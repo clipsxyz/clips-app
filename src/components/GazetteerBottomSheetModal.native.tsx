@@ -242,6 +242,7 @@ export default GazetteerBottomSheetModal;
 
 const styles = StyleSheet.create({
     container: {
-        zIndex: 1000,
+        zIndex: 9999,
+        elevation: 9999,
     },
 });

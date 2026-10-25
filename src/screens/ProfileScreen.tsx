@@ -16,7 +16,6 @@ import {
     Animated,
     Easing,
     Platform,
-    Vibration,
     DeviceEventEmitter,
     useWindowDimensions,
 } from 'react-native';
@@ -48,10 +47,9 @@ import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, getFollowedUsers, reclipPost, toggleLike } from '../api/posts';
+import { fetchPostsByUser, getFollowedUsers } from '../api/posts';
 import {
     getUserCollections,
-    resolvePostThumbnail,
     savePostToDefaultCollection,
     unsavePost,
 } from '../api/collections';
@@ -65,23 +63,9 @@ import type { Post, Collection } from '../types';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import MyFeedModal from '../components/MyFeedModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
-import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import CollectionCoverThumb from '../components/CollectionCoverThumb.native';
-import VideoMuteToggle from '../components/VideoMuteToggle.native';
-import CachedImage from '../components/CachedImage.native';
 import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
-import Video from 'react-native-video';
-import { mockFeedVideoSource } from '../constants/mockFeedVideos.native';
-import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
-import { isVideoMediaUri, resolvePostPlaybackUri } from '../utils/postMedia';
-import {
-    getPostBodyText,
-    getTextOnlyBackgroundColor,
-    getTextOnlyTextColor,
-    isTextOnlyPost,
-    isVideoPost,
-} from '../utils/effectiveTextPostStyleNative';
 import ProfilePictureModal from '../components/ProfilePictureModal.native';
 import CommentSafetyModal from '../components/CommentSafetyModal.native';
 import {
@@ -106,94 +90,8 @@ type ProfileAlertConfig = {
     onDismiss?: () => void;
 };
 
-function peekLocationLabel(post: Post): string | undefined {
-    const label = post.locationLabel || post.venue;
-    const trimmed = typeof label === 'string' ? label.trim() : '';
-    return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function resolvePeekVideoUri(post: Post): string | undefined {
-    const extra = post as Post & { video_url?: string; media_url?: string };
-    const firstVideo = (post.mediaItems || []).find((item) => item?.type === 'video') ?? null;
-    const uri =
-        resolvePostPlaybackUri(post, firstVideo) ||
-        extra.video_url ||
-        extra.media_url ||
-        post.mediaUrl;
-    if (!isPlayableVideoUri(uri)) return undefined;
-    if (/\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(uri)) return undefined;
-    return uri;
-}
-
-function PeekPreviewMedia({ post, muted }: { post: Post; muted: boolean }) {
-    const imageUri = resolvePostThumbnail(post);
-    const bodyText = getPostBodyText(post);
-    const videoPost = isVideoPost(post);
-    const videoUri = resolvePeekVideoUri(post);
-    const canPlayVideo = Boolean(videoUri && (videoPost || isVideoMediaUri(videoUri)));
-
-    if (canPlayVideo && videoUri) {
-        return (
-            <Video
-                source={mockFeedVideoSource(videoUri)}
-                style={styles.peekMedia}
-                resizeMode="cover"
-                paused={false}
-                repeat
-                muted={muted}
-                volume={muted ? 0 : 1}
-                controls={false}
-                poster={imageUri}
-                playInBackground={false}
-                playWhenInactive={false}
-                ignoreSilentSwitch="obey"
-                {...androidListSafeVideoProps()}
-            />
-        );
-    }
-
-    if (imageUri) {
-        return <CachedImage source={{ uri: imageUri }} style={styles.peekMedia} resizeMode="cover" />;
-    }
-
-    if (isTextOnlyPost(post) || bodyText) {
-        return (
-            <View
-                style={[
-                    styles.peekMedia,
-                    styles.peekTextFallback,
-                    { backgroundColor: getTextOnlyBackgroundColor(post) },
-                ]}
-            >
-                <Text style={[styles.peekText, { color: getTextOnlyTextColor(post) }]} numberOfLines={8}>
-                    {bodyText || 'Post'}
-                </Text>
-            </View>
-        );
-    }
-
-    return (
-        <View style={[styles.peekMedia, styles.peekTextFallback]}>
-            <Icon name={videoPost ? 'play-circle-outline' : 'image-outline'} size={ox(42)} color="#9CA3AF" />
-        </View>
-    );
-}
-
-const PEEK_ACTIONS: Array<{
-    key: 'like' | 'comment' | 'repost' | 'share' | 'report';
-    label: string;
-    icon: string;
-    activeIcon?: string;
-}> = [
-    { key: 'like', label: 'Like', icon: 'heart-outline', activeIcon: 'heart' },
-    { key: 'comment', label: 'Comment', icon: 'chatbubble-outline' },
-    { key: 'repost', label: 'Repost', icon: 'repeat-outline' },
-    { key: 'share', label: 'Share', icon: 'share-social-outline' },
-    { key: 'report', label: 'Report', icon: 'flag-outline' },
-];
-
 const ProfileScreen: React.FC = ({ navigation }: any) => {
-    const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+    const { height: windowHeight } = useWindowDimensions();
     const { user, logout, login } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
@@ -207,9 +105,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [myFeedOpen, setMyFeedOpen] = useState(false);
     const closeMyFeed = useCallback(() => setMyFeedOpen(false), []);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
-    const [peekPost, setPeekPost] = useState<Post | null>(null);
-    const [peekMuted, setPeekMuted] = useState(true);
-    const peekAnim = React.useRef(new Animated.Value(0)).current;
     const editSheetAnim = React.useRef(new Animated.Value(0)).current;
     const handleMyFeedPostUpdated = useCallback((updated: Post) => {
         setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
@@ -803,54 +698,32 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
-    const openPeek = useCallback((item: Post) => {
-        Vibration.vibrate(Platform.OS === 'android' ? 18 : 10);
-        setPeekMuted(true);
-        setPeekPost(item);
-    }, []);
+    const openPostDetail = useCallback(
+        (item: Post) => {
+            navigation.navigate('PostDetail', {
+                postId: item.id,
+                initialPost: item,
+            });
+        },
+        [navigation],
+    );
 
     const renderProfileGridItem = useCallback(
         ({ item }: { item: Post }) => (
             <TouchableOpacity
                 style={styles.postItem}
                 activeOpacity={0.85}
-                onPress={() =>
-                    navigation.navigate('PostDetail', {
-                        postId: item.id,
-                        initialPost: item,
-                    })
-                }
-                onLongPress={() => openPeek(item)}
+                onPress={() => openPostDetail(item)}
+                onLongPress={() => openPostDetail(item)}
                 delayLongPress={260}
             >
                 <ProfileGridThumb post={item} />
             </TouchableOpacity>
         ),
-        [navigation, openPeek],
+        [openPostDetail],
     );
 
     const profileGridKeyExtractor = useCallback((item: Post) => String(item.id), []);
-
-    const closePeek = useCallback(() => {
-        Animated.timing(peekAnim, {
-            toValue: 0,
-            duration: 160,
-            easing: Easing.out(Easing.ease),
-            useNativeDriver: true,
-        }).start(() => setPeekPost(null));
-    }, [peekAnim]);
-
-    useEffect(() => {
-        if (peekPost) {
-            peekAnim.setValue(0);
-            Animated.spring(peekAnim, {
-                toValue: 1,
-                useNativeDriver: true,
-                friction: 8,
-                tension: 90,
-            }).start();
-        }
-    }, [peekPost, peekAnim]);
 
     useEffect(() => {
         if (editSheetOpen) {
@@ -872,97 +745,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             useNativeDriver: true,
         }).start(() => setEditSheetOpen(false));
     }, [editSheetAnim]);
-
-    const handlePeekLike = useCallback(async () => {
-        const target = peekPost;
-        if (!target || !user) return;
-        try {
-            const updated = await toggleLike(String(user.id), target.id, target);
-            setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-            setPeekPost(updated);
-        } catch (error) {
-            console.error('Failed to like post:', error);
-        }
-    }, [peekPost, user]);
-
-    const handlePeekComment = useCallback(() => {
-        const target = peekPost;
-        if (!target) return;
-        closePeek();
-        navigation.navigate('PostDetail', { postId: target.id, initialPost: target });
-    }, [peekPost, closePeek, navigation]);
-
-    const isOwnPeekPost = useCallback(
-        (post: Post | null | undefined) => {
-            if (!post || !user) return false;
-            const norm = (value?: string) => String(value || '').replace(/^@/, '').trim().toLowerCase();
-            if (norm(user.handle) && norm(post.userHandle) && norm(user.handle) === norm(post.userHandle)) {
-                return true;
-            }
-            const extra = post as Post & { user_id?: string; userId?: string };
-            const postUserId = String(extra.user_id ?? extra.userId ?? '');
-            return Boolean(user.id && postUserId && String(user.id) === postUserId);
-        },
-        [user],
-    );
-
-    const handlePeekRepost = useCallback(async () => {
-        const target = peekPost;
-        if (!target || !user) return;
-        if (isOwnPeekPost(target)) {
-            showProfileAlert({
-                title: 'Your post',
-                message: 'You cannot reclip your own post.',
-                icon: 'info',
-                confirmButtonText: 'OK',
-            });
-            return;
-        }
-        try {
-            await reclipPost(String(user.id), target.id, user.handle);
-            showProfileAlert({
-                title: 'Reposted',
-                message: 'This post was shared to your feed.',
-                icon: 'success',
-                confirmButtonText: 'Done',
-            });
-            closePeek();
-        } catch (error) {
-            const message = error instanceof Error ? error.message : '';
-            if (/cannot reclip your own post/i.test(message)) {
-                showProfileAlert({
-                    title: 'Your post',
-                    message: 'You cannot reclip your own post.',
-                    icon: 'info',
-                    confirmButtonText: 'OK',
-                });
-                return;
-            }
-            showProfileAlert({
-                title: 'Repost failed',
-                message: 'Could not repost this post right now.',
-                icon: 'alert',
-            });
-        }
-    }, [peekPost, user, isOwnPeekPost, showProfileAlert, closePeek]);
-
-    const handlePeekShare = useCallback(async () => {
-        const target = peekPost;
-        if (!target) return;
-        try {
-            await Share.share({ message: buildShareablePostUrl(target), url: buildShareablePostUrl(target) });
-        } catch (error) {
-            console.error('Failed to share post:', error);
-        }
-    }, [peekPost]);
-
-    const handlePeekReport = useCallback(() => {
-        const target = peekPost;
-        if (!target) return;
-        void import('../utils/promptReportPostNative').then(({ promptReportPostNative }) => {
-            promptReportPostNative(target.id);
-        });
-    }, [peekPost]);
 
     if (loading) {
         return (
@@ -2017,101 +1799,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </Modal>
 
-            <Modal
-                visible={peekPost !== null}
-                transparent
-                animationType="none"
-                statusBarTranslucent
-                onRequestClose={closePeek}
-            >
-                <View style={styles.peekBackdrop}>
-                    <Pressable style={StyleSheet.absoluteFill} onPress={closePeek} />
-                    <Animated.View
-                        pointerEvents="box-none"
-                        style={[
-                            styles.peekStage,
-                            {
-                                opacity: peekAnim,
-                                transform: [
-                                    {
-                                        scale: peekAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [0.86, 1],
-                                        }),
-                                    },
-                                    {
-                                        translateY: peekAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [16, 0],
-                                        }),
-                                    },
-                                ],
-                            },
-                        ]}
-                    >
-                        {peekPost ? (
-                            <View style={[styles.peekCard, { width: Math.min(windowWidth * 0.82, ox(340)) }]}>
-                                <PeekPreviewMedia post={peekPost} muted={peekMuted} />
-                                {resolvePeekVideoUri(peekPost) ? (
-                                    <VideoMuteToggle
-                                        muted={peekMuted}
-                                        onToggle={() => setPeekMuted((prev) => !prev)}
-                                    />
-                                ) : null}
-                                {peekLocationLabel(peekPost) ? (
-                                    <View style={styles.peekLocationPill} pointerEvents="none">
-                                        <Icon name="location-outline" size={ox(11)} color="#FFFFFF" />
-                                        <Text style={styles.peekLocationText} numberOfLines={1}>
-                                            {peekLocationLabel(peekPost)}
-                                        </Text>
-                                    </View>
-                                ) : null}
-                                {isVideoPost(peekPost) && !resolvePeekVideoUri(peekPost) ? (
-                                    <View style={styles.peekPlayBadge} pointerEvents="none">
-                                        <Icon name="play" size={ox(22)} color="#FFFFFF" />
-                                    </View>
-                                ) : null}
-                            </View>
-                        ) : null}
-
-                        <View style={styles.peekMenu}>
-                            {PEEK_ACTIONS.map((action) => {
-                                const liked = peekPost?.userLiked === true;
-                                const iconName =
-                                    action.key === 'like' && liked && action.activeIcon
-                                        ? action.activeIcon
-                                        : action.icon;
-                                const onPress =
-                                    action.key === 'like'
-                                        ? handlePeekLike
-                                        : action.key === 'comment'
-                                          ? handlePeekComment
-                                          : action.key === 'repost'
-                                            ? handlePeekRepost
-                                            : action.key === 'share'
-                                              ? handlePeekShare
-                                              : handlePeekReport;
-                                return (
-                                    <TouchableOpacity
-                                        key={action.key}
-                                        style={styles.peekAction}
-                                        onPress={onPress}
-                                        activeOpacity={0.75}
-                                    >
-                                        <Icon
-                                            name={iconName}
-                                            size={ox(18)}
-                                            color={action.key === 'like' && liked ? '#F43F5E' : '#FFFFFF'}
-                                        />
-                                        <Text style={styles.peekActionLabel}>{action.label}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    </Animated.View>
-                </View>
-            </Modal>
-
             <GazetteerAlertSheet
                 visible={profileAlert !== null}
                 title={profileAlert?.title ?? ''}
@@ -2436,101 +2123,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     editSheetOptionText: {
         color: '#FFFFFF',
         fontSize: ox(15),
-        fontWeight: '700',
-    },
-    peekBackdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(3, 9, 27, 0.72)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: ox(18),
-    },
-    peekStage: {
-        width: '100%',
-        alignItems: 'center',
-        gap: ox(12),
-    },
-    peekCard: {
-        aspectRatio: 0.82,
-        borderRadius: ox(22),
-        overflow: 'hidden',
-        backgroundColor: '#111827',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.16)',
-    },
-    peekMedia: {
-        width: '100%',
-        height: '100%',
-        backgroundColor: '#111827',
-    },
-    peekTextFallback: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: ox(18),
-    },
-    peekText: {
-        fontSize: ox(16),
-        fontWeight: '600',
-        textAlign: 'center',
-        lineHeight: ox(22),
-    },
-    peekLocationPill: {
-        position: 'absolute',
-        top: ox(12),
-        left: ox(12),
-        maxWidth: '80%',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: ox(4),
-        paddingHorizontal: ox(8),
-        paddingVertical: ox(4),
-        borderRadius: ox(999),
-        backgroundColor: 'rgba(15, 23, 42, 0.85)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
-    },
-    peekLocationText: {
-        color: '#FFFFFF',
-        fontSize: ox(11),
-        fontWeight: '600',
-        flexShrink: 1,
-    },
-    peekPlayBadge: {
-        position: 'absolute',
-        right: ox(12),
-        bottom: ox(12),
-        width: ox(36),
-        height: ox(36),
-        borderRadius: ox(18),
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(15, 23, 42, 0.85)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.22)',
-        paddingLeft: ox(2),
-    },
-    peekMenu: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        width: '100%',
-        maxWidth: ox(340),
-        paddingHorizontal: ox(10),
-        paddingVertical: ox(10),
-        borderRadius: ox(18),
-        backgroundColor: 'rgba(15, 23, 42, 0.85)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.16)',
-    },
-    peekAction: {
-        flex: 1,
-        alignItems: 'center',
-        gap: ox(4),
-        paddingVertical: ox(4),
-    },
-    peekActionLabel: {
-        color: '#FFFFFF',
-        fontSize: ox(10),
         fontWeight: '700',
     },
     postImage: {

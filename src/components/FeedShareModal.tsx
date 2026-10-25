@@ -284,7 +284,15 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
     if (!isOpen || !post) return null;
 
     return (
-        <Modal visible={isOpen} animationType="slide" transparent onRequestClose={onClose}>
+        <Modal
+            visible={isOpen}
+            animationType="slide"
+            transparent
+            statusBarTranslucent
+            presentationStyle="overFullScreen"
+            hardwareAccelerated
+            onRequestClose={onClose}
+        >
             <KeyboardAvoidingView
                 style={styles.modalOverlay}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -492,6 +500,8 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
         justifyContent: 'flex-end',
+        zIndex: 9999,
+        elevation: 9999,
     },
     shareModalShell: {
         backgroundColor: UCL_CANVAS_NAVY,

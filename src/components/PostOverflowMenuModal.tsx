@@ -146,7 +146,15 @@ export default function PostOverflowMenuModal({
     );
 
     return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+        <Modal
+            visible={visible}
+            transparent
+            animationType="slide"
+            statusBarTranslucent
+            presentationStyle="overFullScreen"
+            hardwareAccelerated
+            onRequestClose={onClose}
+        >
             <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
                 <TouchableOpacity activeOpacity={1} style={styles.sheet} onPress={(e) => e.stopPropagation()}>
                     <LinearGradient
@@ -378,6 +386,8 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(3, 9, 27, 0.72)',
         justifyContent: 'flex-end',
+        zIndex: 9999,
+        elevation: 9999,
     },
     sheet: {
         backgroundColor: 'rgba(10, 10, 20, 0.92)',

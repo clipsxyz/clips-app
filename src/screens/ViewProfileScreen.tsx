@@ -29,7 +29,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
+import { fetchPostsByUser, getFollowedUsers, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
 import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
 import { emitFollowStatusChanged } from '../hooks/useFollowState';
@@ -56,15 +56,11 @@ import ProfilePostNotifySheet, {
 } from '../components/ProfilePostNotifySheet.native';
 import ShareProfileSheet from '../components/ShareProfileSheet.native';
 import ProfileQRCodeModal from '../components/ProfileQRCodeModal.native';
-import ViewProfilePostsSheet from '../components/ViewProfilePostsSheet.native';
-import ProfileGridPeekSheet from '../components/ProfileGridPeekSheet.native';
 import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedUserModal.native';
 import ViewProfileConnectionsModal, {
     type ConnectionRow,
     type ConnectionsScope,
 } from '../components/ViewProfileConnectionsModal.native';
-import PostCommentsSheet from '../components/PostCommentsSheet';
-import FeedShareModal from '../components/FeedShareModal';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import ProfileCoverActionsModal from '../components/ProfileCoverActionsModal.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
@@ -102,18 +98,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [showTraveledModal, setShowTraveledModal] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [showProfileQR, setShowProfileQR] = useState(false);
-    const [showPostsSheet, setShowPostsSheet] = useState(false);
-    const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
-    const [gridPeekPost, setGridPeekPost] = useState<Post | null>(null);
-    const [peekCommentsPost, setPeekCommentsPost] = useState<Post | null>(null);
-    const [peekSharePost, setPeekSharePost] = useState<Post | null>(null);
     const [showInviteToGroup, setShowInviteToGroup] = useState(false);
     const [showNoPlacesAlert, setShowNoPlacesAlert] = useState(false);
     const [showFollowRequestAlert, setShowFollowRequestAlert] = useState(false);
     const [profilePostsCursor, setProfilePostsCursor] = useState<string | number | null>(null);
     const [profilePostsHasMore, setProfilePostsHasMore] = useState(false);
     const [profilePostsLoadingMore, setProfilePostsLoadingMore] = useState(false);
-    const suppressGridOpenClickRef = React.useRef(false);
     const [showConnectionsModal, setShowConnectionsModal] = useState(false);
     const [connectionsScope, setConnectionsScope] = useState<ConnectionsScope>('followers');
     const [followersList, setFollowersList] = useState<ConnectionRow[]>([]);
@@ -842,105 +832,15 @@ const result = await followOrRequest({
         }
     };
 
-    const onSelectPost = useCallback((item: Post) => {
-        if (suppressGridOpenClickRef.current) {
-            suppressGridOpenClickRef.current = false;
-            return;
-        }
-        setSelectedPostId(item.id);
-        setShowPostsSheet(true);
-    }, []);
-
-    const openGridPeek = useCallback((post: Post) => {
-        suppressGridOpenClickRef.current = true;
-        setGridPeekPost(post);
-    }, []);
-
-    const closeGridPeek = () => {
-        setGridPeekPost(null);
-        setTimeout(() => {
-            suppressGridOpenClickRef.current = false;
-        }, 50);
-    };
-
-    const syncPeekPost = (updated: Post) => {
-        applyPostLikeUpdate(updated);
-        setGridPeekPost((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
-    };
-
-    const applyPostLikeUpdate = (updated: Post) => {
-        setPosts((prev) => {
-            const current = prev.find((p) => String(p.id) === String(updated.id));
-            const next = prev.map((p) =>
-                String(p.id) === String(updated.id) ? { ...p, ...updated, stats: { ...p.stats, ...updated.stats } } : p,
-            );
-            const wasLiked = current?.userLiked === true;
-            const nowLiked = updated.userLiked === true;
-            const delta = wasLiked === nowLiked ? 0 : nowLiked ? 1 : -1;
-            if (delta !== 0) {
-                setStats((st) => ({ ...st, likes: Math.max(0, st.likes + delta) }));
-            } else {
-                const sum = next.reduce((acc, p) => acc + (p.stats?.likes ?? 0), 0);
-                setStats((st) => ({ ...st, likes: Math.max(st.likes, sum) }));
-            }
-            return next;
-        });
-    };
-
-    const handlePeekLike = async () => {
-        if (!gridPeekPost || !user?.id) return;
-        const updated = await toggleLike(user.id, gridPeekPost.id, gridPeekPost);
-        syncPeekPost(updated);
-    };
-
-    const handlePeekComment = () => {
-        if (!gridPeekPost) return;
-        const post = gridPeekPost;
-        closeGridPeek();
-        setPeekCommentsPost(post);
-    };
-
-    const handlePeekReclip = async () => {
-        if (!gridPeekPost || !user?.id || !user?.handle || isOwnProfile) return;
-        const norm = (h?: string) => String(h || '').trim().toLowerCase();
-        if (norm(gridPeekPost.userHandle) === norm(user.handle)) {
-            Alert.alert('Cannot reclip', 'You cannot reclip your own post.');
-            return;
-        }
-        try {
-            setReclipState(String(user.id), gridPeekPost.id, true);
-            const result = await reclipPost(user.id, gridPeekPost.id, user.handle);
-            if (result.originalPost) syncPeekPost(result.originalPost);
-            closeGridPeek();
-            Alert.alert('Reposted', 'Post added to your Following feed and profile.');
-        } catch (error: any) {
-            console.error('Reclip failed:', error);
-            setReclipState(String(user.id), gridPeekPost.id, false);
-            Alert.alert('Could not repost', error?.message || 'Please try again.');
-        }
-    };
-
-    const handlePeekShare = () => {
-        if (!gridPeekPost) return;
-        const post = gridPeekPost;
-        closeGridPeek();
-        setPeekSharePost(post);
-    };
-
-    const handlePeekReport = () => {
-        if (!gridPeekPost) return;
-        Alert.alert('Report this post?', 'Our team will review it.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Report',
-                style: 'destructive',
-                onPress: () => {
-                    Alert.alert("Thanks — we'll review it.");
-                    closeGridPeek();
-                },
-            },
-        ]);
-    };
+    const openPostDetail = useCallback(
+        (item: Post) => {
+            navigation.navigate('PostDetail', {
+                postId: item.id,
+                initialPost: item,
+            });
+        },
+        [navigation],
+    );
 
     const loadMoreProfilePosts = async () => {
         if (!handle || profilePostsLoadingMore) return;
@@ -990,9 +890,9 @@ const result = await followOrRequest({
     const renderProfileGridItem = useCallback(
         ({ item }: { item: Post }) => (
             <Pressable
-                onPress={() => onSelectPost(item)}
-                onLongPress={() => openGridPeek(item)}
-                delayLongPress={450}
+                onPress={() => openPostDetail(item)}
+                onLongPress={() => openPostDetail(item)}
+                delayLongPress={260}
                 style={styles.gridTile}
             >
                 <View style={styles.gridTileInner} pointerEvents="none">
@@ -1000,7 +900,7 @@ const result = await followOrRequest({
                 </View>
             </Pressable>
         ),
-        [onSelectPost, openGridPeek],
+        [openPostDetail],
     );
 
     const profileGridKeyExtractor = useCallback((item: Post) => String(item.id), []);
@@ -1137,9 +1037,6 @@ const result = await followOrRequest({
                     <>
                 <View style={styles.passportTitleBlock}>
                     <Text style={styles.passportTitle}>Passport</Text>
-                    <Text style={styles.passportEyebrow}>
-                        {profileAccountType === 'business' ? 'Business profile' : 'Profile'}
-                    </Text>
                 </View>
 
                 <ProfileCoverHero
@@ -1585,50 +1482,6 @@ const result = await followOrRequest({
                 name={profileDisplayName}
             />
 
-            <ViewProfilePostsSheet
-                visible={showPostsSheet}
-                onClose={() => {
-                    setShowPostsSheet(false);
-                    setSelectedPostId(null);
-                }}
-                posts={posts}
-                initialPostId={selectedPostId}
-                profileName={profileDisplayName}
-                profileHandle={decodedHandle}
-                navigation={navigation}
-                onPostUpdated={applyPostLikeUpdate}
-            />
-
-            <ProfileGridPeekSheet
-                visible={gridPeekPost !== null}
-                post={gridPeekPost}
-                profileHandle={decodedHandle}
-                profileName={profileDisplayName}
-                profileAvatarUrl={profileUser?.avatarUrl}
-                isOwnProfile={isOwnProfile}
-                onClose={closeGridPeek}
-                onLike={() => void handlePeekLike()}
-                onComment={handlePeekComment}
-                onReclip={() => void handlePeekReclip()}
-                onShare={handlePeekShare}
-                onReport={handlePeekReport}
-            />
-
-            <PostCommentsSheet
-                postId={peekCommentsPost?.id ?? ''}
-                post={peekCommentsPost}
-                isOpen={peekCommentsPost !== null}
-                onClose={() => setPeekCommentsPost(null)}
-                commentAuthorHandle={user?.handle || ''}
-                currentUserHandle={user?.handle}
-            />
-
-            <FeedShareModal
-                post={peekSharePost}
-                isOpen={peekSharePost !== null}
-                onClose={() => setPeekSharePost(null)}
-            />
-
             <PickGroupToInviteFeedUserModal
                 visible={showInviteToGroup}
                 onClose={() => setShowInviteToGroup(false)}
@@ -1723,13 +1576,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#FFFFFF',
         letterSpacing: ox(-0.3),
-    },
-    passportEyebrow: {
-        marginTop: ox(4),
-        fontSize: ox(12),
-        color: '#9CA3AF',
-        textTransform: 'uppercase',
-        letterSpacing: ox(3.2),
     },
     content: {
         flex: 1,

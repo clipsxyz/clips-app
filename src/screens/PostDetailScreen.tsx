@@ -552,6 +552,8 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 animationType="slide"
                 onRequestClose={() => setCommentsOpen(false)}
                 statusBarTranslucent
+                presentationStyle="overFullScreen"
+                hardwareAccelerated
             >
                 <KeyboardAvoidingView
                     style={styles.commentsModalRoot}
@@ -893,6 +895,8 @@ const styles = StyleSheet.create({
     commentsModalRoot: {
         flex: 1,
         justifyContent: 'flex-end',
+        zIndex: 9999,
+        elevation: 9999,
     },
     commentsModalBackdrop: {
         // Explicit rather than `...StyleSheet.absoluteFill`: that property is absent

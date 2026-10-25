@@ -189,6 +189,7 @@ function FeedOverlayHost({
                 transparent
                 animationType="slide"
                 statusBarTranslucent
+                presentationStyle="overFullScreen"
                 hardwareAccelerated
                 onRequestClose={closeCommentsSheet}
                 onShow={() => pinFeedScrollSoon()}
@@ -275,6 +276,8 @@ const styles = StyleSheet.create({
     fullscreenOverlayRoot: {
         flex: 1,
         justifyContent: 'flex-end',
+        zIndex: 9999,
+        elevation: 9999,
     },
     fullscreenOverlayBackdrop: {
         ...StyleSheet.absoluteFill,

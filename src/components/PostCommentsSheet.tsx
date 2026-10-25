@@ -12,21 +12,17 @@ import {
     Dimensions,
     KeyboardAvoidingView,
     Keyboard,
+    Modal,
     Platform,
+    Pressable,
     type ListRenderItem,
     type NativeSyntheticEvent,
     type NativeScrollEvent,
 } from 'react-native';
 import {
-    BottomSheetFlatList,
-    BottomSheetFooter,
     BottomSheetTextInput,
-    type BottomSheetFooterProps,
     type BottomSheetFlatListMethods,
 } from '@gorhom/bottom-sheet';
-import GazetteerBottomSheetModal, {
-    GAZETTEER_SHEET_INBOX,
-} from './GazetteerBottomSheetModal.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import {
     UCL_CANVAS_NAVY,
@@ -34,7 +30,6 @@ import {
     UCL_TEXT_PRIMARY,
     UCL_TEXT_SECONDARY,
 } from '../theme/gazetteerAmbientNative';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Avatar from './Avatar';
 import FeedChevronIcon from './FeedChevronIcon.native';
@@ -499,9 +494,6 @@ export default function PostCommentsSheet({
     const isScenesEmbed = variant === 'scenesEmbed';
     const { user } = useAuth();
     const navigation = useNavigation<any>();
-    const insets = useSafeAreaInsets();
-    const insetsBottomRef = useRef(insets.bottom);
-    insetsBottomRef.current = insets.bottom;
     const listRef = useRef<(FlatList<Comment> & BottomSheetFlatListMethods) | null>(null);
 
     const [post, setPost] = useState<Post | null>(postProp ?? null);
@@ -1085,30 +1077,6 @@ export default function PostCommentsSheet({
         </>
     );
 
-    const renderCommentsFooter = useCallback(
-        (props: BottomSheetFooterProps) => (
-            <BottomSheetFooter {...props} bottomInset={insetsBottomRef.current}>
-                {/* Solid footer — animated Passport canvas remounts on keyboard resize and steals focus. */}
-                <View style={styles.footerSolid}>
-                    <CommentInput
-                        placeholder={
-                            replyingTo ? 'Write a reply...' : 'Join the conversation...'
-                        }
-                        onSubmit={(text) => {
-                            void handleComposerSubmit(text);
-                        }}
-                        isLoading={submitting || submittingReply}
-                        replyingToHandle={replyingTo?.handle}
-                        onCancelReply={cancelReply}
-                        useSheetTextInput
-                        autoFocus={Boolean(replyingTo)}
-                    />
-                </View>
-            </BottomSheetFooter>
-        ),
-        [cancelReply, handleComposerSubmit, replyingTo, submitting, submittingReply],
-    );
-
     const commentsListProps = {
         ref: listRef,
         style: styles.commentsList,
@@ -1181,15 +1149,10 @@ export default function PostCommentsSheet({
         </PassportSheetCanvas>
     );
 
-    if (isScenesEmbed) {
-        if (!isOpen) return null;
-        // Android: rely on adjustResize / Modal resize only. KAV `height` was
-        // fighting the soft keyboard and collapsing the list (blank sheet) or
-        // bouncing focus (keyboard pop then drop).
-        if (Platform.OS === 'android') {
-            return <View style={styles.scenesEmbedRoot}>{sheetBody}</View>;
-        }
-        return (
+    const embedBody =
+        Platform.OS === 'android' ? (
+            <View style={styles.scenesEmbedRoot}>{sheetBody}</View>
+        ) : (
             <KeyboardAvoidingView
                 style={styles.scenesEmbedRoot}
                 behavior="padding"
@@ -1198,48 +1161,56 @@ export default function PostCommentsSheet({
                 {sheetBody}
             </KeyboardAvoidingView>
         );
+
+    if (isScenesEmbed) {
+        if (!isOpen) return null;
+        // Android: rely on adjustResize / Modal resize only. KAV `height` was
+        // fighting the soft keyboard and collapsing the list (blank sheet) or
+        // bouncing focus (keyboard pop then drop).
+        return embedBody;
     }
 
     return (
-        <GazetteerBottomSheetModal
+        <Modal
             visible={isOpen}
-            onDismiss={handleClose}
-            snapPoints={['75%']}
-            horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
-            footerComponent={renderCommentsFooter}
-            keyboardBehavior="interactive"
-            keyboardBlurBehavior="restore"
-            android_keyboardInputMode="adjustResize"
+            transparent
+            animationType="slide"
+            statusBarTranslucent
+            presentationStyle="overFullScreen"
+            hardwareAccelerated
+            onRequestClose={handleClose}
         >
-            <PassportSheetCanvas tone="ucl" style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
-                <BottomSheetFlatList
-                    {...(loading
-                        ? {
-                              data: [] as Comment[],
-                              renderItem: () => null,
-                              ListHeaderComponent: (
-                                  <>
-                                      {sheetChromeHeader}
-                                      <View style={styles.loadingWrap}>
-                                          <ActivityIndicator size="large" color={BRAND_600} />
-                                      </View>
-                                  </>
-                              ),
-                          }
-                        : {
-                              ...commentsListProps,
-                              automaticallyAdjustKeyboardInsets: true,
-                          })}
-                    style={[styles.commentsList, styles.sheet]}
-                />
-            </PassportSheetCanvas>
-        </GazetteerBottomSheetModal>
+            <View style={styles.overlayRoot}>
+                <Pressable style={styles.overlayBackdrop} onPress={handleClose} accessibilityLabel="Dismiss comments" />
+                <View style={styles.overlaySheet}>{embedBody}</View>
+            </View>
+        </Modal>
     );
 }
 
 const styles = StyleSheet.create({
+    overlayRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        zIndex: 9999,
+        elevation: 9999,
+    },
+    overlayBackdrop: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+    },
+    overlaySheet: {
+        height: '78%',
+        zIndex: 9999,
+        elevation: 9999,
+        overflow: 'hidden',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+    },
     scenesEmbedRoot: {
         flex: 1,
     },

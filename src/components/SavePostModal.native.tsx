@@ -455,7 +455,15 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         );
 
     return (
-        <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+        <Modal
+            visible={visible}
+            animationType="slide"
+            transparent
+            statusBarTranslucent
+            presentationStyle="overFullScreen"
+            hardwareAccelerated
+            onRequestClose={onClose}
+        >
             <View style={styles.overlay}>
                 <Pressable
                     style={styles.backdrop}
@@ -481,6 +489,8 @@ const styles = StyleSheet.create({
     overlay: {
         flex: 1,
         justifyContent: 'flex-end',
+        zIndex: 9999,
+        elevation: 9999,
     },
     backdrop: {
         ...StyleSheet.absoluteFill,
