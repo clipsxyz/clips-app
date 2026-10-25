@@ -40,7 +40,7 @@ import {
 } from '../utils/headerGlassPalette';
 
 /** News feed shell / ambient canvas floor — matches share-card Passport abyss. */
-export const FEED_PAGE_BG = '#060d16';
+export const FEED_PAGE_BG = '#000000';
 
 /** Scope-change fade. Scroll does not drive this. */
 const HEADER_SCOPE_MORPH_MS = 300;
@@ -71,13 +71,13 @@ function headerScopeStops(primary: string, secondary: string): [string, string, 
     ];
 }
 
-/** Web post card / article background — Gazetteer Swal sheet (`#060d16`). */
-export const FEED_CARD_BG = '#060d16';
+/** Web post card / article background — Champions League black canvas. */
+export const FEED_CARD_BG = '#000000';
 
 /**
  * Header (username) + engagement (like) chrome — same Swal Gazetteer sheet colour.
  */
-export const FEED_CARD_CHROME_BG = '#060d16';
+export const FEED_CARD_CHROME_BG = '#000000';
 
 /**
  * NOW TV frosted chrome — header fades out downward; footer fades in upward.
@@ -136,7 +136,7 @@ export const FEED_POST_CARD_STYLE = {
  */
 export const FEED_CARD_RADIUS = 20;
 export const FEED_CARD_SHELL_BORDER_WIDTH = 1;
-export const FEED_CARD_SHELL_BORDER_COLOR = 'rgba(255, 255, 255, 0.08)';
+export const FEED_CARD_SHELL_BORDER_COLOR = 'rgba(255, 255, 255, 0.15)';
 
 /**
  * Grid-tile chrome (profile posts grid). Deliberately smaller radius than the feed card

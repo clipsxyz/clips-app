@@ -16,7 +16,10 @@ export default function InterestsFeedCard({ selected, onToggle, onSave, onSkip, 
   const atMax = selected.length >= MAX_INTEREST_SELECTIONS;
 
   return (
-    <article className="relative mx-2.5 mb-3 overflow-hidden rounded-2xl border border-white/10 bg-[#0b0711] shadow-lg">
+    <article
+      className="relative mx-2.5 mb-3 overflow-hidden rounded-2xl border border-white/15 shadow-lg"
+      style={{ background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)' }}
+    >
       <DiscoverAmbientCanvas fixed={false} />
 
       <div className="relative z-[2]">

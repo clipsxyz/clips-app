@@ -321,8 +321,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#363636',
-    backgroundColor: '#121212',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#000000',
     padding: 12,
   },
   headerRow: {
@@ -358,8 +358,8 @@ const styles = StyleSheet.create({
   emptyCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#30363d',
-    backgroundColor: '#0d1318',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#000000',
     paddingHorizontal: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -376,8 +376,8 @@ const styles = StyleSheet.create({
     width: 165,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#30363d',
-    backgroundColor: '#0d1318',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#000000',
     padding: 10,
   },
   avatarWrap: {

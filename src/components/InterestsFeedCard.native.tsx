@@ -3,6 +3,10 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'rea
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { INTEREST_OPTIONS, MAX_INTEREST_SELECTIONS } from '../constants/interestOptions';
+import {
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 
 type Props = {
   selected: string[];
@@ -19,18 +23,10 @@ export default function InterestsFeedCard({ selected, onToggle, onSave, onSkip, 
     <View style={styles.card}>
       {/* Soft wash only — DiscoverAmbientCanvas paints above UI on Nokia when used as a sibling. */}
       <LinearGradient
-        colors={['#0b0711', '#201138', '#3a1528', '#201138', '#0b0711']}
-        locations={[0, 0.28, 0.52, 0.78, 1]}
-        start={{ x: 0.1, y: 0 }}
-        end={{ x: 0.9, y: 1 }}
-        style={styles.ambientWash}
-        pointerEvents="none"
-      />
-      <LinearGradient
-        colors={['rgba(217,27,92,0.18)', 'transparent', 'rgba(122,90,200,0.14)']}
-        locations={[0, 0.45, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        colors={[...UEFA_PASSPORT_GRADIENT]}
+        locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
         style={styles.ambientWash}
         pointerEvents="none"
       />
@@ -94,8 +90,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: '#0b0711',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#000000',
     overflow: 'hidden',
   },
   ambientWash: {

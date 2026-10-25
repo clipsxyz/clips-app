@@ -51,8 +51,8 @@ const EXPAND_EASE = Easing.bezier(0.16, 1, 0.3, 1);
 const COLLAPSE_EASE = Easing.bezier(0.22, 1, 0.36, 1);
 const COLLAPSE_HOLD_MS = 32;
 
-/** Web story card tint: bg-gradient-to-tr from-teal/sky/fuchsia. */
-const STORY_CARD_TINT = ['rgba(20,184,166,0.2)', 'rgba(56,189,248,0.2)', 'rgba(217,70,239,0.2)'] as const;
+/** Champions League story card canvas — pure black → bright purple. */
+const STORY_CARD_TINT = ['#000000', '#23104F'] as const;
 
 type CardRect = { x: number; y: number; width: number; height: number };
 
@@ -211,8 +211,8 @@ function StoryCard({
             <TouchableOpacity style={styles.card} onPress={measureAndPress} activeOpacity={0.9}>
                 <LinearGradient
                     colors={[...STORY_CARD_TINT]}
-                    start={{ x: 0, y: 1 }}
-                    end={{ x: 1, y: 0 }}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
                     style={StyleSheet.absoluteFill}
                 />
                 {item.previewVideoUrl ? (
@@ -361,8 +361,8 @@ function Stories24ExpandOverlay({
                 <Animated.View style={[styles.expandCard, shellStyle]}>
                     <LinearGradient
                         colors={[...STORY_CARD_TINT]}
-                        start={{ x: 0, y: 1 }}
-                        end={{ x: 1, y: 0 }}
+                        start={{ x: 0.5, y: 0 }}
+                        end={{ x: 0.5, y: 1 }}
                         style={StyleSheet.absoluteFill}
                     />
                     {stillUri ? (
@@ -494,8 +494,8 @@ function Stories24CollapseOverlay({
                         <>
                             <LinearGradient
                                 colors={[...STORY_CARD_TINT]}
-                                start={{ x: 0, y: 1 }}
-                                end={{ x: 1, y: 0 }}
+                                start={{ x: 0.5, y: 0 }}
+                                end={{ x: 0.5, y: 1 }}
                                 style={StyleSheet.absoluteFill}
                             />
                             {stillUri ? (
@@ -855,7 +855,9 @@ const styles = StyleSheet.create({
         height: CARD_H,
         borderRadius: CARD_RADIUS,
         overflow: 'hidden',
-        backgroundColor: '#101b2f',
+        backgroundColor: '#000000',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     addYoursCard: {
         backgroundColor: 'transparent',
@@ -981,7 +983,7 @@ const styles = StyleSheet.create({
     expandCard: {
         position: 'absolute',
         overflow: 'hidden',
-        backgroundColor: '#101b2f',
+        backgroundColor: '#000000',
         shadowColor: '#000000',
         shadowOffset: { width: 0, height: 20 },
         shadowOpacity: 0.45,

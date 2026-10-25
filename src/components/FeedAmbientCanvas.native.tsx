@@ -3,16 +3,12 @@ import { StyleSheet, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
 /**
- * Obsidian floor for the feed canvas.
- *
- * Neutral by design. The header morphs through a saturated accent palette, and the
- * previous teal Passport wash fought those hues for attention — the accents now read as
- * the only saturated thing on screen.
+ * Champions League floor for the feed canvas — pure black → bright purple.
  */
-export const FEED_AMBIENT_STATIC_HEX = '#0B0E14';
+export const FEED_AMBIENT_STATIC_HEX = '#000000';
 
-/** Subtle vertical wash — smoked glass, darkening toward the tab bar. */
-const FEED_AMBIENT_WASH = ['#161B22', '#0B0E14', '#05070A'] as const;
+/** Champions League vertical wash — pure black → bright purple. */
+const FEED_AMBIENT_WASH = ['#000000', '#23104F'] as const;
 
 /** Faint sheen so cards read as floating on smoked glass rather than sitting on flat paint. */
 const FEED_AMBIENT_FROST = 'rgba(255, 255, 255, 0.02)';
@@ -28,7 +24,7 @@ function FeedAmbientCanvasBase(_props: Props) {
         <>
             <LinearGradient
                 colors={[...FEED_AMBIENT_WASH]}
-                locations={[0, 0.5, 1]}
+                locations={[0, 1]}
                 start={{ x: 0.5, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
                 style={styles.canvas}

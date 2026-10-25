@@ -15,7 +15,7 @@ import { getAvatarForHandle } from '../api/users';
 import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
 import PassportSheetCanvas, { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import Video, { type VideoRef } from 'react-native-video';
 import {
     isMockDemoVideoPath,
@@ -120,7 +120,7 @@ export default function SuggestedFollowerFeedCard({
           <Text style={styles.handle}>{suggestion.userHandle}</Text>
           <Text style={styles.context}>{suggestion.contextLabel}</Text>
           <View style={styles.badgeRow}>
-            <Icon name="business-outline" size={12} color={PASSPORT_PALETTE.wavePrimary} />
+            <Icon name="business-outline" size={12} color="#FFFFFF" />
             <Text style={styles.badgeText}>Suggested by Gazetteer</Text>
           </View>
         </TouchableOpacity>
@@ -184,9 +184,9 @@ export default function SuggestedFollowerFeedCard({
           <TouchableOpacity style={styles.primaryBtnWrap} onPress={handleFollow} disabled={followBusy}>
             <LinearGradient
               colors={[...PASSPORT_SHEET_WASH]}
-              locations={[0, 0.22, 0.52, 0.78, 1]}
-              start={{ x: 0.1, y: 0 }}
-              end={{ x: 0.9, y: 1 }}
+              locations={[0, 1]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
             {followBusy ? (
@@ -207,7 +207,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
     backgroundColor: PASSPORT_ABYSS,
     overflow: 'hidden',
     minHeight: 300,
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(15, 36, 48, 0.88)',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
     padding: 10,
   },
   infoText: {
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontSize: 10,
-    color: PASSPORT_PALETTE.wavePrimary,
+    color: 'rgba(255, 255, 255, 0.72)',
   },
   thumbRow: {
     flexDirection: 'row',
@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 6,
     right: 6,
-    backgroundColor: 'rgba(61,155,143,0.92)',
+    backgroundColor: 'rgba(35, 16, 79, 0.92)',
     borderRadius: 4,
     paddingHorizontal: 4,
     paddingVertical: 2,
@@ -329,7 +329,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(15, 36, 48, 0.72)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     paddingVertical: 11,
     alignItems: 'center',
   },
