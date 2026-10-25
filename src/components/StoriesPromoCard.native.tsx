@@ -5,13 +5,6 @@ import LinearGradient from 'react-native-linear-gradient';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { getAvatarForHandle } from '../api/users';
 import { isVideoUrl } from '../utils/storyMediaNative';
-import {
-    STORY_GRADIENT_RING_COLORS,
-    STORY_GRADIENT_RING_END,
-    STORY_GRADIENT_RING_START,
-    STORY_RING_GAP,
-    STORY_RING_WIDTH,
-} from '../utils/storyRingNative';
 import Avatar from './Avatar';
 
 /**
@@ -59,9 +52,10 @@ type Props = {
 const SCRIM = ['rgba(18, 28, 26, 0.82)', 'rgba(14, 22, 20, 0.72)'] as const;
 const WASH = ['rgba(16, 185, 129, 0.12)', 'rgba(0, 242, 254, 0.08)', 'rgba(18, 28, 26, 0.04)'] as const;
 
-/** Inner photo diameter. Ring stroke + gap match the newsfeed header avatar. */
-const AVATAR_SIZE = 32;
-const RING_SIZE = AVATAR_SIZE + STORY_RING_WIDTH * 2 + STORY_RING_GAP * 2;
+/** Same outer slot, stroke, and standoff as the newsfeed post-header avatar. */
+const AVATAR_SIZE = 36;
+const AVATAR_RING_BORDER = 0.75;
+const AVATAR_RING_GAP = 2.5;
 const AVATAR_OVERLAP = -10;
 const STACK_MAX = 3;
 
@@ -129,33 +123,33 @@ function AvatarStack({
 }) {
     const people = uniqueStoryPeople(stories, avatars);
     if (people.length === 0) return null;
-    const totalWidth = RING_SIZE + (people.length - 1) * (RING_SIZE + AVATAR_OVERLAP);
+    const totalWidth = AVATAR_SIZE + (people.length - 1) * (AVATAR_SIZE + AVATAR_OVERLAP);
     return (
         <View style={[styles.avatarStack, { width: totalWidth }]}>
             {people.map((person, idx) => (
-                <LinearGradient
+                <View
                     key={person.key}
-                    colors={[...STORY_GRADIENT_RING_COLORS]}
-                    start={STORY_GRADIENT_RING_START}
-                    end={STORY_GRADIENT_RING_END}
                     pointerEvents="none"
                     style={[
-                        styles.avatarRing,
+                        styles.avatarSlot,
                         {
                             zIndex: people.length - idx,
                             marginLeft: idx > 0 ? AVATAR_OVERLAP : 0,
                         },
                     ]}
                 >
-                    <View style={styles.avatarWell}>
-                        <Avatar
-                            src={person.src}
-                            name={person.name}
-                            size={AVATAR_SIZE}
-                            hideBorder
-                        />
-                    </View>
-                </LinearGradient>
+                    <Avatar
+                        src={person.src}
+                        name={person.name}
+                        size={AVATAR_SIZE}
+                        hasStory
+                        borderWidth={AVATAR_RING_BORDER}
+                        ringGap={AVATAR_RING_GAP}
+                        gapColor="#000000"
+                        ringColor="#FFFFFF"
+                        hideBorder={false}
+                    />
+                </View>
             ))}
         </View>
     );
@@ -240,23 +234,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
     },
-    avatarRing: {
-        width: RING_SIZE,
-        height: RING_SIZE,
-        borderRadius: RING_SIZE / 2,
-        padding: STORY_RING_WIDTH,
+    avatarSlot: {
+        width: AVATAR_SIZE,
+        height: AVATAR_SIZE,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    avatarWell: {
-        width: '100%',
-        height: '100%',
-        borderRadius: 999,
-        padding: STORY_RING_GAP,
-        backgroundColor: 'transparent',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
     },
     copy: {
         flex: 1,
