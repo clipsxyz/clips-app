@@ -144,6 +144,7 @@ class User extends Authenticatable
     public function reclips()
     {
         return $this->belongsToMany(Post::class, 'post_reclips')
+                    ->withPivot('user_handle')
                     ->withTimestamps();
     }
 

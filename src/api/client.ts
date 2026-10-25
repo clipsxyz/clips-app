@@ -82,6 +82,7 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
     const config: RequestInit = {
         ...fetchOptions,
         headers: {
+            Accept: 'application/json',
             'Content-Type': 'application/json',
             ...authHeader,
             ...fetchOptions.headers,

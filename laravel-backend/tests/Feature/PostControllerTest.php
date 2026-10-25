@@ -357,5 +357,64 @@ class PostControllerTest extends TestCase
             ->deleteJson('/api/posts/' . (string) \Illuminate\Support\Str::uuid())
             ->assertStatus(404);
     }
+
+    public function test_reclip_creates_copy_and_increments_count(): void
+    {
+        $author = User::factory()->create();
+        $viewer = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'text_content' => 'Original clip',
+            'reclips_count' => 0,
+        ]);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/reclip");
+
+        $response->assertStatus(201)
+            ->assertJsonPath('is_reclipped', true)
+            ->assertJsonPath('original_post_id', $post->id)
+            ->assertJsonPath('original_post.id', $post->id)
+            ->assertJsonPath('original_post.reclips_count', 1);
+
+        $this->assertDatabaseHas('post_reclips', [
+            'user_id' => $viewer->id,
+            'post_id' => $post->id,
+            'user_handle' => $viewer->handle,
+        ]);
+        $this->assertDatabaseHas('posts', [
+            'id' => $post->id,
+            'reclips_count' => 1,
+        ]);
+    }
+
+    public function test_reclip_is_idempotent_and_rejects_own_post(): void
+    {
+        $author = User::factory()->create();
+        $viewer = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'reclips_count' => 0,
+        ]);
+
+        $this->actingAs($author, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/reclip")
+            ->assertStatus(400)
+            ->assertJsonPath('error', 'Cannot reclip your own post');
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/reclip")
+            ->assertStatus(201);
+
+        $again = $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/reclip");
+        $again->assertStatus(200)
+            ->assertJsonPath('original_post.reclips_count', 1);
+
+        $this->assertEquals(1, Post::query()->where('original_post_id', $post->id)->count());
+        $this->assertEquals(1, $post->fresh()->reclips_count);
+    }
 }
 

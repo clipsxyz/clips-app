@@ -1250,65 +1250,85 @@ class PostController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+            return response()->json(['error' => 'Invalid post', 'errors' => $validator->errors()], 400);
         }
 
         $user = Auth::user();
-        $originalPost = Post::findOrFail($id);
+        $tapped = Post::findOrFail($id);
+        $originalPost = $this->resolveReclipSource($tapped);
 
-        // Prevent users from reclipping their own posts
-        if ($originalPost->user_handle === $user->handle) {
+        $viewerHandle = mb_strtolower(ltrim((string) $user->handle, '@'));
+        $authorHandle = mb_strtolower(ltrim((string) $originalPost->user_handle, '@'));
+        if ($viewerHandle !== '' && $viewerHandle === $authorHandle) {
             return response()->json(['error' => 'Cannot reclip your own post'], 400);
         }
 
-        $result = DB::transaction(function () use ($user, $originalPost) {
-            // Check if already reclipped
-            $existingReclip = $user->reclips()->where('post_id', $originalPost->id)->first();
+        $created = false;
+        $reclippedPost = DB::transaction(function () use ($user, $originalPost, &$created) {
+            $existingCopy = Post::query()
+                ->where('user_id', $user->id)
+                ->where('original_post_id', $originalPost->id)
+                ->first();
 
-            if ($existingReclip) {
-                // Return the updated original post instead of error
+            if ($existingCopy || $user->reclips()->whereKey($originalPost->id)->exists()) {
                 $originalPost->refresh();
 
-                return $originalPost;
+                return $existingCopy ?: $originalPost;
             }
 
-            // Create reclipped post
             $reclippedPost = Post::create([
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
                 'text_content' => $originalPost->text_content,
                 'media_url' => $originalPost->media_url,
                 'media_type' => $originalPost->media_type,
-                // Carry the intrinsic dimensions across. Without these the reclip lands as a
-                // NULL-dimension row and renders in the 1:1 fallback box until its video
-                // fires onLoad, even though the original post already knows the exact size.
+                'thumbnail_url' => $originalPost->thumbnail_url,
                 'width' => $originalPost->width,
                 'height' => $originalPost->height,
                 'aspect_ratio' => $originalPost->aspect_ratio,
                 'media_items' => $originalPost->media_items,
                 'location_label' => $originalPost->location_label,
+                'location_local' => $originalPost->location_local,
+                'location_regional' => $originalPost->location_regional,
+                'location_national' => $originalPost->location_national,
+                'place_id' => $originalPost->place_id,
+                'latitude' => $originalPost->latitude,
+                'longitude' => $originalPost->longitude,
+                'venue' => $originalPost->venue,
                 'is_reclipped' => true,
                 'original_post_id' => $originalPost->id,
-                'original_user_handle' => $originalPost->user_handle, // Original poster's handle
+                'original_user_handle' => $originalPost->user_handle,
                 'reclipped_by' => $user->handle,
             ]);
 
-            // Add reclip record
-            $user->reclips()->create([
-                'post_id' => $originalPost->id,
-                'user_handle' => $user->handle,
+            $user->reclips()->syncWithoutDetaching([
+                $originalPost->id => ['user_handle' => $user->handle],
             ]);
 
-            // Update original post reclip count
             $originalPost->increment('reclips_count');
             Post::bumpFeedCache();
+            $created = true;
 
             return $reclippedPost;
         });
 
-        // Refresh the post to get all relationships
-        $result->load(['user', 'originalPost']);
+        $originalPost->refresh();
+        $reclippedPost->load(['user', 'originalPost']);
 
-        return response()->json($result, 201);
+        $payload = self::toApiArray($reclippedPost, $user);
+        $payload['original_post'] = self::toApiArray($originalPost, $user);
+
+        return response()->json($payload, $created ? 201 : 200);
+    }
+
+    private function resolveReclipSource(Post $post): Post
+    {
+        if (!$post->is_reclipped || !$post->original_post_id) {
+            return $post;
+        }
+
+        $root = Post::find($post->original_post_id);
+
+        return $root ?: $post;
     }
 }
