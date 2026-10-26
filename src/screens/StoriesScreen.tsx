@@ -22,11 +22,11 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import StoryViewerMedia from '../components/stories/StoryViewerMedia.native';
 import StorySharedPostViewer from '../components/stories/StorySharedPostViewer.native';
 import StoryProfileCard from '../components/stories/StoryProfileCard.native';
@@ -39,9 +39,14 @@ import StoryInsightsSheet from '../components/stories/StoryInsightsSheet.native'
 import StoryBottomBar from '../components/stories/StoryBottomBar.native';
 import StoryViewerHeader from '../components/stories/StoryViewerHeader.native';
 import StoryTextOverlay from '../components/stories/StoryTextOverlay.native';
-import { gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import {
+    gazetteerHeader,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { 
+    clearActiveStoryProbes,
     fetchFollowedUsersStoryGroups,
     fetchStoryGroupByHandle,
     fetchUserStories, 
@@ -93,6 +98,23 @@ import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 const { width, height } = Dimensions.get('window');
+
+function StoriesOpeningCover({ children }: { children: React.ReactNode }) {
+    return (
+        <View style={styles.openingRoot}>
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={StyleSheet.absoluteFill}
+            />
+            <SafeAreaView style={styles.loadingShell} edges={['top']}>
+                {children}
+            </SafeAreaView>
+        </View>
+    );
+}
 const STORY_DURATION = 15000; // 15 seconds
 const STORY_SAFE_ZONE_TOP = 18;
 const STORY_SAFE_ZONE_BOTTOM = 82;
@@ -146,6 +168,16 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [stories24HoldMinReady, setStories24HoldMinReady] = useState(false);
     /** True once a solo request has been resolved (played or fallen through) so the overlay can't hang. */
     const [soloResolved, setSoloResolved] = useState(false);
+    const loadGenRef = useRef(0);
+    const requestedHandleKey = soloHandleKey || normalizedOpenUserHandle.replace(/^@/, '').trim().toLowerCase();
+    const openSessionKey = `${requestedHandleKey}|${String(forceRefreshAt || 0)}`;
+    const [activeSessionKey, setActiveSessionKey] = useState('');
+    const waitingForFreshViewer =
+        !!requestedHandleKey &&
+        !soloResolved &&
+        (activeSessionKey !== openSessionKey ||
+            loading ||
+            (soloModeRequested && !viewingStories));
     const [progress, setProgress] = useState(0);
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
@@ -419,8 +451,20 @@ export default function StoriesScreen({ route, navigation }: any) {
         (!stories24ContentReady || !stories24HoldMinReady);
 
     useEffect(() => {
-        loadStories();
-    }, [user?.id, normalizedOpenUserHandle, railHandlesKey]);
+        setLoading(true);
+        setViewingStories(false);
+        setStoryGroups([]);
+        setCurrentGroupIndex(0);
+        setCurrentStoryIndex(0);
+        setOriginalPost(null);
+        setSoloResolved(false);
+        setProgress(0);
+        progressRef.current = 0;
+        if (requestedHandleKey) clearActiveStoryProbes();
+        void loadStories();
+        // loadStories reads the latest handle / rail / session from this render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id, normalizedOpenUserHandle, railHandlesKey, forceRefreshAt, soloHandleKey, openSessionKey]);
 
     useEffect(() => {
         if (loading || viewingStories) return;
@@ -464,8 +508,12 @@ export default function StoriesScreen({ route, navigation }: any) {
     ]);
 
     const loadStories = async () => {
+        const gen = ++loadGenRef.current;
         if (!user?.id) {
-            setLoading(false);
+            if (gen === loadGenRef.current) {
+                setActiveSessionKey(openSessionKey);
+                setLoading(false);
+            }
             return;
         }
         setLoading(true);
@@ -536,6 +584,8 @@ export default function StoriesScreen({ route, navigation }: any) {
 
             // Solo mode (feed "View stories"): keep ONLY the tapped author's playlist
             // so finishing it can't roll into other people's / the world group.
+            if (gen !== loadGenRef.current) return;
+
             if (soloModeRequested && soloHandleKey) {
                 const soloGroups = groupsWithAvatars.filter(
                     (group) =>
@@ -544,15 +594,17 @@ export default function StoriesScreen({ route, navigation }: any) {
                 );
                 if (soloGroups.length > 0) {
                     setStoryGroups(soloGroups);
+                    setActiveSessionKey(openSessionKey);
                     return;
                 }
             }
 
             setStoryGroups(withGazetteerWorldGroup(groupsWithAvatars));
+            setActiveSessionKey(openSessionKey);
         } catch (error) {
             console.error('Error loading stories:', error);
         } finally {
-            setLoading(false);
+            if (gen === loadGenRef.current) setLoading(false);
         }
     };
 
@@ -1270,33 +1322,26 @@ export default function StoriesScreen({ route, navigation }: any) {
         };
     }, [viewingStories, paused, isHoldingToPause, currentGroupIndex, currentStoryIndex]);
 
-    if (showStories24HoldScreen) {
-        return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="passport">
-                <StoriesPopIcon size={ox(80)} />
-                <Text style={styles.storiesOpeningText}>Opening stories…</Text>
-                <Text style={styles.stories24HoldSubtext}>Stories 24</Text>
-            </GazetteerScreenShell>
-        );
-    }
-
-    if (loading || (soloModeRequested && !viewingStories && !soloResolved)) {
+    if (showStories24HoldScreen || waitingForFreshViewer) {
         const fromProfile =
             (Boolean(normalizedOpenUserHandle) || soloModeRequested) && !stories24OpenFromFeedRail;
         return (
-            <GazetteerScreenShell
-                contentStyle={styles.loadingShell}
-                ambientVariant="passport"
-            >
-                {fromProfile ? (
+            <StoriesOpeningCover>
+                {showStories24HoldScreen ? (
                     <>
-                        <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
+                        <StoriesPopIcon size={ox(80)} />
+                        <Text style={styles.storiesOpeningText}>Opening stories…</Text>
+                        <Text style={styles.stories24HoldSubtext}>Stories 24</Text>
+                    </>
+                ) : fromProfile ? (
+                    <>
+                        <ActivityIndicator size="large" color="#FFFFFF" />
                         <Text style={styles.storiesOpeningText}>Opening story...</Text>
                     </>
                 ) : (
-                    <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
+                    <ActivityIndicator size="large" color="#FFFFFF" />
                 )}
-            </GazetteerScreenShell>
+            </StoriesOpeningCover>
         );
     }
 
@@ -1815,7 +1860,12 @@ export default function StoriesScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+    openingRoot: {
+        flex: 1,
+        backgroundColor: '#000000',
+    },
     loadingShell: {
+        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         gap: ox(16),

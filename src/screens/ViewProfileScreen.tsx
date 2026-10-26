@@ -34,7 +34,7 @@ import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client'
 import { followOrRequest } from '../utils/followOrRequest';
 import { emitFollowStatusChanged } from '../hooks/useFollowState';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
-import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
+import { clearActiveStoryProbes, userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { storyRingState as resolveStoryRingState } from '../utils/storyRingNative';
 import type { StoryRingState } from '../utils/storyRingNative';
 import {
@@ -461,7 +461,15 @@ const result = await followOrRequest({
     };
 
     const handleStoryPress = () => {
-        navigation.navigate('Stories', { openUserHandle: handle });
+        clearActiveStoryProbes();
+        navigation.navigate('Stories', {
+            openUserHandle: handle,
+            targetHandle: handle,
+            soloMode: true,
+            forceRefreshAt: Date.now(),
+            skipStories24RailReturn: true,
+            fromStories24Rail: false,
+        });
     };
 
     const openExternalLink = async (rawUrl?: string) => {

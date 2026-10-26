@@ -5231,6 +5231,9 @@ onVisitProfile={() =>
                             openUserHandle: mergedPost.userHandle,
                             targetHandle: mergedPost.userHandle,
                             soloMode: true,
+                            forceRefreshAt: Date.now(),
+                            skipStories24RailReturn: true,
+                            fromStories24Rail: false,
                         })
                     }
                     onBlockUser={async () => {

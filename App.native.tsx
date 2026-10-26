@@ -338,6 +338,7 @@ function App(): React.JSX.Element {
             component={StoriesScreen}
             options={({ route }) => ({
               presentation: 'fullScreenModal',
+              contentStyle: { backgroundColor: '#000000' },
               // From Stories 24 rail: no native transition — card morph hands off to fullscreen.
               animation: (route.params as { fromStories24Rail?: boolean } | undefined)
                 ?.fromStories24Rail
