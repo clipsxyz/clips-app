@@ -45,4 +45,26 @@ class MessageReadReceiptTest extends TestCase
             ->postJson('/api/messages/conversation/' . rawurlencode($sender->handle) . '/read');
         $again->assertOk()->assertJsonPath('marked', 0);
     }
+
+    public function test_opening_a_conversation_marks_incoming_messages_read(): void
+    {
+        $sender = User::factory()->create();
+        $recipient = User::factory()->create();
+
+        $this->actingAs($sender, 'sanctum')->postJson('/api/messages/send', [
+            'recipient_handle' => $recipient->handle,
+            'text' => 'Open me',
+        ])->assertStatus(201);
+
+        $this->actingAs($recipient, 'sanctum')
+            ->getJson('/api/messages/conversation/' . rawurlencode($sender->handle) . '/paged?limit=20')
+            ->assertOk();
+
+        $list = $this->actingAs($recipient, 'sanctum')
+            ->getJson('/api/messages/conversations?limit=20');
+        $list->assertOk();
+        $row = collect($list->json('items'))->firstWhere('type', 'dm');
+        $this->assertNotNull($row);
+        $this->assertSame(0, (int) ($row['unread_count'] ?? -1));
+    }
 }

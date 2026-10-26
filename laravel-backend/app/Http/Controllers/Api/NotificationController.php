@@ -71,7 +71,8 @@ class NotificationController extends Controller
             ->where('user_id', $user->id)
             ->where('read', false)
             // DMs/replies/stickers already badge the Messages tab via conversation unread.
-            ->whereNotIn('type', ['dm', 'sticker', 'reply'])
+            // Digests are email-only and must not inflate the Inbox tab.
+            ->whereNotIn('type', ['dm', 'sticker', 'reply', 'inactive_digest'])
             ->count();
 
         return response()->json(['count' => $count]);

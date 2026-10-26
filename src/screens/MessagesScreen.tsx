@@ -1495,14 +1495,13 @@ export default function MessagesScreen({ route, navigation }: any) {
     }, [inviteHandle, inviteOpen]);
 
     useEffect(() => {
-        if (messages.length > 0 && user?.handle) {
-            if (isGroupThread && chatGroupId) {
-                markGroupConversationReadById(chatGroupId, user.handle).catch(console.error);
-            } else if (handle) {
-                markConversationRead(user.handle, handle).catch(console.error);
-            }
+        if (!isScreenFocused || !user?.handle) return;
+        if (isGroupThread && chatGroupId) {
+            void markGroupConversationReadById(chatGroupId, user.handle).catch(console.error);
+        } else if (handle) {
+            void markConversationRead(user.handle, handle).catch(console.error);
         }
-    }, [messages, handle, chatGroupId, isGroupThread, user?.handle]);
+    }, [isScreenFocused, messages.length, handle, chatGroupId, isGroupThread, user?.handle]);
 
     useEffect(() => {
         let cancelled = false;

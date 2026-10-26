@@ -24,6 +24,7 @@ type Props = {
     confirmButtonText?: string;
     cancelButtonText?: string;
     showCancelButton?: boolean;
+    confirmDestructive?: boolean;
     onConfirm: () => void;
     onDismiss: () => void;
 };
@@ -41,6 +42,7 @@ export default function GazetteerAlertSheet({
     confirmButtonText = 'Done',
     cancelButtonText = 'Cancel',
     showCancelButton = false,
+    confirmDestructive = false,
     onConfirm,
     onDismiss,
 }: Props) {
@@ -98,8 +100,13 @@ export default function GazetteerAlertSheet({
                         <Text style={styles.title}>{title}</Text>
                         {message ? <Text style={styles.message}>{message}</Text> : null}
 
-                        <TouchableOpacity style={styles.confirmBtn} onPress={onConfirm}>
-                            <Text style={styles.confirmBtnText}>{confirmButtonText}</Text>
+                        <TouchableOpacity
+                            style={[styles.confirmBtn, confirmDestructive && styles.confirmBtnDanger]}
+                            onPress={onConfirm}
+                        >
+                            <Text style={[styles.confirmBtnText, confirmDestructive && styles.confirmBtnDangerText]}>
+                                {confirmButtonText}
+                            </Text>
                         </TouchableOpacity>
                         {showCancelButton ? (
                             <TouchableOpacity style={styles.cancelBtn} onPress={onDismiss}>
@@ -183,6 +190,14 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '700',
         color: UCL_CANVAS_NAVY,
+    },
+    confirmBtnDanger: {
+        backgroundColor: 'rgba(185, 28, 28, 0.92)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+    },
+    confirmBtnDangerText: {
+        color: '#FFFFFF',
     },
     cancelBtn: {
         borderRadius: 999,

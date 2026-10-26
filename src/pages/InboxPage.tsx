@@ -5,7 +5,7 @@ import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
-import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
+import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, deleteNotification } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
 import { listConversations, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
@@ -22,7 +22,8 @@ import { leaveChatGroup } from '../api/client';
 import { markGroupConversationReadById } from '../api/messages';
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 import {
-    isThreadActivityNotificationType,
+    countsTowardInboxNotificationBadge,
+    inboxUnreadPartsFromLists,
     publishInboxUnreadParts,
 } from '../utils/inboxUnread';
 
@@ -700,7 +701,10 @@ export default function InboxPage() {
                 });
             
             // Combine notifications and conversations, sorted by timestamp (newest first)
-            const allNotifications = [...notifs, ...conversationNotifications].sort((a, b) => b.timestamp - a.timestamp);
+            const allNotifications = [
+                ...notifs.filter((n) => countsTowardInboxNotificationBadge(n.type)),
+                ...conversationNotifications,
+            ].sort((a, b) => b.timestamp - a.timestamp);
 
             // Resolve whether story-reply notifications still point to active stories.
             const storyReplyNotifs = allNotifications.filter((n) => !!n.storyId && !!n.fromHandle && !n.chatGroupId);
@@ -1011,15 +1015,10 @@ export default function InboxPage() {
         }
     }, [user?.handle, loadData]);
 
-    const unreadNotifications = notifications.filter(
-        (n) => !n.read && !isThreadActivityNotificationType(n.type),
-    ).length;
-    const unreadMessages = items
-        .filter((c) => c.kind !== 'group' && !c.isRequest)
-        .reduce((sum, c) => sum + (c.unread || 0), 0);
-    const unreadGroups = items
-        .filter((c) => c.kind === 'group')
-        .reduce((sum, c) => sum + (c.unread || 0), 0);
+    const inboxUnreadParts = inboxUnreadPartsFromLists(items, notifications);
+    const unreadNotifications = inboxUnreadParts.notifications;
+    const unreadMessages = inboxUnreadParts.messages;
+    const unreadGroups = inboxUnreadParts.groups;
     const unreadMessagesTotal = unreadMessages;
 
     React.useEffect(() => {

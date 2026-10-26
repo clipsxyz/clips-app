@@ -42,4 +42,21 @@ describe('inbox notification unread count', () => {
 
         expect(await getUnreadNotificationCount('Barry@Dublin')).toBe(0);
     });
+
+    it('does not count DM thread notifications toward the Notifs / footer badge', async () => {
+        await createNotification({
+            type: 'dm',
+            fromHandle: 'Gazetteer@Dublin',
+            toHandle: 'Barry@Dublin',
+            message: 'Cool',
+        });
+        await createNotification({
+            type: 'like',
+            fromHandle: 'Alice@Cork',
+            toHandle: 'Barry@Dublin',
+            message: 'liked your post',
+        });
+
+        expect(await getUnreadNotificationCount('Barry@Dublin')).toBe(1);
+    });
 });

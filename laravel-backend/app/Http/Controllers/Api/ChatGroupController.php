@@ -240,8 +240,13 @@ class ChatGroupController extends Controller
             return response()->json(['error' => 'Not your invite'], 403);
         }
 
+        $group = $invite->chatGroup;
+        if ($invite->status === 'accepted') {
+            return response()->json(['success' => true, 'group' => $group?->fresh(), 'already' => true]);
+        }
+
         if ($invite->status !== 'pending') {
-            return response()->json(['error' => 'Invite is no longer pending'], 400);
+            return response()->json(['success' => true, 'already' => true]);
         }
 
         if ($invite->expires_at && $invite->expires_at->isPast()) {
@@ -250,36 +255,61 @@ class ChatGroupController extends Controller
             return response()->json(['error' => 'Invite expired'], 400);
         }
 
-        $group = $invite->chatGroup;
-        if ($group->trashed()) {
+        if (! $group || $group->trashed()) {
             return response()->json(['error' => 'This group no longer exists'], 410);
         }
 
-        DB::transaction(function () use ($invite, $group, $user) {
-            $member = ChatGroupMember::where('chat_group_id', $group->id)
-                ->where('user_id', $user->id)
-                ->first();
+        try {
+            DB::transaction(function () use ($invite, $group, $user) {
+                $locked = ChatGroupInvite::query()->where('id', $invite->id)->lockForUpdate()->first();
+                if (! $locked || $locked->status === 'accepted') {
+                    return;
+                }
+                if ($locked->status !== 'pending') {
+                    return;
+                }
 
-            if ($member && $member->left_at) {
-                $member->update([
-                    'left_at' => null,
-                    'role' => 'member',
-                    'last_read_at' => now(),
-                ]);
-            } elseif (! $member) {
-                ChatGroupMember::create([
-                    'chat_group_id' => $group->id,
-                    'user_id' => $user->id,
-                    'role' => 'member',
-                    'last_read_at' => now(),
-                ]);
+                $member = ChatGroupMember::query()
+                    ->where('chat_group_id', $group->id)
+                    ->where('user_id', $user->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($member && $member->left_at) {
+                    $member->update([
+                        'left_at' => null,
+                        'role' => 'member',
+                        'last_read_at' => now(),
+                    ]);
+                } elseif (! $member) {
+                    ChatGroupMember::firstOrCreate(
+                        [
+                            'chat_group_id' => $group->id,
+                            'user_id' => $user->id,
+                        ],
+                        [
+                            'role' => 'member',
+                            'last_read_at' => now(),
+                        ]
+                    );
+                }
+
+                $locked->update(['status' => 'accepted']);
+
+                Notification::where('chat_group_invite_id', $invite->id)
+                    ->update(['read' => true]);
+            });
+        } catch (\Throwable $e) {
+            $current = ChatGroupInvite::with('chatGroup')->find($inviteId);
+            if ($current && ($current->status === 'accepted' || ChatGroupMember::query()
+                ->where('chat_group_id', $group->id)
+                ->where('user_id', $user->id)
+                ->exists())) {
+                return response()->json(['success' => true, 'group' => $current->chatGroup, 'already' => true]);
             }
 
-            $invite->update(['status' => 'accepted']);
-
-            Notification::where('chat_group_invite_id', $invite->id)
-                ->update(['read' => true]);
-        });
+            return response()->json(['error' => 'Could not accept this invite.'], 409);
+        }
 
         return response()->json(['success' => true, 'group' => $group->fresh()]);
     }
@@ -294,7 +324,7 @@ class ChatGroupController extends Controller
         }
 
         if ($invite->status !== 'pending') {
-            return response()->json(['error' => 'Invite is no longer pending'], 400);
+            return response()->json(['success' => true, 'already' => true]);
         }
 
         $invite->update(['status' => 'declined']);

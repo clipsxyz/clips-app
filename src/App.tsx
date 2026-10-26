@@ -41,7 +41,7 @@ import VerifiedBadge from './components/VerifiedBadge';
 import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage, blockUser } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
-import { inboxBadgeFromEventPayload, inboxBadgeTotal } from './utils/inboxUnread';
+import { inboxBadgeFromEventPayload, inboxBadgeTotal, loadInboxUnreadParts } from './utils/inboxUnread';
 import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
@@ -138,19 +138,8 @@ function BottomNav({ onCreateClick, onInboxClick }: { onCreateClick: () => void;
     let cancelled = false;
     const refresh = async () => {
       try {
-        const [notificationUnread, messageUnread] = await Promise.all([
-          getUnreadNotificationCount(user.handle).catch(() => 0),
-          getUnreadTotal(user.handle).catch(() => 0),
-        ]);
-        if (!cancelled) {
-          setInboxBadgeCount(
-            inboxBadgeTotal({
-              messages: messageUnread,
-              groups: 0,
-              notifications: notificationUnread,
-            }),
-          );
-        }
+        const parts = await loadInboxUnreadParts(user.handle);
+        if (!cancelled) setInboxBadgeCount(inboxBadgeTotal(parts));
       } catch {
         if (!cancelled) setInboxBadgeCount(0);
       }

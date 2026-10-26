@@ -18,9 +18,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { enableFreeze } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
-import { getUnreadTotal } from './src/api/messages';
-import { getUnreadNotificationCount } from './src/api/notifications';
-import { inboxBadgeFromEventPayload, inboxBadgeTotal } from './src/utils/inboxUnread';
+import { inboxBadgeFromEventPayload, inboxBadgeTotal, loadInboxUnreadParts } from './src/utils/inboxUnread';
 import {
   HomeTabStack,
   BoostTabStack,
@@ -161,27 +159,12 @@ function MainTabs() {
     let consecutiveFailures = 0;
     const handle = user.handle;
     const refresh = async () => {
-      let failed: number;
+      let failed = 0;
       try {
-        const results = await Promise.allSettled([
-          getUnreadNotificationCount(handle),
-          getUnreadTotal(handle),
-        ]);
-        failed = results.filter((r) => r.status === 'rejected').length;
-        if (mounted) {
-          const notificationUnread =
-            results[0].status === 'fulfilled' ? results[0].value : 0;
-          const messageUnread = results[1].status === 'fulfilled' ? results[1].value : 0;
-          setInboxBadgeCount(
-            inboxBadgeTotal({
-              messages: messageUnread,
-              groups: 0,
-              notifications: notificationUnread,
-            }),
-          );
-        }
+        const parts = await loadInboxUnreadParts(handle);
+        if (mounted) setInboxBadgeCount(inboxBadgeTotal(parts));
       } catch {
-        failed = 2;
+        failed = 1;
         if (mounted) setInboxBadgeCount(0);
       }
       consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;

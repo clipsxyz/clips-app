@@ -1,6 +1,6 @@
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
-import { isThreadActivityNotificationType } from '../utils/inboxUnread';
+import { countsTowardInboxNotificationBadge } from '../utils/inboxUnread';
 
 export type NotificationType =
     | 'sticker'
@@ -167,7 +167,9 @@ function filterNotificationsByPreferences(forHandle: string, items: Notification
         const currentHandle = (current?.handle || '').toLowerCase();
         if (!currentHandle || currentHandle !== String(forHandle || '').toLowerCase()) return items;
         const prefs = getNotificationPreferences();
-        return items.filter((n) => isNotificationTypeEnabled(prefs, normalizeNotificationChannel(n)));
+        // Push master toggle must not hide in-app Inbox rows; channel toggles still apply.
+        const inboxPrefs = { ...prefs, enabled: true };
+        return items.filter((n) => isNotificationTypeEnabled(inboxPrefs, normalizeNotificationChannel(n)));
     } catch {
         return items;
     }
@@ -206,13 +208,8 @@ function markLocalAllNotificationsRead(forHandle: string): void {
     });
 }
 
-function localOnlyUnreadCount(forHandle: string): number {
-    return (notifications.get(forHandle) || []).filter(
-        (n) =>
-            !n.read &&
-            String(n.id || '').startsWith('notif-') &&
-            !isThreadActivityNotificationType(n.type),
-    ).length;
+function countUnreadInboxNotifications(items: Notification[]): number {
+    return items.filter((n) => !n.read && countsTowardInboxNotificationBadge(n.type)).length;
 }
 
 export async function markNotificationRead(notificationId: string, forHandle: string): Promise<void> {
@@ -244,19 +241,8 @@ export async function markAllNotificationsRead(forHandle: string): Promise<void>
 }
 
 export async function getUnreadNotificationCount(forHandle: string): Promise<number> {
-    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
-    if (isLaravelApiEnabled()) {
-        try {
-            const apiClient = await import('./client');
-            const response = await apiClient.fetchUnreadNotificationCount();
-            const apiCount = Math.max(0, Number(response?.count ?? 0) || 0);
-            return apiCount + localOnlyUnreadCount(forHandle);
-        } catch (error) {
-            console.warn('Failed to fetch unread notification count from API, falling back to local store:', error);
-        }
-    }
     const items = await getNotifications(forHandle);
-    return items.filter((n) => !n.read && !isThreadActivityNotificationType(n.type)).length;
+    return countUnreadInboxNotifications(items);
 }
 
 export async function deleteNotification(notificationId: string, forHandle: string): Promise<void> {

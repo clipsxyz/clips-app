@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -18,6 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import InboxConversationRow, { inboxConversationRowId } from '../components/InboxConversationRow.native';
 import InboxChatInfoSheet from '../components/InboxChatInfoSheet.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import InboxLoadingSkeleton from '../components/InboxLoadingSkeleton.native';
 import { useAuth } from '../context/Auth';
 import {
@@ -63,7 +64,8 @@ import {
 import { ox } from '../constants/nativeOpticalScale';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
 import {
-    isThreadActivityNotificationType,
+    countsTowardInboxNotificationBadge,
+    inboxUnreadPartsFromLists,
     publishInboxUnreadParts,
 } from '../utils/inboxUnread';
 
@@ -72,6 +74,25 @@ const insightsSeenKey = (handle: string) =>
 
 type MessageFilter = 'all' | 'groups' | 'unread' | 'requests' | 'pinned';
 type InboxTab = 'messages' | 'groups' | 'notifications' | 'insights';
+
+type InboxAlertConfig = {
+    title: string;
+    message?: string;
+    icon?: 'success' | 'alert' | 'info';
+    confirmButtonText?: string;
+    cancelButtonText?: string;
+    showCancelButton?: boolean;
+    confirmDestructive?: boolean;
+    onConfirm?: () => void;
+};
+
+function isAlreadyHandledInviteError(error: unknown): boolean {
+    const status = Number((error as { status?: number } | null)?.status || 0);
+    const message = String((error as { message?: string } | null)?.message || '').toLowerCase();
+    if (status === 404 || status === 409) return true;
+    if (status === 400 && /pending|already|expired|no longer/.test(message)) return true;
+    return /pending|already|not found|no longer/.test(message);
+}
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -112,6 +133,8 @@ export default function InboxScreen({ navigation, route }: any) {
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [pendingInvites, setPendingInvites] = useState<ChatGroupInviteRow[]>([]);
     const [actingInviteId, setActingInviteId] = useState<string | null>(null);
+    const actingInviteIdRef = useRef<string | null>(null);
+    const [inboxAlert, setInboxAlert] = useState<InboxAlertConfig | null>(null);
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<InboxTab>('messages');
@@ -239,17 +262,16 @@ export default function InboxScreen({ navigation, route }: any) {
         };
 
         socket?.on('conversationUpdated', onRealtime);
-        socket?.on('inboxUnreadChanged', onRealtime);
         socket?.on('newMessage', onRealtime);
         // Same-device fallback bus (socket disabled / mock mode).
+        // Do not refetch on inboxUnreadChanged — that event is the pill/tab
+        // publishing its own count and would restore stale server unread.
         const busSubs = [
             DeviceEventEmitter.addListener('conversationUpdated', onRealtime),
-            DeviceEventEmitter.addListener('inboxUnreadChanged', onRealtime),
         ];
 
         return () => {
             socket?.off('conversationUpdated', onRealtime);
-            socket?.off('inboxUnreadChanged', onRealtime);
             socket?.off('newMessage', onRealtime);
             busSubs.forEach((sub) => sub.remove());
         };
@@ -627,51 +649,82 @@ export default function InboxScreen({ navigation, route }: any) {
             }
             await deleteNotification(notif.id, user.handle);
             await loadData();
-            Alert.alert('Follow request accepted', `You are now following ${notif.fromHandle}.`);
+            setInboxAlert({
+                title: 'Follow request accepted',
+                message: `You are now following ${notif.fromHandle}.`,
+                icon: 'success',
+                confirmButtonText: 'OK',
+            });
         } catch (error) {
             console.error('Failed to accept follow request:', error);
-            Alert.alert('Error', 'Failed to accept follow request.');
+            setInboxAlert({
+                title: 'Could not accept',
+                message: 'Failed to accept follow request.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         }
     };
 
-    const handleAcceptGroupInvite = async (inviteId: string) => {
-        if (!inviteId || actingInviteId) return;
+    const removeInviteFromUi = (inviteId: string) => {
+        setPendingInvites((prev) => prev.filter((row) => row.id !== inviteId));
+        setNotifications((prev) =>
+            prev.filter((n) => n.type !== 'group_invite' || n.chatGroupInviteId !== inviteId),
+        );
+    };
+
+    const beginInviteAction = (inviteId: string): boolean => {
+        if (!inviteId || actingInviteIdRef.current) return false;
+        actingInviteIdRef.current = inviteId;
         setActingInviteId(inviteId);
+        removeInviteFromUi(inviteId);
+        return true;
+    };
+
+    const endInviteAction = () => {
+        actingInviteIdRef.current = null;
+        setActingInviteId(null);
+    };
+
+    const handleAcceptGroupInvite = async (inviteId: string) => {
+        if (!beginInviteAction(inviteId)) return;
         try {
             await acceptChatGroupInvite(inviteId);
-            setPendingInvites((prev) => prev.filter((row) => row.id !== inviteId));
-            setNotifications((prev) =>
-                prev.filter((n) => n.type !== 'group_invite' || n.chatGroupInviteId !== inviteId),
-            );
             await loadData({ silent: true });
         } catch (error) {
             console.error('Failed to accept group invite:', error);
-            Alert.alert(
-                'Invite',
-                error instanceof Error ? error.message : 'Could not accept this invite.',
-            );
+            if (!isAlreadyHandledInviteError(error)) {
+                setInboxAlert({
+                    title: 'Invite',
+                    message: error instanceof Error ? error.message : 'Could not accept this invite.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+            }
+            await loadData({ silent: true });
         } finally {
-            setActingInviteId(null);
+            endInviteAction();
         }
     };
 
     const handleDeclineGroupInvite = async (inviteId: string) => {
-        if (!inviteId || actingInviteId) return;
-        setActingInviteId(inviteId);
+        if (!beginInviteAction(inviteId)) return;
         try {
             await declineChatGroupInvite(inviteId);
-            setPendingInvites((prev) => prev.filter((row) => row.id !== inviteId));
-            setNotifications((prev) =>
-                prev.filter((n) => n.type !== 'group_invite' || n.chatGroupInviteId !== inviteId),
-            );
+            await loadData({ silent: true });
         } catch (error) {
             console.error('Failed to decline group invite:', error);
-            Alert.alert(
-                'Invite',
-                error instanceof Error ? error.message : 'Could not decline this invite.',
-            );
+            if (!isAlreadyHandledInviteError(error)) {
+                setInboxAlert({
+                    title: 'Invite',
+                    message: error instanceof Error ? error.message : 'Could not decline this invite.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+            }
+            await loadData({ silent: true });
         } finally {
-            setActingInviteId(null);
+            endInviteAction();
         }
     };
 
@@ -696,7 +749,12 @@ export default function InboxScreen({ navigation, route }: any) {
             await loadData();
         } catch (error) {
             console.error('Failed to deny follow request:', error);
-            Alert.alert('Error', 'Failed to deny follow request.');
+            setInboxAlert({
+                title: 'Could not deny',
+                message: 'Failed to deny follow request.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         }
     };
 
@@ -830,32 +888,31 @@ export default function InboxScreen({ navigation, route }: any) {
             });
     }, [conversations, notificationPrefs, user?.handle]);
     const allNotifications = useMemo(() => {
-        return [...notifications, ...activityNotifications].sort((a, b) => b.timestamp - a.timestamp);
+        return [
+            ...notifications.filter((n) => countsTowardInboxNotificationBadge(n.type)),
+            ...activityNotifications,
+        ].sort((a, b) => b.timestamp - a.timestamp);
     }, [notifications, activityNotifications]);
-    const unreadNotifications = notifications.filter(
-        (n) => !n.read && !isThreadActivityNotificationType(n.type),
-    ).length;
     const sortedConversations = [...conversations].sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
         return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
     });
-    const directMessages = sortedConversations.filter((c) => c.kind !== 'group');
     const groupMessages = sortedConversations.filter((c) => c.kind === 'group');
-    const unreadMessages = directMessages
-        .filter((c) => !c.isRequest)
-        .reduce((sum, c) => sum + (c.unread || 0), 0);
-    const unreadGroups = groupMessages.reduce((sum, c) => sum + (c.unread || 0), 0);
+    const inboxUnreadParts = inboxUnreadPartsFromLists(conversations, notifications);
+    const unreadMessages = inboxUnreadParts.messages;
+    const unreadGroups = inboxUnreadParts.groups;
+    const unreadNotifications = inboxUnreadParts.notifications;
 
     useEffect(() => {
         if (!user?.handle) return;
         publishInboxUnreadParts({
             handle: user.handle,
             messages: unreadMessages,
-            groups: unreadGroups,
+            groups: unreadGroups + pendingInvites.length,
             notifications: unreadNotifications,
         });
-    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications]);
+    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications, pendingInvites.length]);
 
     const filterConversationList = (list: ConversationSummary[]) => {
         if (messageFilter === 'groups') return list.filter((c) => c.kind === 'group');
@@ -1234,8 +1291,12 @@ export default function InboxScreen({ navigation, route }: any) {
                                 {item.type === 'group_invite' && !!item.chatGroupInviteId && (
                                     <View style={styles.followRequestActions}>
                                         <TouchableOpacity
-                                            style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
-                                            disabled={actingInviteId === item.chatGroupInviteId}
+                                            style={[
+                                                styles.followRequestBtn,
+                                                styles.followRequestAcceptBtn,
+                                                !!actingInviteId && styles.followRequestBtnDisabled,
+                                            ]}
+                                            disabled={!!actingInviteId}
                                             onPress={() => { void handleAcceptGroupInvite(item.chatGroupInviteId!); }}
                                         >
                                             <Text style={styles.followRequestAcceptText}>
@@ -1243,8 +1304,12 @@ export default function InboxScreen({ navigation, route }: any) {
                                             </Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity
-                                            style={[styles.followRequestBtn, styles.followRequestDenyBtn]}
-                                            disabled={actingInviteId === item.chatGroupInviteId}
+                                            style={[
+                                                styles.followRequestBtn,
+                                                styles.followRequestDenyBtn,
+                                                !!actingInviteId && styles.followRequestBtnDisabled,
+                                            ]}
+                                            disabled={!!actingInviteId}
                                             onPress={() => { void handleDeclineGroupInvite(item.chatGroupInviteId!); }}
                                         >
                                             <Text style={styles.followRequestDenyText}>Decline</Text>
@@ -1272,10 +1337,18 @@ export default function InboxScreen({ navigation, route }: any) {
                             {!item.id.startsWith('conv-notif-') && (
                                 <TouchableOpacity
                                     onPress={() =>
-                                        Alert.alert('Delete notification', 'Remove this notification?', [
-                                            { text: 'Cancel', style: 'cancel' },
-                                            { text: 'Delete', style: 'destructive', onPress: () => { void handleDeleteNotification(item.id); } },
-                                        ])
+                                        setInboxAlert({
+                                            title: 'Delete notification',
+                                            message: 'Remove this notification?',
+                                            icon: 'alert',
+                                            showCancelButton: true,
+                                            cancelButtonText: 'Cancel',
+                                            confirmButtonText: 'Delete',
+                                            confirmDestructive: true,
+                                            onConfirm: () => {
+                                                void handleDeleteNotification(item.id);
+                                            },
+                                        })
                                     }
                                     style={styles.rowActionIcon}
                                 >
@@ -1461,7 +1534,8 @@ export default function InboxScreen({ navigation, route }: any) {
                                 {pendingInvites.map((invite) => {
                                     const inviterHandle = pendingInviteInviterHandle(invite);
                                     const groupName = pendingInviteGroupName(invite);
-                                    const busy = actingInviteId === invite.id;
+                                    const busy = !!actingInviteId;
+                                    const thisBusy = actingInviteId === invite.id;
                                     return (
                                         <View key={invite.id} style={styles.pendingInviteCard}>
                                             <Avatar
@@ -1484,16 +1558,24 @@ export default function InboxScreen({ navigation, route }: any) {
                                                 </Text>
                                                 <View style={styles.followRequestActions}>
                                                     <TouchableOpacity
-                                                        style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
+                                                        style={[
+                                                            styles.followRequestBtn,
+                                                            styles.followRequestAcceptBtn,
+                                                            busy && styles.followRequestBtnDisabled,
+                                                        ]}
                                                         disabled={busy}
                                                         onPress={() => { void handleAcceptGroupInvite(invite.id); }}
                                                     >
                                                         <Text style={styles.followRequestAcceptText}>
-                                                            {busy ? '…' : 'Accept'}
+                                                            {thisBusy ? '…' : 'Accept'}
                                                         </Text>
                                                     </TouchableOpacity>
                                                     <TouchableOpacity
-                                                        style={[styles.followRequestBtn, styles.followRequestDenyBtn]}
+                                                        style={[
+                                                            styles.followRequestBtn,
+                                                            styles.followRequestDenyBtn,
+                                                            busy && styles.followRequestBtnDisabled,
+                                                        ]}
                                                         disabled={busy}
                                                         onPress={() => { void handleDeclineGroupInvite(invite.id); }}
                                                     >
@@ -1649,6 +1731,22 @@ export default function InboxScreen({ navigation, route }: any) {
                           }
                         : undefined
                 }
+            />
+            <GazetteerAlertSheet
+                visible={inboxAlert !== null}
+                title={inboxAlert?.title ?? ''}
+                message={inboxAlert?.message}
+                icon={inboxAlert?.icon ?? 'alert'}
+                confirmButtonText={inboxAlert?.confirmButtonText ?? 'OK'}
+                cancelButtonText={inboxAlert?.cancelButtonText ?? 'Cancel'}
+                showCancelButton={inboxAlert?.showCancelButton ?? false}
+                confirmDestructive={inboxAlert?.confirmDestructive ?? false}
+                onConfirm={() => {
+                    const action = inboxAlert?.onConfirm;
+                    setInboxAlert(null);
+                    action?.();
+                }}
+                onDismiss={() => setInboxAlert(null)}
             />
         </GazetteerScreenShell>
     );
@@ -1965,6 +2063,9 @@ const styles = StyleSheet.create({
         borderRadius: ox(8),
         paddingHorizontal: ox(12),
         paddingVertical: ox(6),
+    },
+    followRequestBtnDisabled: {
+        opacity: 0.45,
     },
     followRequestAcceptBtn: {
         backgroundColor: '#FFFFFF',

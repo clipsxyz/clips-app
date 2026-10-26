@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ChatGroup;
+use App\Models\ChatGroupInvite;
 use App\Models\ChatGroupMember;
 use App\Models\Notification;
 use App\Models\User;
@@ -121,6 +122,55 @@ class ChatGroupControllerTest extends TestCase
 
         $response->assertStatus(400)
             ->assertJson(['error' => 'User is already in this group']);
+    }
+
+    public function test_accept_invite_is_idempotent(): void
+    {
+        $inviter = User::factory()->create(['handle' => 'gazetteer@dublin']);
+        $invitee = User::factory()->create(['handle' => 'barry@cork']);
+        $group = $this->makeGroupWithMember($inviter, 'Cork crew');
+        $invite = ChatGroupInvite::create([
+            'chat_group_id' => $group->id,
+            'inviter_id' => $inviter->id,
+            'invitee_id' => $invitee->id,
+            'status' => 'pending',
+        ]);
+
+        $first = $this->actingAs($invitee, 'sanctum')
+            ->postJson("/api/chat-groups/invites/{$invite->id}/accept");
+        $first->assertOk()->assertJson(['success' => true]);
+
+        $second = $this->actingAs($invitee, 'sanctum')
+            ->postJson("/api/chat-groups/invites/{$invite->id}/accept");
+        $second->assertOk()->assertJson(['success' => true]);
+
+        $this->assertEquals(1, ChatGroupMember::query()
+            ->where('chat_group_id', $group->id)
+            ->where('user_id', $invitee->id)
+            ->count());
+    }
+
+    public function test_decline_invite_is_idempotent(): void
+    {
+        $inviter = User::factory()->create(['handle' => 'gazetteer@dublin']);
+        $invitee = User::factory()->create(['handle' => 'barry@cork']);
+        $group = $this->makeGroupWithMember($inviter, 'Cork crew');
+        $invite = ChatGroupInvite::create([
+            'chat_group_id' => $group->id,
+            'inviter_id' => $inviter->id,
+            'invitee_id' => $invitee->id,
+            'status' => 'pending',
+        ]);
+
+        $this->actingAs($invitee, 'sanctum')
+            ->postJson("/api/chat-groups/invites/{$invite->id}/decline")
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->actingAs($invitee, 'sanctum')
+            ->postJson("/api/chat-groups/invites/{$invite->id}/decline")
+            ->assertOk()
+            ->assertJson(['success' => true]);
     }
 
     private function makeGroupWithMember(User $creator, string $name): ChatGroup

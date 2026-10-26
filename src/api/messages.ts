@@ -2,7 +2,7 @@ import { getRuntimeEnv, isLaravelApiEnabled, isMockMode } from '../config/runtim
 import { hasAuthTokenAsync } from '../utils/authTokenBridge';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 import { laravelMessageIsRead } from '../utils/dmThreadStatus';
-import { effectiveThreadUnread } from '../utils/inboxUnread';
+import { effectiveThreadUnread, unreadAfterOpeningThread } from '../utils/inboxUnread';
 
 /** Live inbox/thread fetches — never inject mock users when production/API mode is on. */
 function useLiveInboxApi(): boolean {
@@ -129,6 +129,55 @@ const unreadByHandle = new Map<string, number>();
 const unreadOverrideByThread = new Map<string, number>();
 // Track per-thread last read timestamps per user: `${user}::${other}` => timestamp
 const lastReadByThread = new Map<string, number>();
+const LAST_READ_STORAGE_KEY = 'clips:dm-thread-last-read';
+
+function threadKey(selfHandle: string, otherHandle: string): string {
+    return `${String(selfHandle || '').trim().toLowerCase()}::${String(otherHandle || '').trim().toLowerCase()}`;
+}
+
+function persistLastReadMap(): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        const payload: Record<string, number> = {};
+        lastReadByThread.forEach((ts, key) => {
+            if (ts > 0) payload[key] = ts;
+        });
+        localStorage.setItem(LAST_READ_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+        /* ignore */
+    }
+}
+
+function rememberThreadOpened(selfHandle: string, otherHandle: string, at = Date.now()): void {
+    lastReadByThread.set(threadKey(selfHandle, otherHandle), at);
+    unreadOverrideByThread.set(threadKey(selfHandle, otherHandle), 0);
+    persistLastReadMap();
+}
+
+function liveThreadUnread(
+    forHandle: string,
+    otherHandle: string,
+    apiUnread: number,
+    lastMessageTimestamp?: number,
+    lastSenderHandle?: string | null,
+    isRequest?: boolean,
+): number {
+    const key = threadKey(forHandle, otherHandle);
+    const override = unreadOverrideByThread.get(key);
+    const raw = unreadAfterOpeningThread({
+        unread: apiUnread,
+        lastMessageTimestamp,
+        lastReadAt: lastReadByThread.get(key) || 0,
+        override,
+    });
+    return effectiveThreadUnread({
+        unread: raw,
+        lastSenderHandle,
+        viewerHandle: forHandle,
+        isRequest,
+        markedUnread: override !== undefined && override > 0,
+    });
+}
 // Track pinned conversations per user: userHandle => Set<otherHandle>
 const pinnedConversations = new Map<string, Set<string>>();
 // Track message requests per user: userHandle => Set<senderHandle>
@@ -184,6 +233,18 @@ function persistBlockedMap(): void {
 
     const blockedFromStorage = readMapOfStringSets(BLOCKED_STORAGE_KEY);
     blockedFromStorage.forEach((set, key) => blockedUsers.set(key, set));
+
+    try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(LAST_READ_STORAGE_KEY) : null;
+        if (raw) {
+            const parsed = JSON.parse(raw) as Record<string, number>;
+            Object.entries(parsed || {}).forEach(([k, ts]) => {
+                if (k && typeof ts === 'number' && ts > 0) lastReadByThread.set(k, ts);
+            });
+        }
+    } catch {
+        /* ignore */
+    }
 })();
 
 /** In-memory chat groups when `VITE_USE_LARAVEL_API=false` (local / mock mode). */
@@ -476,7 +537,7 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     list.push(msg);
     conversations.set(id, list);
     // New incoming message should clear any manual unread override for receiver's thread.
-    unreadOverrideByThread.delete(`${to}::${from}`);
+    unreadOverrideByThread.delete(threadKey(to, from));
     // Recompute unread for receiver across all threads
     unreadByHandle.set(to, await computeUnreadTotal(to));
 
@@ -619,77 +680,37 @@ export async function deleteChatMessage(
 }
 
 export async function getUnreadTotal(handle: string): Promise<number> {
-    if (useLiveInboxApi() && (await hasAuthTokenAsync())) {
-        try {
-            const apiClient = await import('./client');
-            const res = await apiClient.fetchConversations(0, 100);
-            const items = res?.items ?? [];
-            return items.reduce(
-                (
-                    s: number,
-                    i: {
-                        unread_count?: number;
-                        type?: string;
-                        other_user?: { handle?: string };
-                        latest_message?: { sender_handle?: string; senderHandle?: string };
-                    },
-                ) => {
-                    const other = String(i.other_user?.handle || '');
-                    const override =
-                        i.type !== 'group' && other
-                            ? unreadOverrideByThread.get(`${handle}::${other}`)
-                            : undefined;
-                    const raw = override !== undefined ? override : Number(i.unread_count) || 0;
-                    const lastSender =
-                        i.latest_message?.sender_handle || i.latest_message?.senderHandle || '';
-                    return (
-                        s +
-                        effectiveThreadUnread({
-                            unread: raw,
-                            lastSenderHandle: lastSender,
-                            viewerHandle: handle,
-                            markedUnread: override !== undefined && override > 0,
-                        })
-                    );
-                },
-                0,
-            );
-        } catch (e: any) {
-            if (e?.name === 'ConnectionRefused' || e?.message === 'CONNECTION_REFUSED') throw e;
-            if (e?.status === 401) return 0;
-            console.warn('Laravel getUnreadTotal failed:', e);
-            return 0;
-        }
-    }
-    if (useLiveInboxApi()) {
+    const { inboxBadgeTotal, loadInboxUnreadParts } = await import('../utils/inboxUnread');
+    try {
+        return inboxBadgeTotal(await loadInboxUnreadParts(handle));
+    } catch (e: any) {
+        if (e?.name === 'ConnectionRefused' || e?.message === 'CONNECTION_REFUSED') throw e;
+        if (e?.status === 401) return 0;
+        console.warn('getUnreadTotal failed:', e);
         return 0;
     }
-    return unreadByHandle.get(handle) || 0;
 }
 
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
-    unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 0);
-    let marked = 0;
+    rememberThreadOpened(selfHandle, otherHandle);
     if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
-            const res = await apiClient.markConversationRead(otherHandle);
-            marked = Number((res as { marked?: number } | undefined)?.marked ?? 1);
+            await apiClient.markConversationRead(otherHandle);
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             console.warn('Laravel markConversationRead failed:', e);
         }
     } else if (!useLiveInboxApi()) {
-        const key = `${selfHandle}::${otherHandle}`;
-        lastReadByThread.set(key, Date.now());
         unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
-        const { emitInboxUnreadChanged } = await import('../services/socketio');
-        emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
-        dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
-        marked = 1;
     }
-    if (marked > 0) {
-        await emitMessagesRead(selfHandle, otherHandle);
+    await emitMessagesRead(selfHandle, otherHandle);
+    try {
+        const { loadInboxUnreadParts, publishInboxUnreadParts } = await import('../utils/inboxUnread');
+        const parts = await loadInboxUnreadParts(selfHandle);
+        publishInboxUnreadParts({ handle: selfHandle, ...parts });
+    } catch {
+        dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
     }
 }
 
@@ -702,9 +723,10 @@ export async function markConversationUnread(selfHandle: string, otherHandle: st
         .sort((a, b) => b.timestamp - a.timestamp)[0];
     if (latestIncoming) {
         // Set last-read just before latest incoming to force at least one unread.
-        lastReadByThread.set(`${selfHandle}::${otherHandle}`, latestIncoming.timestamp - 1);
+        lastReadByThread.set(threadKey(selfHandle, otherHandle), latestIncoming.timestamp - 1);
+        persistLastReadMap();
     }
-    unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 1);
+    unreadOverrideByThread.set(threadKey(selfHandle, otherHandle), 1);
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
     const { emitInboxUnreadChanged } = await import('../services/socketio');
     emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
@@ -957,14 +979,13 @@ export async function listConversations(forHandle: string): Promise<Conversation
                         }
                         const otherHandle = row.other_user?.handle ?? '';
                         const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
-                        const override = unreadOverrideByThread.get(`${forHandle}::${otherHandle}`);
-                        const raw = override !== undefined ? override : Number(row.unread_count) || 0;
-                        const unread = effectiveThreadUnread({
-                            unread: raw,
-                            lastSenderHandle: lastMessage?.senderHandle,
-                            viewerHandle: forHandle,
-                            markedUnread: override !== undefined && override > 0,
-                        });
+                        const unread = liveThreadUnread(
+                            forHandle,
+                            otherHandle,
+                            Number(row.unread_count) || 0,
+                            lastMessage?.timestamp,
+                            lastMessage?.senderHandle,
+                        );
                         const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
                         return {
                             kind: 'dm' as const,
@@ -1001,7 +1022,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
         const sorted = msgs.slice().sort((m1, m2) => m2.timestamp - m1.timestamp);
         // Prefer last real message for inbox preview (skip system echoes).
         const last = sorted.find((m) => !m.isSystemMessage) || sorted[0];
-        const lastRead = lastReadByThread.get(`${forHandle}::${other}`) || 0;
+        const lastRead = lastReadByThread.get(threadKey(forHandle, other)) || 0;
         const unread = sorted.filter(m => m.senderHandle !== forHandle && m.timestamp > lastRead && !m.isSystemMessage).length;
         const existing = summaries.get(other) || { last: undefined, unread: 0 };
         const betterLast = !existing.last || (last && last.timestamp > existing.last.timestamp) ? last : existing.last;
@@ -1018,18 +1039,17 @@ export async function listConversations(forHandle: string): Promise<Conversation
     const allConversations = await Promise.all(
         Array.from(summaries.entries()).map(async ([otherHandle, v]) => {
             const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
-            const override = unreadOverrideByThread.get(`${forHandle}::${otherHandle}`);
-            const raw = override !== undefined ? override : v.unread;
             return {
                 otherHandle,
                 lastMessage: v.last,
-                unread: effectiveThreadUnread({
-                    unread: raw,
-                    lastSenderHandle: v.last?.senderHandle,
-                    viewerHandle: forHandle,
-                    isRequest: v.isRequest || false,
-                    markedUnread: override !== undefined && override > 0,
-                }),
+                unread: liveThreadUnread(
+                    forHandle,
+                    otherHandle,
+                    v.unread,
+                    v.last?.timestamp,
+                    v.last?.senderHandle,
+                    v.isRequest || false,
+                ),
                 isPinned: pinned.has(otherHandle),
                 isRequest: v.isRequest || false,
                 hasUnviewedStories,
@@ -1168,8 +1188,10 @@ export async function isUserBlocked(userHandle: string, otherHandle: string): Pr
 export async function deleteConversation(userHandle: string, otherHandle: string): Promise<void> {
     const id = getConversationId(userHandle, otherHandle);
     conversations.delete(id);
-    unreadOverrideByThread.delete(`${userHandle}::${otherHandle}`);
-    unreadOverrideByThread.delete(`${otherHandle}::${userHandle}`);
+    unreadOverrideByThread.delete(threadKey(userHandle, otherHandle));
+    unreadOverrideByThread.delete(threadKey(otherHandle, userHandle));
+    lastReadByThread.delete(threadKey(userHandle, otherHandle));
+    persistLastReadMap();
     
     // Remove from pinned if pinned
     const pinned = pinnedConversations.get(userHandle);
@@ -1201,7 +1223,7 @@ async function computeUnreadTotal(handle: string): Promise<number> {
         const [a, b] = id.split('|');
         if (a !== handle && b !== handle) return;
         const other = a === handle ? b : a;
-        const lastRead = lastReadByThread.get(`${handle}::${other}`) || 0;
+        const lastRead = lastReadByThread.get(threadKey(handle, other)) || 0;
         total += msgs.filter(m => m.senderHandle !== handle && m.timestamp > lastRead && !m.isSystemMessage).length;
     });
     return total;

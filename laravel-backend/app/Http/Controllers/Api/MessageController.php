@@ -39,6 +39,8 @@ class MessageController extends Controller
             ->orderBy('created_at', 'asc')
             ->get();
 
+        $this->markIncomingDirectMessagesRead($user, $otherHandle);
+
         return response()->json($messages);
     }
 
@@ -92,6 +94,8 @@ class MessageController extends Controller
             );
         }
 
+        $this->markIncomingDirectMessagesRead($user, $otherHandle);
+
         return response()->json([
             'items' => $rows->sortBy('created_at')->values(),
             'nextCursor' => $nextCursor,
@@ -142,11 +146,11 @@ class MessageController extends Controller
                         'avatar_url' => $otherUser->avatar_url,
                     ] : null,
                     'latest_message' => $latestMessage,
-                    'unread_count' => $latestMessage->sender_handle === $user->handle
+                    'unread_count' => strcasecmp((string) $latestMessage->sender_handle, (string) $user->handle) === 0
                         ? 0
                         : Message::where('conversation_id', $conversationId)
                             ->whereNull('chat_group_id')
-                            ->where('recipient_handle', $user->handle)
+                            ->whereRaw('LOWER(recipient_handle) = ?', [strtolower((string) $user->handle)])
                             ->where('is_system_message', false)
                             ->whereNull('read_at')
                             ->count(),
@@ -250,6 +254,17 @@ class MessageController extends Controller
             'nextCursor' => $nextCursor,
             'hasMore' => $hasMore
         ]);
+    }
+
+    private function markIncomingDirectMessagesRead($user, string $otherHandle): int
+    {
+        return (int) Message::query()
+            ->whereNull('chat_group_id')
+            ->whereNull('read_at')
+            ->where('is_system_message', false)
+            ->whereRaw('LOWER(recipient_handle) = ?', [strtolower((string) $user->handle)])
+            ->whereRaw('LOWER(sender_handle) = ?', [strtolower($otherHandle)])
+            ->update(['read_at' => now()]);
     }
 
     private function decodeConversationCursor(?string $cursor): array
@@ -667,12 +682,7 @@ class MessageController extends Controller
         }
 
         $user = Auth::user();
-        $conversationId = Message::getConversationId($user->handle, $otherHandle);
-
-        $marked = Message::where('conversation_id', $conversationId)
-            ->where('recipient_handle', $user->handle)
-            ->whereNull('read_at')
-            ->update(['read_at' => now()]);
+        $marked = $this->markIncomingDirectMessagesRead($user, $otherHandle);
 
         return response()->json(['success' => true, 'marked' => $marked]);
     }
