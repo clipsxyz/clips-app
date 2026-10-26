@@ -28,6 +28,7 @@ import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import { useAuth } from '../context/Auth';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
+import { dedupeChatMessages, upsertChatMessage } from '../utils/dedupeChatMessages';
 import {
     fetchConversationMessagesPage,
     fetchGroupThreadMessagesPage,
@@ -907,12 +908,13 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [groupName, setGroupName] = useState(initialGroupName);
     const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const visibleMessages = useMemo(() => dedupeChatMessages(messages), [messages]);
     // Parent lookup for enriching thin reply payloads (id-only) into full quote cards.
     const messagesById = useMemo(() => {
         const map = new Map<string, ChatMessage>();
-        for (const m of messages) map.set(m.id, m);
+        for (const m of visibleMessages) map.set(m.id, m);
         return map;
-    }, [messages]);
+    }, [visibleMessages]);
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
     const [threadCursor, setThreadCursor] = useState<string | null>(null);
@@ -1286,10 +1288,10 @@ export default function MessagesScreen({ route, navigation }: any) {
     }, [handle, chatGroupId]);
 
     // Real-time DM delivery: register this user on the Socket.IO relay and
-    // append incoming messages for THIS thread in place. No refetch — the
-    // payload is deduped by server message ID against current state (which
-    // also absorbs the relay's echo of our own optimistic sends, already
-    // reconciled to that same ID).
+    // upsert incoming messages for THIS thread in place. The relay emits the
+    // same payload on both `newMessage` and `conversationUpdated`; we listen
+    // to one socket event plus the local bus, and merge by id / sender+body+time
+    // so optimistic sends and echoes never render twice.
     useEffect(() => {
         if (!user?.handle) return;
         const socket = connectSocket(user.handle);
@@ -1313,8 +1315,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                 if (handle && rawMsg.senderHandle !== user.handle && rawMsg.senderHandle !== handle) return;
             }
 
+            const incomingId = String(rawMsg.id ?? '').trim();
             const incoming: ChatMessage = {
-                id: String(rawMsg.id),
+                id: incomingId && incomingId !== 'undefined' ? incomingId : `echo-${Date.now()}`,
                 senderHandle: String(rawMsg.senderHandle ?? rawMsg.sender_handle ?? ''),
                 text: rawMsg.text ?? undefined,
                 imageUrl: rawMsg.imageUrl ?? rawMsg.image_url ?? undefined,
@@ -1328,24 +1331,19 @@ export default function MessagesScreen({ route, navigation }: any) {
                 replyTo: rawMsg.replyTo ?? rawMsg.reply_to ?? undefined,
                 sourcePostId: rawMsg.sourcePostId ?? rawMsg.source_post_id ?? undefined,
             };
-            if (!incoming.id || !incoming.senderHandle) return;
+            if (!incoming.senderHandle) return;
 
-            setMessages((prev) => {
-                if (prev.some((m) => m.id === incoming.id)) return prev;
-                return [...prev, incoming].sort((a, b) => a.timestamp - b.timestamp);
-            });
+            setMessages((prev) => upsertChatMessage(prev, incoming));
             if (incoming.senderHandle !== user.handle) {
                 shouldAutoScrollRef.current = true;
             }
         };
 
-        socket?.on('conversationUpdated', onRealtime);
         socket?.on('newMessage', onRealtime);
         // Same-device fallback bus (socket disabled / mock mode).
         const busSub = DeviceEventEmitter.addListener('conversationUpdated', onRealtime);
 
         return () => {
-            socket?.off('conversationUpdated', onRealtime);
             socket?.off('newMessage', onRealtime);
             busSub.remove();
             if (isGroupThread && chatGroupId) {
@@ -1809,7 +1807,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     hasMore: page.hasMore,
                 });
             }
-            setMessages(page.items);
+            setMessages(dedupeChatMessages(page.items));
             // Re-bind an armed reply target across the reload: if the user tapped
             // Reply on an optimistic/locally-rendered message, its temporary ID
             // no longer exists once server rows land. Swap in the matching server
@@ -1856,11 +1854,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 });
             }
             if (page.items.length > 0) {
-                setMessages((prev) => {
-                    const seen = new Set(prev.map((m) => m.id));
-                    const merged = [...page.items.filter((m) => !seen.has(m.id)), ...prev];
-                    return merged.sort((a, b) => a.timestamp - b.timestamp);
-                });
+                setMessages((prev) => dedupeChatMessages([...page.items, ...prev]));
             }
             if (isGroupThread && 'groupName' in page && typeof page.groupName === 'string' && page.groupName) {
                 setGroupName(page.groupName);
@@ -1909,24 +1903,19 @@ export default function MessagesScreen({ route, navigation }: any) {
      */
     const reconcileSentMessage = (optimistic: ChatMessage, serverMsg: ChatMessage | undefined) => {
         if (!serverMsg) return;
-        setMessages((prev) => {
-            const merged: ChatMessage = {
-                ...serverMsg,
-                replyTo: serverMsg.replyTo ?? optimistic.replyTo,
-                imageUrl: serverMsg.imageUrl ?? optimistic.imageUrl,
-                audioUrl: serverMsg.audioUrl ?? optimistic.audioUrl,
-                text: serverMsg.text ?? optimistic.text,
-            };
-            let swapped = false;
-            const next = prev
-                .filter((m) => m.id !== serverMsg.id || m.id === optimistic.id)
-                .map((m) => {
-                    if (m.id !== optimistic.id) return m;
-                    swapped = true;
-                    return merged;
-                });
-            return swapped ? next : [...next, merged];
-        });
+        const merged: ChatMessage = {
+            ...serverMsg,
+            replyTo: serverMsg.replyTo ?? optimistic.replyTo,
+            imageUrl: serverMsg.imageUrl ?? optimistic.imageUrl,
+            audioUrl: serverMsg.audioUrl ?? optimistic.audioUrl,
+            text: serverMsg.text ?? optimistic.text,
+        };
+        setMessages((prev) =>
+            upsertChatMessage(
+                prev.filter((m) => m.id !== optimistic.id),
+                merged,
+            ),
+        );
     };
 
     const handleSend = async () => {
@@ -1970,7 +1959,7 @@ export default function MessagesScreen({ route, navigation }: any) {
         };
 
         shouldAutoScrollRef.current = true;
-        setMessages(prev => [...prev, newMessage]);
+        setMessages((prev) => upsertChatMessage(prev, newMessage));
         setMessageText('');
         scrollMessagesToBottom(true);
 
@@ -2496,7 +2485,7 @@ export default function MessagesScreen({ route, navigation }: any) {
         };
         setImageCompose(null);
         shouldAutoScrollRef.current = true;
-        setMessages((prev) => [...prev, optimistic]);
+        setMessages((prev) => upsertChatMessage(prev, optimistic));
         try {
             const serverMsg =
                 isGroupThread && chatGroupId
@@ -2535,7 +2524,7 @@ export default function MessagesScreen({ route, navigation }: any) {
         };
         setShowStickerPicker(false);
         shouldAutoScrollRef.current = true;
-        setMessages((prev) => [...prev, optimistic]);
+        setMessages((prev) => upsertChatMessage(prev, optimistic));
         try {
             const serverMsg =
                 isGroupThread && chatGroupId
@@ -2791,7 +2780,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 replyTo: replyToPayload,
             };
             shouldAutoScrollRef.current = true;
-            setMessages((prev) => [...prev, optimistic]);
+            setMessages((prev) => upsertChatMessage(prev, optimistic));
             const serverMsg =
                 isGroupThread && chatGroupId
                     ? await appendGroupChatMessage(user.handle, chatGroupId, { audioUrl, replyTo: replyToPayload })
@@ -3116,7 +3105,7 @@ export default function MessagesScreen({ route, navigation }: any) {
             >
                 <FlatList
                     ref={flatListRef}
-                    data={messages}
+                    data={visibleMessages}
                     renderItem={renderMessage}
                     keyExtractor={(item) => item.id}
                     style={styles.messagesList}
