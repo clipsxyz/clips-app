@@ -118,7 +118,7 @@ import {
     subscribeFeedAutoplayPref,
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
-import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, setFeedAudioFocusPostId, setFeedPreloadPostIds, subscribeActiveFeedVideo, subscribeFeedAudioFocusPostId } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, notifyActiveFeedVideoListeners, setFeedAudioFocusPostId, setFeedPreloadPostIds, subscribeActiveFeedVideo, subscribeFeedAudioFocusPostId } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff } from '../utils/feedScenesHandoffNative';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
@@ -2682,17 +2682,31 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
 
             const restoreId =
-                scenesReturn?.postId ?? lastViewableVideoPostIdRef.current;
+                scenesReturn?.postId ??
+                lastViewableVideoPostIdRef.current ??
+                getActiveFeedVideoPostId();
             const pinnedY = scenesReturnScrollYRef.current;
             scenesReturnScrollYRef.current = null;
 
+            const rearmVisibleVideo = (postId: string | null) => {
+                if (feedAutoplayOverlayBlocks()) return;
+                if (!postId || !feedAutoplayAllowedRef.current) return;
+                lastViewableVideoPostIdRef.current = postId;
+                // Same post id + paused={false} does not resume a natively frozen ExoPlayer
+                // (tab freezeOnBlur). Drop then re-broadcast so FeedPostMedia remounts/plays.
+                activeVideoPostIdRef.current = null;
+                setActiveFeedVideoPostId(null);
+                requestAnimationFrame(() => {
+                    if (feedAutoplayOverlayBlocks()) return;
+                    if (!feedAutoplayAllowedRef.current) return;
+                    scheduleActiveFeedVideoRef.current(postId, true);
+                    notifyActiveFeedVideoListeners();
+                });
+            };
+
             const finishRestore = () => {
                 if (feedAutoplayOverlayBlocks()) return;
-                if (restoreId && feedAutoplayAllowedRef.current) {
-                    // Force so blur→focus with the same post still remounts/plays.
-                    activeVideoPostIdRef.current = null;
-                    scheduleActiveFeedVideoRef.current(restoreId, true);
-                }
+                rearmVisibleVideo(restoreId);
                 setTimeout(() => {
                     suppressFeedViewabilityRef.current = false;
                 }, 160);
@@ -4351,16 +4365,33 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Dedupe runs forever: a poster is fetched once per app session, and this effect
         // re-runs on every `flatForRender` change (likes, comment counts, pagination).
     }, [flatForRender]);
+    const wasFeedFocusedRef = React.useRef(isFeedFocused);
     React.useEffect(() => {
+        const gainedFocus = isFeedFocused && !wasFeedFocusedRef.current;
+        wasFeedFocusedRef.current = isFeedFocused;
         if (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost) || getFeedOverlayBlocksPlayback()) {
             return;
         }
         if (!feedAutoplayAllowed || !feedHasPosts) return;
+        const preferred =
+            lastViewableVideoPostIdRef.current ?? getActiveFeedVideoPostId();
+        if (!preferred) return;
+        if (gainedFocus) {
+            // Tab return (Boost → Home): FlatList will not re-fire viewability, and freezeOnBlur
+            // leaves the settle-mounted player paused with the same active id. Re-evaluate now.
+            activeVideoPostIdRef.current = null;
+            setActiveFeedVideoPostId(null);
+            const t = setTimeout(() => {
+                if (feedAutoplayOverlayBlocks()) return;
+                if (!feedAutoplayAllowedRef.current) return;
+                scheduleActiveFeedVideoRef.current(String(preferred), true);
+                notifyActiveFeedVideoListeners();
+            }, 0);
+            return () => clearTimeout(t);
+        }
         if (activeVideoPostIdRef.current) return;
         // Once FlatList viewability has run, stay quiet — do not invent playback from data updates.
         if (feedViewabilitySeenRef.current) return;
-        const preferred = lastViewableVideoPostIdRef.current;
-        if (!preferred) return;
         const t = setTimeout(() => {
             if (activeVideoPostIdRef.current) return;
             if (feedAutoplayOverlayBlocks()) return;
