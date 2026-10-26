@@ -1,7 +1,12 @@
 import type { Story, StoryGroup, StickerOverlay } from '../types';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAvatarForHandle } from './users';
-import { isVideoUrl, pickStoryMediaUri, resolveStoryMediaUrl } from '../utils/storyMediaNative';
+import {
+    isVideoUrl,
+    pickStoryMediaUri,
+    pickStoryPosterUri,
+    resolveStoryMediaUrl,
+} from '../utils/storyMediaNative';
 
 let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
 export function getLastStoriesLoadSource(): 'api-paged' | 'api-user' | 'mock' {
@@ -778,10 +783,13 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
               : mediaUrl
                 ? 'image'
                 : undefined;
+    const userHandle = String(
+        story.user_handle || story.userHandle || story.user?.handle || '',
+    ).trim();
     return {
         id: story.id,
-        userId: story.user_id || story.userId,
-        userHandle: story.user_handle || story.userHandle,
+        userId: story.user_id || story.userId || story.user?.id,
+        userHandle,
         mediaUrl: mediaUrl || undefined,
         mediaType,
         text: story.text || undefined,
@@ -799,7 +807,7 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         textStyle: story.text_style || undefined,
         stickers: normalizeStoryStickers(story.stickers),
         taggedUsers: story.tagged_users || undefined,
-        videoPosterUrl: resolveStoryMediaUrl(story.video_poster_url) || undefined,
+        videoPosterUrl: pickStoryPosterUri(story) || undefined,
         audience: story.audience || 'public',
         sharedFromPost: story.shared_from_post_id || undefined,
         sharedFromUser: story.shared_from_user_handle || undefined,
@@ -877,9 +885,22 @@ export async function fetchStoriesPage(
 }
 
 // Get stories for a specific user
-export async function fetchUserStories(viewerUserId: string, targetUserId: string, followedUserHandles: string[] = []): Promise<Story[]> {
+export async function fetchUserStories(
+    viewerUserId: string,
+    targetUserId: string,
+    followedUserHandles: string[] = [],
+    targetHandle?: string,
+): Promise<Story[]> {
     if (isLaravelApiEnabled()) {
         try {
+            const handle = (targetHandle || '').trim();
+            if (handle) {
+                const byHandle = await fetchStoryGroupByHandle(handle);
+                if (byHandle?.stories?.length) {
+                    lastStoriesLoadSource = 'api-user';
+                    return sortStoriesNewestFirst(byHandle.stories);
+                }
+            }
             const allGroups = await fetchFollowedUsersStoryGroups(viewerUserId, followedUserHandles);
             const targetGroup = allGroups.find((group) => group.userId === targetUserId);
             lastStoriesLoadSource = 'api-user';
@@ -917,11 +938,12 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
             if (rawStories.length === 0) return null;
             const stories = rawStories.map((story: any) => mapLaravelStoryToStory(story));
             lastStoriesLoadSource = 'api-user';
+            const handle = (stories[0].userHandle || userHandle || '').trim();
             return {
                 userId: stories[0].userId,
-                userHandle: stories[0].userHandle,
-                name: stories[0].userHandle.split('@')[0],
-                avatarUrl: storyAvatarUrl(stories[0]) || getAvatarForHandle(stories[0].userHandle),
+                userHandle: handle,
+                name: handle.split('@')[0] || 'User',
+                avatarUrl: storyAvatarUrl(stories[0]) || getAvatarForHandle(handle),
                 stories: sortStoriesNewestFirst(stories),
             };
         } catch (error) {
@@ -1083,7 +1105,9 @@ export async function createStory(
             location: response.location || location || undefined,
             venue: response.venue || venue || undefined,
             videoPosterUrl:
-                resolveStoryMediaUrl(response.video_poster_url || videoPosterUrl) || undefined,
+                pickStoryPosterUri(response) ||
+                pickStoryPosterUri({ videoPosterUrl, video_poster_url: videoPosterUrl }) ||
+                undefined,
             audience: response.audience || audience || 'public',
             views: response.views_count || 0,
             viewerHandles: Array.isArray((response as any).viewer_handles)
@@ -1625,10 +1649,11 @@ export async function fetchFollowedUsersStoryGroups(
                 if (existing) {
                     existing.stories.push(story);
                 } else {
+                    const handle = (story.userHandle || '').trim() || story.userId || 'unknown';
                     byUser.set(story.userId, {
                         userId: story.userId,
-                        userHandle: story.userHandle,
-                        name: story.userHandle.split('@')[0],
+                        userHandle: handle,
+                        name: handle.split('@')[0] || 'User',
                         avatarUrl: storyAvatarUrl(story) || undefined,
                         stories: [story],
                     });

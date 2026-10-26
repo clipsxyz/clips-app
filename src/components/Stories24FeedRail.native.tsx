@@ -20,6 +20,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import CachedImage from './CachedImage.native';
 import LinearGradient from 'react-native-linear-gradient';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
 import FeedPlusIcon from './FeedPlusIcon.native';
 import Avatar from './Avatar.native';
@@ -93,6 +94,14 @@ type Props = {
     onCollapseHandled?: () => void;
 };
 
+function usableRailStill(uri?: string): string | undefined {
+    const raw = (uri || '').trim();
+    if (!raw || raw.startsWith('#')) return undefined;
+    if (/^(file:|content:|blob:|ph:)/i.test(raw)) return undefined;
+    if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(raw)) return undefined;
+    return resolvePublicMediaUrl(raw) || raw;
+}
+
 function StoryPreviewVideo({
     posterUri,
 }: {
@@ -102,8 +111,8 @@ function StoryPreviewVideo({
 }) {
     // Still-only rail thumbs. Android TextureView ignores overflow clipping and bleeds into
     // the feed; motion plays in the fullscreen story viewer instead.
-    const posterSource =
-        posterUri && !posterUri.startsWith('#') ? { uri: posterUri } : undefined;
+    const poster = usableRailStill(posterUri);
+    const posterSource = poster ? { uri: poster } : undefined;
 
     if (posterSource) {
         return (
@@ -190,6 +199,8 @@ function StoryCard({
         registerCardRef(handleKey, node);
     };
 
+    const stillUri = usableRailStill(item.thumb);
+
     if (isAddYours) {
         return (
             <View ref={setCardRef} collapsable={false} style={morphHidden ? styles.cardMorphHidden : undefined}>
@@ -223,12 +234,12 @@ function StoryCard({
                 {item.previewVideoUrl ? (
                     <StoryPreviewVideo
                         uri={item.previewVideoUrl}
-                        posterUri={item.thumb}
+                        posterUri={stillUri}
                         paused={previewVideosPaused || !playPreviewVideo}
                     />
-                ) : item.thumb ? (
+                ) : stillUri ? (
                     <CachedImage
-                        source={{ uri: item.thumb }}
+                        source={{ uri: stillUri }}
                         style={StyleSheet.absoluteFill}
                         resizeMode="cover"
                         pointerEvents="none"

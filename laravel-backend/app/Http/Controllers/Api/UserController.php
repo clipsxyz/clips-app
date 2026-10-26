@@ -66,13 +66,19 @@ class UserController extends Controller
 
         $page = $this->paginateProfilePosts($request, $user, $viewer instanceof User ? $viewer : null);
 
-        if ($viewer instanceof User && $viewer->id !== $user->id) {
+        // Pagination reuses this endpoint with postsCursor — do not count those as visits.
+        $isInitialProfileOpen = !$request->filled('postsCursor');
+        if ($isInitialProfileOpen && $viewer instanceof User && $viewer->id !== $user->id) {
             $sourcePostId = (string) $request->get('sourcePostId', '');
-            BoostAnalyticsService::recordProfileVisitForUser(
-                (string) $user->id,
-                (string) $viewer->id,
-                Str::isUuid($sourcePostId) ? $sourcePostId : null
-            );
+            try {
+                BoostAnalyticsService::recordProfileVisitForUser(
+                    (string) $user->id,
+                    (string) $viewer->id,
+                    Str::isUuid($sourcePostId) ? $sourcePostId : null
+                );
+            } catch (\Throwable $e) {
+                \Log::warning('profile visit analytics skipped', ['error' => $e->getMessage()]);
+            }
         }
 
         $userData = $user->toApiArray();

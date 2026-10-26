@@ -111,11 +111,14 @@ class StoryControllerTest extends TestCase
             ]);
 
         $response->assertStatus(201);
+        // file:// stills only exist on the uploader's phone — persist/return null so
+        // other devices don't get a black Stories 24 tile.
         $this->assertDatabaseHas('stories', [
             'user_id' => $user->id,
             'media_type' => 'video',
-            'video_poster_url' => 'file:///data/user/0/com.clipsapp/cache/poster.jpg',
+            'video_poster_url' => null,
         ]);
+        $this->assertNull($response->json('video_poster_url'));
     }
 
     public function test_cannot_create_empty_story(): void
@@ -354,6 +357,27 @@ class StoryControllerTest extends TestCase
         $response = $this->actingAs($viewer, 'sanctum')->getJson('/api/stories/paged?filter=Ireland');
         $response->assertStatus(200);
         $this->assertNotContains($story->id, array_column($response->json('items'), 'id'));
+    }
+
+    public function test_story_media_urls_rewrite_localhost_onto_the_request_host(): void
+    {
+        $user = User::factory()->create();
+        Story::factory()->forUser($user)->create([
+            'media_type' => 'video',
+            'media_url' => 'http://localhost:8000/storage/uploads/clip.mp4',
+            'video_poster_url' => 'http://localhost:8000/storage/uploads/clip.jpg',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $handle = rawurlencode($user->handle);
+        $response = $this->actingAs($user, 'sanctum')->getJson(
+            "http://192.168.1.13:8000/api/stories/user/{$handle}",
+        );
+
+        $response->assertStatus(200);
+        $story = $response->json('0');
+        $this->assertSame('http://192.168.1.13:8000/storage/uploads/clip.mp4', $story['media_url'] ?? null);
+        $this->assertSame('http://192.168.1.13:8000/storage/uploads/clip.jpg', $story['video_poster_url'] ?? null);
     }
 }
 

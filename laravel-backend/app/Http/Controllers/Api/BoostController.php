@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Boost;
 use App\Models\BoostAnalyticsEvent;
+use App\Models\Post;
 use App\Models\User;
+use App\Services\BoostAnalyticsService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -411,21 +413,35 @@ class BoostController extends Controller
             ->orderByDesc('activated_at')
             ->first();
 
-        if (!$boost) {
-            return response()->json([
-                'hasBoost' => false,
-                'isActive' => false,
-                'postId' => $postId,
-                'range' => $range,
-                'analytics' => null,
-            ]);
-        }
-
         $fromTs = null;
         if ($range === '24h') {
             $fromTs = now()->subDay();
         } elseif ($range === '7d') {
             $fromTs = now()->subDays(7);
+        }
+
+        if (!$boost) {
+            $post = Post::where('id', $postId)->where('user_id', $viewer->id)->first();
+            $profileVisits = BoostAnalyticsService::profileVisitCountForUser((string) $viewer->id, $fromTs);
+            return response()->json([
+                'hasBoost' => false,
+                'isActive' => false,
+                'postId' => $postId,
+                'range' => $range,
+                'spendEur' => 0,
+                'analytics' => $post ? [
+                    'impressions' => (int) ($post->views_count ?? 0),
+                    'likes' => (int) ($post->likes_count ?? 0),
+                    'comments' => (int) ($post->comments_count ?? 0),
+                    'shares' => (int) ($post->shares_count ?? 0),
+                    'profileVisits' => $profileVisits,
+                    'messageStarts' => 0,
+                    'costPerProfileVisit' => null,
+                    'costPerMessageStart' => null,
+                    'trend' => ['impressions' => []],
+                    'sourceMatchedEventsCount' => 0,
+                ] : null,
+            ]);
         }
 
         $eventsQuery = BoostAnalyticsEvent::query()->where('boost_id', $boost->id);
@@ -453,7 +469,10 @@ class BoostController extends Controller
         $likes = $events->isEmpty() && $range === 'all' ? (int) ($boost->likes_count ?? 0) : (int) $counts['like'];
         $comments = $events->isEmpty() && $range === 'all' ? (int) ($boost->comments_count ?? 0) : (int) $counts['comment'];
         $shares = $events->isEmpty() && $range === 'all' ? (int) ($boost->shares_count ?? 0) : (int) $counts['share'];
-        $profileVisits = (int) $counts['profile_visit'];
+        $profileVisits = max(
+            (int) $counts['profile_visit'],
+            BoostAnalyticsService::profileVisitCountForUser((string) $viewer->id, $fromTs)
+        );
         $messagesStarted = (int) $counts['message_start'];
 
         // Build simple trend buckets for sparkline-like UI.

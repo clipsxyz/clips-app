@@ -153,4 +153,35 @@ describe('mapLaravelStoryToStory shared-post fields', () => {
         expect(fromPath.mediaUrl).toBe('/storage/stories/debs-upload.mp4');
         expect(fromPath.mediaType).toBe('video');
     });
+
+    it('maps poster aliases and drops device-local file:// stills', () => {
+        expect(
+            mapLaravelStoryToStory({
+                ...base,
+                media_type: 'video',
+                media_url: 'https://cdn.example.com/clip.mp4',
+                thumbnail_url: 'https://cdn.example.com/still.jpg',
+            }).videoPosterUrl,
+        ).toBe('https://cdn.example.com/still.jpg');
+
+        expect(
+            mapLaravelStoryToStory({
+                ...base,
+                media_type: 'video',
+                media_url: 'https://cdn.example.com/clip.mp4',
+                video_poster_url: 'file:///data/user/0/com.clipsapp/cache/poster.jpg',
+            }).videoPosterUrl,
+        ).toBeUndefined();
+    });
+
+    it('reads user handle from the nested user relation', () => {
+        const story = mapLaravelStoryToStory({
+            id: 's2',
+            user_id: 'u2',
+            user: { id: 'u2', handle: 'Debs@Manchester' },
+            media_url: 'https://cdn.example.com/clip.mp4',
+            media_type: 'video',
+        });
+        expect(story.userHandle).toBe('Debs@Manchester');
+    });
 });

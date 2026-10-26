@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\PublicMediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -159,6 +160,7 @@ class UploadController extends Controller
         } catch (\Throwable $e) {
             $fileUrl = url('/storage/uploads/' . $filename);
         }
+        $fileUrl = PublicMediaUrl::forClient($fileUrl) ?: $fileUrl;
 
         return response()->json([
             'success' => true,
@@ -224,6 +226,7 @@ class UploadController extends Controller
             } catch (\Exception $e) {
                 $fileUrl = url('/storage/' . $path);
             }
+            $fileUrl = PublicMediaUrl::forClient($fileUrl) ?: $fileUrl;
 
             $uploadedFiles[] = [
                 'fileUrl' => $fileUrl,

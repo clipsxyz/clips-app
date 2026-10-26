@@ -58,6 +58,7 @@ import {
     persistStories24RailReturn,
     readStories24RailOpenHandle,
 } from '../utils/stories24Rail';
+import { storyHasRenderableMedia } from '../utils/storyMediaNative';
 import { isGazetteerWorldGroup, withGazetteerWorldGroup } from '../utils/gazetteerWorldStories';
 import { isStoryVideo, resolveStoryVideoPlaybackUrl } from '../utils/storyMediaNative';
 import {
@@ -575,13 +576,25 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
 
         const followedUserHandles = await getFollowedUsers(user.id);
-        const fetchedStories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
-        // The followed-users feed (`/stories/paged`) can omit an author we just opened directly
-        // (e.g. a profile/"View stories" tap for someone not yet reflected server-side). In that
-        // case fall back to the group's own playlist, which came from the server-scoped
-        // `/stories/user/{handle}` lookup, so we don't stall on the loading overlay.
+        const fetchedStories = await fetchUserStories(
+            user.id,
+            group.userId,
+            followedUserHandles || [],
+            group.userHandle,
+        );
+        // Prefer the handle-scoped playlist when it has real media. `/stories/paged` can
+        // return the same ids with empty/unusable URIs (device file:// posters, missing
+        // media_url), which previously replaced a playable group with a black viewer.
+        const fetchedRenderable = (fetchedStories || []).filter(storyHasRenderableMedia);
+        const groupRenderable = (group.stories || []).filter(storyHasRenderableMedia);
         const stories =
-            fetchedStories && fetchedStories.length > 0 ? fetchedStories : group.stories || [];
+            fetchedRenderable.length > 0
+                ? fetchedStories
+                : groupRenderable.length > 0
+                  ? group.stories
+                  : fetchedStories && fetchedStories.length > 0
+                    ? fetchedStories
+                    : group.stories || [];
         if (!stories || stories.length === 0) return;
 
         const groupIndex = storyGroups.findIndex(g => g.userId === group.userId);

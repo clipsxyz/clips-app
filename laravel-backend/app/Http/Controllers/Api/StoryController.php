@@ -11,6 +11,8 @@ use App\Models\User;
 use App\Models\Post;
 use App\Services\LinkPreviewService;
 use App\Services\StoryService;
+use App\Services\VideoThumbnailService;
+use App\Support\PublicMediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -81,20 +83,7 @@ class StoryController extends Controller
             ->get();
 
         $items = $stories->map(function ($story) use ($hasViewer) {
-            $storyData = $story->toArray();
-            if ($hasViewer) {
-                $attrs = $story->getAttributes();
-                $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                    ? (bool) $attrs['has_viewed']
-                    : false;
-                $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                    ? optional($story->reactions->first())->emoji
-                    : null;
-            } else {
-                $storyData['has_viewed'] = false;
-                $storyData['user_reaction'] = null;
-            }
-            return $storyData;
+            return $this->presentStory($story, $hasViewer);
         })->values();
 
         $lastStory = $stories->last();
@@ -156,20 +145,7 @@ class StoryController extends Controller
                 'avatar_url' => $user?->avatar_url,
                 'latest_created_at' => $latestAt ? Carbon::parse($latestAt)->toISOString() : null,
                 'stories' => $ordered->map(function ($story) use ($hasViewer) {
-                    $storyData = $story->toArray();
-                    if ($hasViewer) {
-                        $attrs = $story->getAttributes();
-                        $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                            ? (bool) $attrs['has_viewed']
-                            : false;
-                        $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                            ? optional($story->reactions->first())->emoji
-                            : null;
-                    } else {
-                        $storyData['has_viewed'] = false;
-                        $storyData['user_reaction'] = null;
-                    }
-                    return $storyData;
+                    return $this->presentStory($story, $hasViewer);
                 })->values(),
             ];
         });
@@ -222,20 +198,7 @@ class StoryController extends Controller
         $stories = $query->get();
 
         $transformedStories = $stories->map(function ($story) use ($hasViewer) {
-            $storyData = $story->toArray();
-            if ($hasViewer) {
-                $attrs = $story->getAttributes();
-                $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                    ? (bool) $attrs['has_viewed']
-                    : false;
-                $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                    ? optional($story->reactions->first())->emoji
-                    : null;
-            } else {
-                $storyData['has_viewed'] = false;
-                $storyData['user_reaction'] = null;
-            }
-            return $storyData;
+            return $this->presentStory($story, $hasViewer);
         });
 
         return response()->json($transformedStories);
@@ -355,7 +318,7 @@ class StoryController extends Controller
             return $story;
         });
 
-        return response()->json($story, 201);
+        return response()->json($this->presentStory($story, false), 201);
     }
 
     /**
@@ -498,6 +461,90 @@ class StoryController extends Controller
         }
 
         return ['created_at' => $createdAt, 'id' => $id];
+    }
+
+    /**
+     * Client payload: public media URLs, no device-local file:// posters, viewer flags.
+     *
+     * @return array<string, mixed>
+     */
+    private function presentStory(Story $story, bool $hasViewer): array
+    {
+        $this->ensureStoryPublicMedia($story);
+
+        $storyData = $story->toArray();
+        $storyData['media_url'] = $this->publicMediaUrl($story->media_url);
+        $storyData['video_poster_url'] = $this->publicMediaUrl($story->video_poster_url);
+        if (empty($storyData['user_handle']) && $story->relationLoaded('user')) {
+            $storyData['user_handle'] = $story->user?->handle;
+        }
+
+        if ($hasViewer) {
+            $attrs = $story->getAttributes();
+            $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
+                ? (bool) $attrs['has_viewed']
+                : false;
+            $storyData['user_reaction'] = $story->relationLoaded('reactions')
+                ? optional($story->reactions->first())->emoji
+                : null;
+        } else {
+            $storyData['has_viewed'] = false;
+            $storyData['user_reaction'] = null;
+        }
+
+        return $storyData;
+    }
+
+    private function ensureStoryPublicMedia(Story $story): void
+    {
+        $dirty = false;
+        if ($this->isDeviceLocalUri($story->video_poster_url)) {
+            $story->video_poster_url = null;
+            $dirty = true;
+        }
+        if ($this->isDeviceLocalUri($story->media_url)) {
+            $story->media_url = null;
+            $dirty = true;
+        }
+        if ($dirty) {
+            $story->save();
+        }
+
+        $isVideo = ($story->media_type === 'video')
+            || (is_string($story->media_url) && preg_match('/\.(mp4|mov|m4v|webm)(\?|$)/i', $story->media_url));
+        if (! $isVideo) {
+            return;
+        }
+
+        $poster = is_string($story->video_poster_url) ? trim($story->video_poster_url) : '';
+        if ($poster !== '' && preg_match('#^https?://#i', $poster)) {
+            return;
+        }
+
+        app(VideoThumbnailService::class)->ensureForStory($story);
+        $story->refresh();
+    }
+
+    private function isDeviceLocalUri(?string $url): bool
+    {
+        $raw = strtolower(trim((string) $url));
+        if ($raw === '') {
+            return false;
+        }
+
+        return str_starts_with($raw, 'file:')
+            || str_starts_with($raw, 'content:')
+            || str_starts_with($raw, 'blob:')
+            || str_starts_with($raw, 'ph:');
+    }
+
+    private function publicMediaUrl(?string $url): ?string
+    {
+        if ($this->isDeviceLocalUri($url)) {
+            return null;
+        }
+
+        return PublicMediaUrl::forClient($url);
     }
 
     private function encodeStoryCursor($createdAt, string $id): string

@@ -1,6 +1,7 @@
 import type { ImageSourcePropType } from 'react-native';
 import type { Post, Story } from '../types';
-import { getReactNativeDefaultApiBaseUrl, isReactNativeRuntime } from '../config/runtimeEnv';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
+import { isReactNativeRuntime } from '../config/runtimeEnv';
 import {
     isMockDemoVideoPath,
     mockFeedVideoSource,
@@ -61,6 +62,45 @@ export function pickStoryMediaUri(
     return resolveStoryMediaUrl(coerceStoryStoragePath(picked)) || picked;
 }
 
+/**
+ * Still frame for rail tiles / TextureView cover. Skip device-local URIs — those only
+ * exist on the uploader's phone and paint blank tiles for everyone else.
+ */
+export function pickStoryPosterUri(
+    story?: Partial<Story> | Record<string, unknown> | null,
+): string | undefined {
+    if (!story) return undefined;
+    const raw = story as Record<string, unknown>;
+    const picked = firstMediaCandidate(
+        raw.videoPosterUrl,
+        raw.video_poster_url,
+        raw.posterUrl,
+        raw.poster_url,
+        raw.thumbnailUrl,
+        raw.thumbnail_url,
+        raw.poster,
+    );
+    if (!picked || isVideoUrl(picked)) return undefined;
+    const resolved = resolveStoryMediaUrl(coerceStoryStoragePath(picked)) || picked;
+    if (/^(file:|content:|blob:|ph:)/i.test(resolved)) return undefined;
+    return resolved;
+}
+
+/** True when the viewer/rail can paint something besides a black surface. */
+export function storyHasRenderableMedia(
+    story?: Partial<Story> | Record<string, unknown> | null,
+): boolean {
+    if (!story) return false;
+    const raw = story as Record<string, unknown>;
+    if (pickStoryMediaUri(story) || pickStoryPosterUri(story)) return true;
+    if (raw.sharedFromPost || raw.shared_from_post_id) return true;
+    const text = typeof raw.text === 'string' ? raw.text : typeof raw.text_content === 'string' ? raw.text_content : '';
+    if (text.trim()) return true;
+    if (raw.poll || raw.question) return true;
+    const stickers = raw.stickers;
+    return Array.isArray(stickers) && stickers.length > 0;
+}
+
 /** Pull `/demo-videos/...` path out of absolute or relative URLs. */
 function demoVideoPathFromUrl(url: string): string | undefined {
     const trimmed = url.trim();
@@ -77,44 +117,17 @@ function demoVideoPathFromUrl(url: string): string | undefined {
 export function resolveStoryMediaUrl(url?: string | null): string | undefined {
     const raw = (url || '').trim();
     if (!raw) return undefined;
-    if (!isReactNativeRuntime()) return raw;
 
     // Keep demo slots as relative paths so mockFeedVideoSource can map to the bundle.
     if (demoVideoPathFromUrl(raw) || isMockDemoVideoPath(raw)) {
         return demoVideoPathFromUrl(raw) || raw;
     }
 
-    const apiBase = getReactNativeDefaultApiBaseUrl();
-    if (!apiBase) return raw;
+    if (/^(data:|file:|content:|ph:)/i.test(raw)) return raw;
+    if (!isReactNativeRuntime()) return raw;
 
-    try {
-        const api = new URL(apiBase);
-        const apiOrigin = `${api.protocol}//${api.host}`;
-
-        if (raw.startsWith('/')) {
-            return `${apiOrigin}${raw}`;
-        }
-
-        if (
-            !/^https?:\/\//i.test(raw) &&
-            !/^data:/i.test(raw) &&
-            !/^file:\/\//i.test(raw) &&
-            !/^content:\/\//i.test(raw)
-        ) {
-            return `${apiOrigin}/${raw.replace(/^\/+/, '')}`;
-        }
-
-        const parsed = new URL(raw);
-        if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-            parsed.protocol = api.protocol;
-            parsed.hostname = api.hostname;
-            parsed.port = api.port;
-            return parsed.toString();
-        }
-    } catch {
-        // keep as-is
-    }
-    return raw;
+    // Same host remap as feed posts (last-good API origin), not Metro's default host.
+    return resolvePublicMediaUrl(raw) || raw;
 }
 
 /** RN story video playback URL string (for rail previews / legacy callers). */

@@ -10102,9 +10102,12 @@ function BoostPageWrapper() {
   }
 
   return (
-    <div className="flex flex-col min-h-0 flex-1 pb-2">
+    <div
+      className="flex flex-col min-h-0 flex-1 pb-2"
+      style={{ background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)', backgroundColor: '#000000' }}
+    >
       {/* Pinned header â€“ posts scroll underneath (z-30 above card overlays) */}
-      <div className="sticky top-0 z-30 isolate shrink-0 px-3 py-3 bg-[#030712] border-b border-gray-800/50 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.3)]">
+      <div className="sticky top-0 z-30 isolate shrink-0 px-3 py-3 bg-transparent border-b border-white/10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.3)]">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people.</p>
         <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">

@@ -8,6 +8,7 @@ import {
     getStoryVideoPosterSource,
     isStoryVideo,
     pickStoryMediaUri,
+    pickStoryPosterUri,
     resolveStoryMediaUrl,
     storyVideoSource,
 } from '../../utils/storyMediaNative';
@@ -24,7 +25,7 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
     const text = getStoryTextContent(story);
     const mediaUri = pickStoryMediaUri(story) || story.mediaUrl;
     const videoSource = storyVideoSource(mediaUri);
-    const stillUri = resolveStoryMediaUrl(story.videoPosterUrl);
+    const stillUri = pickStoryPosterUri(story) || resolveStoryMediaUrl(story.videoPosterUrl);
     const posterSource =
         (stillUri ? { uri: stillUri } : undefined) || getStoryVideoPosterSource(mediaUri);
     const posterUri = stillUri || getStoryVideoPosterFallback(mediaUri);

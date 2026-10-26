@@ -4,6 +4,9 @@ import { getFollowedUsers, posts as localPosts } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
 import {
+    isVideoUrl,
+    pickStoryMediaUri,
+    pickStoryPosterUri,
     resolveStoryMediaUrl,
     resolveStoryVideoPlaybackUrl,
 } from './storyMediaNative';
@@ -171,7 +174,7 @@ export async function buildStories24RailItems(
         const latest = sortedStories[0];
         if (!latest) continue;
 
-        const latestMediaUrl = resolveStoryMediaUrl(latest.mediaUrl);
+        const latestMediaUrl = pickStoryMediaUri(latest) || resolveStoryMediaUrl(latest.mediaUrl);
         const latestMediaType = latest.mediaType;
         const firstImage = resolveStoryMediaUrl(
             sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl,
@@ -185,11 +188,14 @@ export async function buildStories24RailItems(
             if (!raw || raw === 'public' || raw === 'close_friends' || raw === 'only_me') {
                 return undefined;
             }
-            if (!/^https?:\/\//i.test(raw) && !raw.startsWith('/')) return undefined;
-            return resolveStoryMediaUrl(raw);
+            if (isVideoUrl(raw) || /^(file:|content:|blob:|ph:)/i.test(raw)) return undefined;
+            const resolved = resolveStoryMediaUrl(raw);
+            if (!resolved || isVideoUrl(resolved)) return undefined;
+            if (!/^https?:\/\//i.test(resolved) && !resolved.startsWith('/')) return undefined;
+            return resolved;
         };
         const sharedPoster =
-            usablePoster(latest.videoPosterUrl) ||
+            usablePoster(pickStoryPosterUri(latest) || latest.videoPosterUrl) ||
             usablePoster(sharedPost?.videoPosterUrl) ||
             usablePoster(
                 sharedPost?.mediaItems?.find((m) => m?.type === 'video' && m.posterUrl)?.posterUrl,
@@ -198,8 +204,8 @@ export async function buildStories24RailItems(
                 sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url)?.url,
             );
         const previewVideoUrl =
-            latestMediaType === 'video'
-                ? resolveStoryVideoPlaybackUrl(latest.mediaUrl)
+            latestMediaType === 'video' || isVideoUrl(latestMediaUrl)
+                ? resolveStoryVideoPlaybackUrl(latestMediaUrl)
                 : sharedPost?.mediaType === 'video'
                   ? resolveStoryVideoPlaybackUrl(sharedPost.mediaUrl)
                   : undefined;
@@ -215,9 +221,11 @@ export async function buildStories24RailItems(
         // Prefer real story/post stills. Never use profile avatars as video thumbs — on press
         // the rail pauses previews and would flash the avatar instead of the shared clip.
         let thumb =
-            firstImage ||
             sharedPoster ||
-            (latestMediaType !== 'video' && !previewVideoUrl ? latestMediaUrl : undefined);
+            firstImage ||
+            (latestMediaType !== 'video' && !previewVideoUrl && !isVideoUrl(latestMediaUrl)
+                ? latestMediaUrl
+                : undefined);
         if (thumb && avatarUrl && thumb === avatarUrl) {
             thumb = undefined;
         }

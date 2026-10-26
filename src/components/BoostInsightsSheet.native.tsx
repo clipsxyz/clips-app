@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-    Image,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -8,11 +7,23 @@ import {
 } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import type { Post } from '../types';
 import { getBoostAnalytics, type BoostAnalytics } from '../api/boost';
-import { buildInstantAnalytics } from '../utils/boostInsightsNative';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
-import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
+import {
+    buildInstantAnalytics,
+    mergeBoostAnalytics,
+    resolveBoostInsightsPreview,
+} from '../utils/boostInsightsNative';
+import GazetteerBottomSheetModal from './GazetteerBottomSheetModal.native';
+import CachedImage from './CachedImage.native';
+import {
+    SCREEN_CANVAS_BASE,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import { getQualityLabel, getQualityReason, estimateReachTeaser } from '../utils/boostPostGrid';
 
 type Props = {
@@ -39,25 +50,30 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
 
     useEffect(() => {
         if (!sheetOpen || !post) return;
-        setData(buildInstantAnalytics(post));
+        setData(buildInstantAnalytics(post, range));
         setLoading(true);
         let cancelled = false;
         void getBoostAnalytics(post.id, range)
             .then((analytics) => {
-                if (!cancelled) setData(analytics);
+                if (!cancelled) setData(mergeBoostAnalytics(post, analytics, range));
             })
-            .catch(() => {})
+            .catch(() => {
+                if (!cancelled) setData(buildInstantAnalytics(post, range));
+            })
             .finally(() => {
                 if (!cancelled) setLoading(false);
             });
         return () => {
             cancelled = true;
         };
-    }, [sheetOpen, post?.id, range]);
+    }, [sheetOpen, post, range]);
+
+    const preview = useMemo(() => (post ? resolveBoostInsightsPreview(post) : null), [post]);
+    const resolved = data ?? (post ? buildInstantAnalytics(post, range) : null);
 
     if (!post) return null;
 
-    const analytics = data?.analytics;
+    const analytics = resolved?.analytics;
     const metrics = {
         impressions: analytics?.impressions ?? 0,
         likes: analytics?.likes ?? 0,
@@ -67,17 +83,14 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
         messageStarts: analytics?.messageStarts ?? 0,
     };
     const spend =
-        typeof data?.spendEur === 'number' ? `EUR ${data.spendEur.toFixed(2)}` : 'EUR 0.00';
+        typeof resolved?.spendEur === 'number' ? `EUR ${resolved.spendEur.toFixed(2)}` : 'EUR 0.00';
     const trendValues =
         analytics?.trend?.impressions?.map((t: { value: number }) => Number(t.value) || 0) ?? [];
     const trendSpark = sparkline(trendValues);
     const quality = getQualityLabel(post);
-
-    const firstMedia =
-        post.mediaItems?.find((m) => (m.type === 'image' || m.type === 'video') && m.url) ??
-        post.mediaItems?.[0];
-    const previewUrl = firstMedia?.url || post.mediaUrl || '';
-    const previewText = (post.text || post.caption || post.imageText || '').trim();
+    const stillLooksLikeVideo =
+        !!preview?.uri && /\.(mp4|mov|webm|m3u8)(\?|$)/i.test(preview.uri);
+    const thumbUri = stillLooksLikeVideo ? undefined : preview?.uri;
 
     return (
         <GazetteerBottomSheetModal
@@ -85,8 +98,8 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
             onDismiss={onClose}
             snapPoints={['88%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
+            backgroundStyle={styles.sheetBg}
+            handleIndicatorStyle={styles.handle}
             backdropOpacity={0.65}
         >
             {/*
@@ -94,6 +107,14 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
               scroll content — avoids title/X painting over the selected post card.
             */}
             <View style={styles.body}>
+                <LinearGradient
+                    colors={[...UEFA_PASSPORT_GRADIENT]}
+                    locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                />
                 <View style={styles.chrome}>
                     <View style={styles.header}>
                         <Text style={styles.title}>Boost insights</Text>
@@ -104,15 +125,32 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
 
                     <View style={styles.previewCard}>
                         <View style={styles.previewThumb}>
-                            {previewUrl ? (
-                                <Image source={{ uri: previewUrl }} style={styles.previewImg} />
-                            ) : previewText ? (
+                            {preview?.textOnly && preview.text ? (
                                 <Text style={styles.previewText} numberOfLines={3}>
-                                    {previewText}
+                                    {preview.text}
+                                </Text>
+                            ) : thumbUri ? (
+                                <CachedImage
+                                    source={{ uri: thumbUri }}
+                                    style={styles.previewImg}
+                                    resizeMode="cover"
+                                />
+                            ) : preview?.text ? (
+                                <Text style={styles.previewText} numberOfLines={3}>
+                                    {preview.text}
                                 </Text>
                             ) : (
-                                <Text style={styles.previewText}>POST</Text>
+                                <Icon
+                                    name={preview?.isVideo ? 'play' : 'image-outline'}
+                                    size={18}
+                                    color={UCL_TEXT_PRIMARY}
+                                />
                             )}
+                            {preview?.isVideo && !preview.textOnly ? (
+                                <View style={styles.playBadge} pointerEvents="none">
+                                    <Icon name="play" size={10} color="#FFFFFF" />
+                                </View>
+                            ) : null}
                         </View>
                         <View style={styles.previewMeta}>
                             <Text style={styles.previewLabel}>Selected post</Text>
@@ -140,16 +178,16 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
                         <Text
                             style={[
                                 styles.statusPill,
-                                data?.isActive ? styles.statusActive : styles.statusEnded,
+                                resolved?.isActive ? styles.statusActive : styles.statusEnded,
                             ]}
                         >
-                            {data?.hasBoost
-                                ? data.isActive
+                            {resolved?.hasBoost
+                                ? resolved.isActive
                                     ? 'Active boost'
                                     : 'Boost ended'
                                 : 'No boost record yet'}
                         </Text>
-                        {(data?.analytics?.sourceMatchedEventsCount ?? 0) > 0 ? (
+                        {(resolved?.analytics?.sourceMatchedEventsCount ?? 0) > 0 ? (
                             <Text style={styles.matchedPill}>Source matched</Text>
                         ) : null}
                     </View>
@@ -200,8 +238,24 @@ function MetricRow({
 }
 
 const styles = StyleSheet.create({
+    sheetBg: {
+        backgroundColor: SCREEN_CANVAS_BASE,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    handle: {
+        width: 40,
+        backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    },
     body: {
         flex: 1,
+        backgroundColor: 'transparent',
+        overflow: 'hidden',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
     },
     chrome: {
         zIndex: 2,
@@ -251,17 +305,28 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     previewThumb: {
-        width: 48,
-        height: 48,
+        width: 52,
+        height: 52,
         borderRadius: 12,
-        backgroundColor: '#1f2937',
+        backgroundColor: '#111111',
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 4,
+        position: 'relative',
     },
-    previewImg: { width: '100%', height: '100%' },
-    previewText: { color: UCL_TEXT_PRIMARY, fontSize: 9, textAlign: 'center' },
+    previewImg: { ...StyleSheet.absoluteFill },
+    previewText: { color: UCL_TEXT_PRIMARY, fontSize: 9, textAlign: 'center', paddingHorizontal: 4 },
+    playBadge: {
+        position: 'absolute',
+        right: 3,
+        bottom: 3,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     previewMeta: { flex: 1, minWidth: 0 },
     previewLabel: {
         fontSize: 10,

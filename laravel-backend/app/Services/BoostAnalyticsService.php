@@ -6,6 +6,10 @@ use App\Models\Boost;
 use App\Models\BoostAnalyticsEvent;
 use App\Models\Message;
 use App\Models\Post;
+use App\Models\ProfileVisitEvent;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 class BoostAnalyticsService
 {
@@ -55,7 +59,8 @@ class BoostAnalyticsService
     }
 
     /**
-     * Record a profile visit against the most recent active boost of the profile owner.
+     * Record a profile visit. Always stored for the owner (organic), and also
+     * attributed to an active boost when one exists.
      */
     public static function recordProfileVisitForUser(string $profileOwnerUserId, ?string $actorUserId, ?string $sourcePostId = null): bool
     {
@@ -80,18 +85,78 @@ class BoostAnalyticsService
                 ->first();
         }
 
-        if (!$boost) {
-            return false;
+        $attribution = $boost
+            ? ($usedSourceContext ? 'source_post' : 'fallback_active_boost')
+            : 'organic';
+
+        $alreadyToday = false;
+        if ($actorUserId && self::profileVisitTableReady()) {
+            try {
+                $alreadyToday = ProfileVisitEvent::query()
+                    ->where('profile_user_id', $profileOwnerUserId)
+                    ->where('actor_user_id', $actorUserId)
+                    ->where('created_at', '>=', now()->startOfDay())
+                    ->exists();
+            } catch (Throwable $e) {
+                Log::warning('profile_visit_events lookup skipped', ['error' => $e->getMessage()]);
+                $alreadyToday = false;
+            }
         }
 
-        self::recordEvent(
-            $boost->id,
-            $boost->post_id,
-            'profile_visit',
-            $actorUserId,
-            $usedSourceContext ? 'source_post' : 'fallback_active_boost'
-        );
-        return true;
+        if (!$alreadyToday && self::profileVisitTableReady()) {
+            try {
+                ProfileVisitEvent::create([
+                    'profile_user_id' => $profileOwnerUserId,
+                    'actor_user_id' => $actorUserId,
+                    'source_post_id' => $sourcePostId ?: null,
+                    'boost_id' => $boost?->id,
+                    'attribution_context' => $attribution,
+                ]);
+            } catch (Throwable $e) {
+                Log::warning('profile_visit_events insert skipped', ['error' => $e->getMessage()]);
+            }
+        }
+
+        if ($boost) {
+            self::recordEvent(
+                $boost->id,
+                $boost->post_id,
+                'profile_visit',
+                $actorUserId,
+                $attribution
+            );
+        }
+
+        return !$alreadyToday || $boost !== null;
+    }
+
+    public static function profileVisitCountForUser(string $profileOwnerUserId, $fromTs = null): int
+    {
+        if (!self::profileVisitTableReady()) {
+            return 0;
+        }
+
+        try {
+            $query = ProfileVisitEvent::query()->where('profile_user_id', $profileOwnerUserId);
+            if ($fromTs) {
+                $query->where('created_at', '>=', $fromTs);
+            }
+
+            return (int) $query->count();
+        } catch (Throwable $e) {
+            Log::warning('profile_visit_events count skipped', ['error' => $e->getMessage()]);
+
+            return 0;
+        }
+    }
+
+    private static function profileVisitTableReady(): bool
+    {
+        try {
+            return Schema::hasTable('profile_visit_events');
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     /**

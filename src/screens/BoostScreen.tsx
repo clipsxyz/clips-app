@@ -9,8 +9,16 @@ import {
     Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { chipActiveMagenta, chipActiveMagentaText, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import {
+    chipActiveMagenta,
+    chipActiveMagentaText,
+    gazetteerHeader,
+    SCREEN_CANVAS_BASE,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
@@ -26,6 +34,30 @@ import { ox } from '../constants/nativeOpticalScale';
 
 /** Minimum gap between silent focus-triggered refreshes (ms). Prevents API thrashing. */
 const SILENT_REFRESH_MS = 3000;
+
+function BoostCanvas({
+    children,
+    contentStyle,
+}: {
+    children: React.ReactNode;
+    contentStyle?: object;
+}) {
+    return (
+        <View style={styles.shell}>
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+            />
+            <GazetteerScreenShell ambient={false} style={styles.shellTransparent} contentStyle={contentStyle}>
+                {children}
+            </GazetteerScreenShell>
+        </View>
+    );
+}
 
 const BoostScreen: React.FC = ({ navigation }: any) => {
     const { user } = useAuth();
@@ -167,30 +199,30 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
 
     if (!user) {
         return (
-            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
+            <BoostCanvas contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>Please sign in to view your posts</Text>
-            </GazetteerScreenShell>
+            </BoostCanvas>
         );
     }
 
     if (loading) {
         return (
-            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
-                <ActivityIndicator size="large" color="#3d9b8f" />
-            </GazetteerScreenShell>
+            <BoostCanvas contentStyle={styles.centeredShell}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+            </BoostCanvas>
         );
     }
 
     if (error) {
         return (
-            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
+            <BoostCanvas contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>{error}</Text>
-            </GazetteerScreenShell>
+            </BoostCanvas>
         );
     }
 
     return (
-        <GazetteerScreenShell ambientVariant="passport">
+        <BoostCanvas>
             <View style={styles.header}>
                 <Text style={styles.title}>Your Posts</Text>
                 <Text style={styles.subtitle}>Boost your posts to reach more people</Text>
@@ -323,11 +355,19 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                     });
                 }}
             />
-        </GazetteerScreenShell>
+        </BoostCanvas>
     );
 };
 
 const styles = StyleSheet.create({
+    shell: {
+        flex: 1,
+        backgroundColor: SCREEN_CANVAS_BASE,
+    },
+    shellTransparent: {
+        flex: 1,
+        backgroundColor: 'transparent',
+    },
     centeredShell: {
         justifyContent: 'center',
         alignItems: 'center',

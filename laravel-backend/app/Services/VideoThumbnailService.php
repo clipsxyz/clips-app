@@ -3,12 +3,50 @@
 namespace App\Services;
 
 use App\Models\Post;
+use App\Models\Story;
 use App\Support\DominantColor;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class VideoThumbnailService
 {
+    /**
+     * Persist a public JPEG still on a video story so the Stories 24 rail is not a black tile.
+     * Device-local file:// posters from the uploader's phone are ignored.
+     */
+    public function ensureForStory(Story $story): ?string
+    {
+        $existing = is_string($story->video_poster_url) ? trim($story->video_poster_url) : '';
+        $existingUsable = $existing !== '' && preg_match('#^https?://#i', $existing);
+
+        if ($existingUsable && ! $this->isLikelyBlackImage($existing)) {
+            return $existing;
+        }
+
+        $source = is_string($story->media_url) ? $story->media_url : null;
+        if ($source === null || $source === '') {
+            return $existingUsable ? $existing : null;
+        }
+
+        $sibling = $this->siblingJpegUrl($source);
+        if ($sibling !== null && ! $this->isLikelyBlackImage($sibling)) {
+            $story->video_poster_url = $sibling;
+            $story->save();
+
+            return $sibling;
+        }
+
+        $url = $this->extractJpeg($source, 'story-'.$story->id);
+        if ($url === null) {
+            return $existingUsable ? $existing : null;
+        }
+
+        $story->video_poster_url = $url;
+        $story->save();
+
+        return $url;
+    }
+
     /**
      * Persist a JPEG poster on the post when one is missing.
      * Uses an existing poster URL when present; otherwise extracts a frame with FFmpeg.
