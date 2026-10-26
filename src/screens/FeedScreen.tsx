@@ -1806,8 +1806,8 @@ onBlock={onBlockUser}
         // Dimension-only updates MUST break the memo: a width/height/aspectRatio
         // arriving for the same post (or for the active carousel slide, via
         // mediaItemsEqual below) changes the card's height even when every
-        // engagement field is identical. Without these, `extraData` could signal
-        // the change and the comparator would still skip the re-render.
+        // engagement field is identical. `data` carries the new post object;
+        // without these checks the comparator would skip the re-render.
         a.width === b.width &&
         a.height === b.height &&
         a.aspectRatio === b.aspectRatio &&
@@ -4220,29 +4220,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     ]);
 
     /**
-     * FlatList `extraData` signature: row ids PLUS every post's intrinsic dims.
+     * FlatList `extraData` — primitives only.
      *
-     * `extraData` is the list's "the data didn't change identity but the cells must
-     * re-render anyway" signal. Encoding each post's width/height (and per-slide
-     * dims) means a dimension arriving or changing for one post re-renders its cell
-     * with the correct aspect box instead of letting a recycled landscape height
-     * bleed onto the following portrait rows. Keys stay per-post (`post:<id>` in
-     * keyExtractor), and there is deliberately NO getItemLayout: card heights are
-     * content-driven/dynamic, so a fixed layout map would snap offsets.
+     * Post identity and aspect boxes already travel through `data` (`flatForRender`)
+     * and `FeedCard`'s memo (width/height/mediaItems). Encoding every row's dims here
+     * rebuilt a giant string on each parent render and forced the list to treat
+     * dimension noise as a full extraData change. Keep this to cheap flags that
+     * are not in `data`: pending local uploads, pull-to-refresh, and focus.
      */
-    const feedExtraData = React.useMemo(() => {
-        const dims = flatForRender
-            .map((row) =>
-                row.kind === 'post'
-                    ? `${row.post.id}:${row.post.width ?? ''}x${row.post.height ?? ''}:` +
-                      (row.post.mediaItems ?? [])
-                          .map((i) => `${i.width ?? ''}x${i.height ?? ''}`)
-                          .join(',')
-                    : row.kind,
-            )
-            .join('|');
-        return `${pendingUploadTick}-${refreshing}-${isFeedFocused}-${dims}`;
-    }, [flatForRender, pendingUploadTick, refreshing, isFeedFocused]);
+    const feedExtraData = `${pendingUploadTick}-${Number(refreshing)}-${Number(isFeedFocused)}`;
 
     flatForRenderRef.current = flatForRender;
 
@@ -5477,7 +5463,7 @@ onVisitProfile={() =>
                     markFeedScrolling();
                 }}
                 scrollEventThrottle={32}
-                decelerationRate={Platform.OS === 'ios' ? 'normal' : 0.985}
+                decelerationRate={Platform.OS === 'ios' ? 'normal' : 0.992}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
