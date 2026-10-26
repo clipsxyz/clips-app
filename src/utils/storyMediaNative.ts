@@ -10,9 +10,55 @@ import {
 } from '../constants/mockFeedVideos';
 
 const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|heif)(\?|#|$)/i;
+const AUDIENCE_VALUES = new Set(['public', 'close_friends', 'only_me']);
 
 export function isVideoUrl(url?: string | null): boolean {
     return !!(url && VIDEO_EXT.test(url));
+}
+
+function firstMediaCandidate(...vals: unknown[]): string | undefined {
+    for (const v of vals) {
+        if (typeof v !== 'string') continue;
+        const s = v.trim();
+        if (!s || AUDIENCE_VALUES.has(s)) continue;
+        return s;
+    }
+    return undefined;
+}
+
+/** Bare disk keys from a just-finished upload → a Laravel public storage path. */
+function coerceStoryStoragePath(raw: string): string {
+    if (/^(https?:|file:|content:|data:|ph:)/i.test(raw) || raw.startsWith('/')) return raw;
+    if (raw.startsWith('demo-videos/')) return `/${raw}`;
+    if (VIDEO_EXT.test(raw) || IMAGE_EXT.test(raw)) {
+        return `/storage/${raw.replace(/^\/+/, '')}`;
+    }
+    return raw;
+}
+
+/**
+ * Fresh story payloads may use `media_url`, `mediaUrl`, `uri`, or `file_path`.
+ * Pick the first playable string so the viewer never mounts with an empty source.
+ */
+export function pickStoryMediaUri(
+    story?: Partial<Story> | Record<string, unknown> | null,
+): string | undefined {
+    if (!story) return undefined;
+    const raw = story as Record<string, unknown>;
+    const picked = firstMediaCandidate(
+        raw.mediaUrl,
+        raw.media_url,
+        raw.uri,
+        raw.url,
+        raw.file_path,
+        raw.filePath,
+        raw.path,
+        raw.video_url,
+        raw.videoUrl,
+    );
+    if (!picked) return undefined;
+    return resolveStoryMediaUrl(coerceStoryStoragePath(picked)) || picked;
 }
 
 /** Pull `/demo-videos/...` path out of absolute or relative URLs. */
@@ -144,9 +190,10 @@ export function getStoryVideoPosterSource(
 
 export function isStoryVideo(story?: Story, originalPost?: Post | null): boolean {
     if (!story) return false;
+    const mediaUri = pickStoryMediaUri(story) || story.mediaUrl;
     if (story.mediaType === 'video') return true;
-    if (isVideoUrl(story.mediaUrl)) return true;
-    if (story.mediaUrl && (demoVideoPathFromUrl(story.mediaUrl) || isMockDemoVideoPath(story.mediaUrl))) {
+    if (isVideoUrl(mediaUri)) return true;
+    if (mediaUri && (demoVideoPathFromUrl(mediaUri) || isMockDemoVideoPath(mediaUri))) {
         return true;
     }
     if (story.sharedFromPost && originalPost) {

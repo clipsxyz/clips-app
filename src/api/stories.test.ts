@@ -125,4 +125,32 @@ describe('mapLaravelStoryToStory shared-post fields', () => {
         expect(story.sharedFromUser).toBeUndefined();
         expect(story.videoPosterUrl).toBeUndefined();
     });
+
+    it('resolves media from mediaUrl, uri, or file_path when media_url is missing', () => {
+        expect(
+            mapLaravelStoryToStory({
+                ...base,
+                media_url: undefined,
+                mediaUrl: 'https://cdn.example.com/fresh.mp4',
+                media_type: 'video',
+            }).mediaUrl,
+        ).toBe('https://cdn.example.com/fresh.mp4');
+
+        expect(
+            mapLaravelStoryToStory({
+                ...base,
+                media_url: undefined,
+                uri: 'https://cdn.example.com/from-uri.jpg',
+            }).mediaUrl,
+        ).toBe('https://cdn.example.com/from-uri.jpg');
+
+        const fromPath = mapLaravelStoryToStory({
+            ...base,
+            media_url: undefined,
+            media_type: undefined,
+            file_path: 'stories/debs-upload.mp4',
+        });
+        expect(fromPath.mediaUrl).toBe('/storage/stories/debs-upload.mp4');
+        expect(fromPath.mediaType).toBe('video');
+    });
 });

@@ -7,6 +7,7 @@ import {
     getStoryVideoPosterFallback,
     getStoryVideoPosterSource,
     isStoryVideo,
+    pickStoryMediaUri,
     resolveStoryMediaUrl,
     storyVideoSource,
 } from '../../utils/storyMediaNative';
@@ -21,17 +22,23 @@ type Props = {
 /** Regular (non–shared-post) story media: video, image, or text-only template. */
 export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
     const text = getStoryTextContent(story);
-    const videoSource = storyVideoSource(story.mediaUrl);
-    const posterSource = getStoryVideoPosterSource(story.mediaUrl);
-    const posterUri = getStoryVideoPosterFallback(story.mediaUrl);
-    const imageUri = resolveStoryMediaUrl(story.mediaUrl) || posterUri;
-    const hasMedia = !!videoSource || !!posterSource || !!imageUri;
+    const mediaUri = pickStoryMediaUri(story) || story.mediaUrl;
+    const videoSource = storyVideoSource(mediaUri);
+    const stillUri = resolveStoryMediaUrl(story.videoPosterUrl);
+    const posterSource =
+        (stillUri ? { uri: stillUri } : undefined) || getStoryVideoPosterSource(mediaUri);
+    const posterUri = stillUri || getStoryVideoPosterFallback(mediaUri);
     const isVideo = isStoryVideo(story);
+    const imageUri =
+        stillUri ||
+        (!isVideo ? resolveStoryMediaUrl(mediaUri) : undefined) ||
+        posterUri;
+    const hasMedia = !!videoSource || !!posterSource || !!imageUri;
     const [videoFailed, setVideoFailed] = useState(false);
 
     useEffect(() => {
         setVideoFailed(false);
-    }, [story.id, story.mediaUrl]);
+    }, [story.id, mediaUri]);
 
     if (hasMedia && isVideo && videoSource && !videoFailed) {
         return (

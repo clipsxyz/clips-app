@@ -1,7 +1,7 @@
 import type { Story, StoryGroup, StickerOverlay } from '../types';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAvatarForHandle } from './users';
-import { resolveStoryMediaUrl } from '../utils/storyMediaNative';
+import { isVideoUrl, pickStoryMediaUri, resolveStoryMediaUrl } from '../utils/storyMediaNative';
 
 let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
 export function getLastStoriesLoadSource(): 'api-paged' | 'api-user' | 'mock' {
@@ -768,12 +768,22 @@ function storyAvatarUrl(story: Story): string | undefined {
 }
 
 export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
+    const mediaUrl = pickStoryMediaUri(story);
+    const rawType = story.media_type || story.mediaType;
+    const mediaType: Story['mediaType'] =
+        rawType === 'video' || rawType === 'image'
+            ? rawType
+            : isVideoUrl(mediaUrl)
+              ? 'video'
+              : mediaUrl
+                ? 'image'
+                : undefined;
     return {
         id: story.id,
-        userId: story.user_id,
-        userHandle: story.user_handle,
-        mediaUrl: resolveStoryMediaUrl(story.media_url) || undefined,
-        mediaType: story.media_type || undefined,
+        userId: story.user_id || story.userId,
+        userHandle: story.user_handle || story.userHandle,
+        mediaUrl: mediaUrl || undefined,
+        mediaType,
         text: story.text || undefined,
         textColor: story.text_color || undefined,
         textSize: story.text_size || undefined,
@@ -781,7 +791,7 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         venue: story.venue || undefined,
         createdAt: story.created_at ? new Date(story.created_at).getTime() : Date.now(),
         expiresAt: story.expires_at ? new Date(story.expires_at).getTime() : Date.now(),
-        views: story.views_count || 0,
+        views: Number(story.views_count ?? story.views ?? 0) || 0,
         hasViewed: !!story.has_viewed,
         reactions: [],
         replies: [],
@@ -1058,7 +1068,7 @@ export async function createStory(
             id: response.id,
             userId: response.user_id || userId,
             userHandle: response.user_handle || userHandle,
-            mediaUrl: resolveStoryMediaUrl(response.media_url || mediaUrl) || undefined,
+            mediaUrl: pickStoryMediaUri(response) || resolveStoryMediaUrl(response.media_url || mediaUrl) || undefined,
             mediaType: response.media_type || mediaType || undefined,
             // Keep local text data if backend response omits it (prevents blank text-only stories).
             text: response.text || text || undefined,
