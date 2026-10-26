@@ -35,6 +35,22 @@ describe('dedupeChatMessages', () => {
         expect(merged[0].text).toBe('on my way');
     });
 
+    it('keeps a live read receipt when the echo has not caught up', () => {
+        const local = msg({
+            id: 'uuid-read',
+            senderHandle: 'Gazetteer@Dublin',
+            read: true,
+        });
+        const echo = msg({
+            id: 'uuid-read',
+            senderHandle: 'Gazetteer@Dublin',
+            read: false,
+        });
+        const merged = upsertChatMessage([local], echo);
+        expect(merged).toHaveLength(1);
+        expect(merged[0].read).toBe(true);
+    });
+
     it('does not merge two different texts from the same sender', () => {
         const a = msg({ id: '1', senderHandle: 'Debs@Manchester', text: 'one', timestamp: 10 });
         const b = msg({ id: '2', senderHandle: 'Debs@Manchester', text: 'two', timestamp: 20 });

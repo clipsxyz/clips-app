@@ -11,6 +11,10 @@ import VerifiedBadge from './VerifiedBadge.native';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
+import {
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { useDmTapSuppressed } from './DmMessagePressable.native';
 
@@ -94,9 +98,10 @@ export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
 
     const card = (
         <LinearGradient
-            colors={['rgba(30,36,46,0.94)', 'rgba(15,19,26,0.97)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+            colors={[...UEFA_PASSPORT_GRADIENT]}
+            locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
             style={styles.glassCard}
         >
             <View style={styles.headerRow}>
@@ -215,8 +220,15 @@ export function DmSharedPostPreviewCard({ postId, token, userId, onTap }: Previe
                 if (suppressTap?.current) return;
                 onTap();
             }}
-            style={styles.previewCard}
+            style={styles.tapWrap}
         >
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.previewCard}
+            >
             {hasMedia ? (
                 <View style={styles.previewMediaBlock}>
                     <View style={styles.previewAspect}>
@@ -244,6 +256,7 @@ export function DmSharedPostPreviewCard({ postId, token, userId, onTap }: Previe
                     <Text style={styles.previewEmptyText}>Tap to view in Scenes</Text>
                 </View>
             )}
+            </LinearGradient>
         </TouchableOpacity>
     );
 }
@@ -323,7 +336,7 @@ const styles = StyleSheet.create({
         marginTop: ox(4),
         borderRadius: ox(12),
         overflow: 'hidden',
-        backgroundColor: 'rgba(0,0,0,0.35)',
+        backgroundColor: '#000000',
     },
     mediaImage: {
         width: '100%',
@@ -371,7 +384,6 @@ const styles = StyleSheet.create({
         maxWidth: DM_MEDIA_MAX_WIDTH,
         borderRadius: ox(18),
         overflow: 'hidden',
-        backgroundColor: 'rgba(30,36,46,0.9)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.14)',
         minHeight: ox(100),
@@ -382,7 +394,7 @@ const styles = StyleSheet.create({
     previewAspect: {
         width: '100%',
         aspectRatio: DM_MEDIA_ASPECT_RATIO,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: '#000000',
         position: 'relative',
     },
     previewEmpty: {

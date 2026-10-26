@@ -29,6 +29,7 @@ import { useAuth } from '../context/Auth';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { dedupeChatMessages, upsertChatMessage } from '../utils/dedupeChatMessages';
+import { formatDmPresenceLabel } from '../utils/dmThreadStatus';
 import {
     fetchConversationMessagesPage,
     fetchGroupThreadMessagesPage,
@@ -45,6 +46,7 @@ import {
     unblockUser,
     isUserBlocked,
     deleteConversation,
+    deleteChatMessage,
     type ChatMessage,
 } from '../api/messages';
 import {
@@ -79,6 +81,8 @@ import {
     UCL_CANVAS_NAVY,
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
 } from '../theme/gazetteerAmbientNative';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import DmMessageActionsSheet, { type DmMessageAction } from '../components/DmMessageActionsSheet.native';
@@ -384,7 +388,6 @@ type DmMessageRowProps = {
     threadHandle?: string;
     isGroupThread: boolean;
     dmSentStyle: DmSentBubbleStyle;
-    translatedText?: string;
     reactions?: DmReaction[];
     isPlayingAudio: boolean;
     isSwiping: boolean;
@@ -415,7 +418,6 @@ const DmMessageRow = React.memo(function DmMessageRow({
     threadHandle,
     isGroupThread,
     dmSentStyle,
-    translatedText,
     reactions,
     isPlayingAudio,
     isSwiping,
@@ -711,11 +713,8 @@ const DmMessageRow = React.memo(function DmMessageRow({
                                 isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
                             ]}
                         >
-                            {translatedText || item.text}
+                            {item.text}
                         </Text>
-                    ) : null}
-                    {!!translatedText && !!item.text ? (
-                        <Text style={styles.translatedOriginalText}>Original: {item.text}</Text>
                     ) : null}
                     {item.imageUrl ? (
                         ctx.isLikelyVideoUrl(item.imageUrl) ? (
@@ -730,7 +729,15 @@ const DmMessageRow = React.memo(function DmMessageRow({
                                 isActive={isActive}
                             />
                         ) : (
-                            <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
+                            <LinearGradient
+                                colors={[...UEFA_PASSPORT_GRADIENT]}
+                                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                                start={{ x: 0.5, y: 0 }}
+                                end={{ x: 0.5, y: 1 }}
+                                style={styles.messageImageCard}
+                            >
+                                <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
+                            </LinearGradient>
                         )
                     ) : null}
                     {item.audioUrl ? (
@@ -762,7 +769,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                         <Icon
                             name="checkmark-done"
                             size={ox(13)}
-                            color={(item as any).read ? dmSentBubbleColor(dmSentStyle) : '#8E8E93'}
+                            color={item.read ? dmSentBubbleColor(dmSentStyle) : '#8E8E93'}
                         />
                     ) : null}
                 </View>
@@ -908,7 +915,15 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [groupName, setGroupName] = useState(initialGroupName);
     const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [otherUserLastActiveAt, setOtherUserLastActiveAt] = useState<string | number | null>(null);
+    const [presenceNow, setPresenceNow] = useState(() => Date.now());
     const visibleMessages = useMemo(() => dedupeChatMessages(messages), [messages]);
+    /** Newest-first for the inverted thread list so the first paint is the latest message. */
+    const listMessages = useMemo(() => visibleMessages.slice().reverse(), [visibleMessages]);
+    const dmPresenceLabel = useMemo(
+        () => (isGroupThread ? 'Group chat' : formatDmPresenceLabel(otherUserLastActiveAt, presenceNow)),
+        [isGroupThread, otherUserLastActiveAt, presenceNow],
+    );
     // Parent lookup for enriching thin reply payloads (id-only) into full quote cards.
     const messagesById = useMemo(() => {
         const map = new Map<string, ChatMessage>();
@@ -939,7 +954,6 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [messageReactions, setMessageReactions] = useState<Record<string, Array<{ emoji: string; users: string[] }>>>({});
     const [showStickerPicker, setShowStickerPicker] = useState(false);
     const [stickerTargetMessageId, setStickerTargetMessageId] = useState<string | null>(null);
-    const [translatedMessages, setTranslatedMessages] = useState<Record<string, string>>({});
     const [isRecordingVoice, setIsRecordingVoice] = useState(false);
     const [recordingSeconds, setRecordingSeconds] = useState(0);
     const [recordingGestureHint, setRecordingGestureHint] = useState<'none' | 'cancel'>('none');
@@ -988,12 +1002,8 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [leaveGroupBusy, setLeaveGroupBusy] = useState(false);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
-    /** True from thread open until the initial bottom anchor has settled. While
-     * pending, maintainVisibleContentPosition stays OFF (it would anchor the old
-     * position against scrollToEnd) and late-measuring rows re-trigger the scroll. */
-    const initialScrollPendingRef = useRef(true);
-    const [mvcpEnabled, setMvcpEnabled] = useState(false);
-    const initialScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+    /** Inverted lists fire onEndReached on mount; ignore until the user scrolls toward older rows. */
+    const allowOlderLoadRef = useRef(false);
     const isScreenFocused = useIsFocused();
     // Message ids currently inside the active viewport — drives inline video auto-pause.
     const [activeMessageIds, setActiveMessageIds] = useState<Set<string>>(() => new Set());
@@ -1212,7 +1222,8 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const scrollMessagesToBottom = useCallback((animated = true) => {
         requestAnimationFrame(() => {
-            flatListRef.current?.scrollToEnd({ animated });
+            // Inverted list: offset 0 is the newest message (visual bottom).
+            flatListRef.current?.scrollToOffset({ offset: 0, animated });
         });
     }, []);
 
@@ -1277,12 +1288,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         // Flush the previous thread completely on open/switch: stale rows (and the
         // FlatList's retained native offset) must never leak into the new thread.
         setMessages([]);
+        setOtherUserLastActiveAt(null);
         setReplyingTo(null);
         setEditingMessage(null);
         setThreadCursor(null);
         setThreadHasMore(false);
-        initialScrollPendingRef.current = true;
-        setMvcpEnabled(false);
+        allowOlderLoadRef.current = false;
         shouldAutoScrollRef.current = true;
         loadMessages(true);
     }, [handle, chatGroupId]);
@@ -1330,6 +1341,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                           : Date.now(),
                 replyTo: rawMsg.replyTo ?? rawMsg.reply_to ?? undefined,
                 sourcePostId: rawMsg.sourcePostId ?? rawMsg.source_post_id ?? undefined,
+                read: Boolean(rawMsg.read || rawMsg.read_at || rawMsg.readAt),
             };
             if (!incoming.senderHandle) return;
 
@@ -1339,12 +1351,49 @@ export default function MessagesScreen({ route, navigation }: any) {
             }
         };
 
+        const onConversationMeta = (data: any) => {
+            const type = data?.type;
+            const participants: string[] = Array.isArray(data.participants) ? data.participants : [];
+
+            if (type === 'messagesRead') {
+                if (participants.length > 0 && !participants.includes(user.handle)) return;
+                const reader = String(data.readerHandle ?? data.reader_handle ?? '');
+                if (!reader || sameDmHandle(reader, user.handle)) return;
+                if (!isGroupThread && handle && !sameDmHandle(reader, handle)) return;
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        sameDmHandle(m.senderHandle, user.handle) && !m.read ? { ...m, read: true } : m,
+                    ),
+                );
+                return;
+            }
+
+            if (type === 'messageDeleted') {
+                const deletedId = String(data.messageId ?? data.message_id ?? '');
+                if (!deletedId) return;
+                if (isGroupThread) {
+                    const gid = data.chatGroupId ?? data.chat_group_id;
+                    if (gid && String(gid) !== String(chatGroupId)) return;
+                } else if (participants.length > 0 && !participants.includes(user.handle)) {
+                    return;
+                }
+                setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+                setReplyingTo((prev) => (prev?.id === deletedId ? null : prev));
+                setEditingMessage((prev) => (prev?.id === deletedId ? null : prev));
+            }
+        };
+
         socket?.on('newMessage', onRealtime);
+        socket?.on('conversationUpdated', onConversationMeta);
         // Same-device fallback bus (socket disabled / mock mode).
-        const busSub = DeviceEventEmitter.addListener('conversationUpdated', onRealtime);
+        const busSub = DeviceEventEmitter.addListener('conversationUpdated', (data) => {
+            if (data?.type === 'messagesRead' || data?.type === 'messageDeleted') onConversationMeta(data);
+            else onRealtime(data);
+        });
 
         return () => {
             socket?.off('newMessage', onRealtime);
+            socket?.off('conversationUpdated', onConversationMeta);
             busSub.remove();
             if (isGroupThread && chatGroupId) {
                 leaveGroupChat(String(chatGroupId));
@@ -1461,7 +1510,10 @@ export default function MessagesScreen({ route, navigation }: any) {
         let cancelled = false;
         async function loadOtherUserPlaces() {
             if (!handle || isGroupThread) {
-                if (!cancelled) setOtherUserPlacesTraveled(undefined);
+                if (!cancelled) {
+                    setOtherUserPlacesTraveled(undefined);
+                    setOtherUserLastActiveAt(null);
+                }
                 return;
             }
             try {
@@ -1469,6 +1521,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                 if (user?.id) {
                     try {
                         const profile = await fetchUserProfile(handle, user.id);
+                        const lastActive =
+                            (profile as any)?.last_active_at ?? (profile as any)?.lastActiveAt ?? null;
+                        if (!cancelled) setOtherUserLastActiveAt(lastActive);
                         const apiPlaces =
                             (profile as any).places_traveled || (profile as any).placesTraveled;
                         if (Array.isArray(apiPlaces) && apiPlaces.length > 0) {
@@ -1487,7 +1542,10 @@ export default function MessagesScreen({ route, navigation }: any) {
                     setOtherUserPlacesTraveled(places && places.length > 0 ? places : []);
                 }
             } catch {
-                if (!cancelled) setOtherUserPlacesTraveled([]);
+                if (!cancelled) {
+                    setOtherUserPlacesTraveled([]);
+                    setOtherUserLastActiveAt(null);
+                }
             }
         }
         void loadOtherUserPlaces();
@@ -1495,6 +1553,13 @@ export default function MessagesScreen({ route, navigation }: any) {
             cancelled = true;
         };
     }, [handle, isGroupThread, user?.id]);
+
+    useEffect(() => {
+        if (isGroupThread || !otherUserLastActiveAt) return;
+        setPresenceNow(Date.now());
+        const id = setInterval(() => setPresenceNow(Date.now()), 60_000);
+        return () => clearInterval(id);
+    }, [isGroupThread, otherUserLastActiveAt]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1755,38 +1820,6 @@ export default function MessagesScreen({ route, navigation }: any) {
         });
     };
 
-    /**
-     * The single initial-scroll authority. After the first page loads, anchor to
-     * the bottom repeatedly while async rows (images, shared-post cards) finish
-     * measuring, then hand control back: clear the pending flag and enable
-     * maintainVisibleContentPosition for older-message prepends.
-     */
-    useEffect(() => {
-        if (loading || messages.length === 0 || !initialScrollPendingRef.current) return;
-        for (const t of initialScrollTimersRef.current) clearTimeout(t);
-        const delays = [0, 120, 350, 700];
-        initialScrollTimersRef.current = delays.map((delay, i) =>
-            setTimeout(() => {
-                scrollMessagesToBottom(false);
-                if (i === delays.length - 1) {
-                    initialScrollPendingRef.current = false;
-                    setMvcpEnabled(true);
-                }
-            }, delay),
-        );
-        return () => {
-            for (const t of initialScrollTimersRef.current) clearTimeout(t);
-            initialScrollTimersRef.current = [];
-        };
-    }, [loading, messages.length, scrollMessagesToBottom]);
-
-    // Shared-post cards arrive (and grow) after the message rows: while the
-    // initial anchor is still pending, each resolution re-asserts the bottom.
-    useEffect(() => {
-        if (!initialScrollPendingRef.current || messages.length === 0) return;
-        scrollMessagesToBottom(false);
-    }, [sharedPosts, messages.length, scrollMessagesToBottom]);
-
     const loadMessages = async (reset: boolean = false) => {
         if (!user?.handle) return;
         if (reset) {
@@ -1909,6 +1942,7 @@ export default function MessagesScreen({ route, navigation }: any) {
             imageUrl: serverMsg.imageUrl ?? optimistic.imageUrl,
             audioUrl: serverMsg.audioUrl ?? optimistic.audioUrl,
             text: serverMsg.text ?? optimistic.text,
+            read: Boolean(serverMsg.read || optimistic.read),
         };
         setMessages((prev) =>
             upsertChatMessage(
@@ -2054,12 +2088,15 @@ export default function MessagesScreen({ route, navigation }: any) {
                     });
                 },
             });
+        }
+        if (fromMe) {
             actions.push({
-                key: 'translate',
-                label: translatedMessages[item.id] ? 'Hide translation' : 'Translate',
-                icon: 'language-outline',
+                key: 'delete',
+                label: 'Delete message',
+                icon: 'trash-outline',
+                destructive: true,
                 onPress: () => {
-                    void handleTranslateMessage(item);
+                    confirmDeleteMessage(item);
                 },
             });
         }
@@ -2072,47 +2109,51 @@ export default function MessagesScreen({ route, navigation }: any) {
                     navigation.navigate('ViewProfile', { handle: item.senderHandle });
                 },
             });
+            actions.push({
+                key: 'report',
+                label: 'Report',
+                icon: 'alert-circle-outline',
+                destructive: true,
+                onPress: () => {
+                    handleReportMessage(item);
+                },
+            });
         }
-        actions.push({
-            key: 'report',
-            label: 'Report',
-            icon: 'alert-circle-outline',
-            destructive: true,
-            onPress: () => {
-                handleReportMessage(item);
-            },
-        });
         return actions;
     };
 
-    const translateText = async (text: string): Promise<string> => {
-        // Placeholder parity behavior; wire real translation API in a later backend pass.
-        return new Promise((resolve) => {
-            setTimeout(() => resolve(`[Translated] ${text}`), 260);
+    const confirmDeleteMessage = (item: ChatMessage) => {
+        if (!user?.handle || !sameDmHandle(item.senderHandle, user.handle)) return;
+        showAlert({
+            title: 'Delete this message?',
+            message: 'It will be removed from this chat for both of you.',
+            icon: 'alert',
+            confirmButtonText: 'Delete',
+            showCancelButton: true,
+            cancelButtonText: 'Cancel',
+            onConfirm: () => {
+                const previous = messages;
+                setMessages((prev) => prev.filter((m) => m.id !== item.id));
+                setReplyingTo((prev) => (prev?.id === item.id ? null : prev));
+                setEditingMessage((prev) => (prev?.id === item.id ? null : prev));
+                void (async () => {
+                    try {
+                        await deleteChatMessage(user.handle, item.id, {
+                            otherHandle: isGroupThread ? undefined : handle,
+                            chatGroupId: isGroupThread ? String(chatGroupId) : undefined,
+                        });
+                    } catch {
+                        setMessages(previous);
+                        showAlert({
+                            title: 'Delete failed',
+                            message: 'Could not delete this message right now.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                    }
+                })();
+            },
         });
-    };
-
-    const handleTranslateMessage = async (item: ChatMessage) => {
-        if (!item.text) return;
-        if (translatedMessages[item.id]) {
-            setTranslatedMessages((prev) => {
-                const next = { ...prev };
-                delete next[item.id];
-                return next;
-            });
-            return;
-        }
-        try {
-            const translated = await translateText(item.text);
-            setTranslatedMessages((prev) => ({ ...prev, [item.id]: translated }));
-        } catch {
-            showAlert({
-                title: 'Translate failed',
-                message: 'Could not translate this message right now.',
-                icon: 'alert',
-                confirmButtonText: 'OK',
-            });
-        }
     };
 
     const handleForwardMessage = async (item: ChatMessage) => {
@@ -2953,7 +2994,6 @@ export default function MessagesScreen({ route, navigation }: any) {
                 threadHandle={handle}
                 isGroupThread={isGroupThread}
                 dmSentStyle={dmSentStyle}
-                translatedText={translatedMessages[item.id]}
                 reactions={messageReactions[item.id]}
                 isPlayingAudio={Boolean(item.audioUrl) && playingAudioId === item.audioUrl}
                 isSwiping={swipingMessageId === item.id}
@@ -3068,9 +3108,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 {isGroupThread ? groupName : handle}
                             </Text>
                         </TouchableOpacity>
-                        <Text style={styles.headerSubtitle}>
-                            {isGroupThread ? 'Group chat' : 'Active now'}
-                        </Text>
+                        {dmPresenceLabel ? (
+                            <Text style={styles.headerSubtitle}>{dmPresenceLabel}</Text>
+                        ) : null}
                     </View>
                 </View>
                 <View style={styles.headerActions}>
@@ -3105,11 +3145,13 @@ export default function MessagesScreen({ route, navigation }: any) {
             >
                 <FlatList
                     ref={flatListRef}
-                    data={visibleMessages}
+                    inverted
+                    key={`dm-${isGroupThread ? String(chatGroupId || '') : String(handle || '')}`}
+                    data={listMessages}
                     renderItem={renderMessage}
                     keyExtractor={(item) => item.id}
                     style={styles.messagesList}
-                    initialNumToRender={14}
+                    initialNumToRender={16}
                     maxToRenderPerBatch={10}
                     windowSize={11}
                     updateCellsBatchingPeriod={50}
@@ -3119,40 +3161,37 @@ export default function MessagesScreen({ route, navigation }: any) {
                     onViewableItemsChanged={onViewableItemsChanged}
                     contentContainerStyle={[
                         styles.messagesContent,
-                        messages.length === 0 ? styles.messagesContentEmpty : null,
+                        listMessages.length === 0 ? styles.messagesContentEmpty : null,
                     ]}
-                    maintainVisibleContentPosition={
-                        mvcpEnabled
-                            ? {
-                                  minIndexForVisible: 0,
-                                  autoscrollToTopThreshold: 12,
-                              }
-                            : undefined
-                    }
                     onContentSizeChange={() => {
-                        // Never spend the auto-scroll flag on the empty/loading
-                        // layout pass — only on real message content.
-                        if (messages.length === 0) return;
+                        if (listMessages.length === 0) return;
                         if (shouldAutoScrollRef.current) {
-                            scrollMessagesToBottom(true);
+                            scrollMessagesToBottom(false);
                             shouldAutoScrollRef.current = false;
                         }
                     }}
                     onScroll={(e) => {
-                        if (e.nativeEvent.contentOffset.y <= 120) {
-                            loadOlderMessages();
+                        if (e.nativeEvent.contentOffset.y > 64) {
+                            allowOlderLoadRef.current = true;
                         }
                     }}
+                    onEndReached={() => {
+                        if (!allowOlderLoadRef.current) return;
+                        void loadOlderMessages();
+                    }}
+                    onEndReachedThreshold={0.3}
                     scrollEventThrottle={16}
-                    ListHeaderComponent={loadingOlder ? (
-                        <View style={styles.loadingOlderWrap}>
-                            <ActivityIndicator size="small" color="#8B5CF6" />
-                            <Text style={styles.loadingOlderText}>Loading older messages...</Text>
-                        </View>
-                    ) : null}
+                    ListFooterComponent={
+                        loadingOlder ? (
+                            <View style={styles.loadingOlderWrap}>
+                                <ActivityIndicator size="small" color="#8B5CF6" />
+                                <Text style={styles.loadingOlderText}>Loading older messages...</Text>
+                            </View>
+                        ) : null
+                    }
                     ListEmptyComponent={
                         loading ? (
-                            <View style={styles.threadLoadingWrap}>
+                            <View style={[styles.threadLoadingWrap, styles.invertedEmpty]}>
                                 <ActivityIndicator size="large" color="#f472b6" />
                             </View>
                         ) : null
@@ -3601,7 +3640,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                                     />
                                     <View style={styles.chatInfoProfileText}>
                                         <Text style={styles.chatInfoName}>{handle}</Text>
-                                        <Text style={styles.chatInfoSubtitle}>Active now</Text>
+                                        {dmPresenceLabel ? (
+                                            <Text style={styles.chatInfoSubtitle}>{dmPresenceLabel}</Text>
+                                        ) : null}
                                     </View>
                                 </View>
 
@@ -3826,13 +3867,14 @@ const styles = StyleSheet.create({
     },
     messagesContent: {
         flexGrow: 1,
-        justifyContent: 'flex-end',
         paddingHorizontal: ox(12),
-        paddingTop: ox(10),
-        paddingBottom: ox(12),
+        paddingVertical: ox(12),
     },
     messagesContentEmpty: {
-        justifyContent: 'center',
+        flexGrow: 1,
+    },
+    invertedEmpty: {
+        transform: [{ scaleY: -1 }],
     },
     loadingOlderWrap: {
         flexDirection: 'row',
@@ -3917,12 +3959,18 @@ const styles = StyleSheet.create({
     messageTextFromOther: {
         color: '#F9FAFB',
     },
-    messageImage: {
+    messageImageCard: {
         width: DM_MEDIA_MAX_WIDTH,
         maxWidth: '100%',
-        aspectRatio: DM_MEDIA_ASPECT_RATIO,
-        borderRadius: ox(12),
+        borderRadius: ox(14),
+        overflow: 'hidden',
         marginTop: ox(8),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
+    },
+    messageImage: {
+        width: '100%',
+        aspectRatio: DM_MEDIA_ASPECT_RATIO,
     },
     messageVideoFallback: {
         width: 200,
@@ -4409,13 +4457,6 @@ const styles = StyleSheet.create({
         color: '#374151',
         fontSize: ox(10),
         fontWeight: '700',
-    },
-    translatedOriginalText: {
-        marginTop: ox(4),
-        fontSize: ox(11),
-        lineHeight: ox(15),
-        color: 'rgba(255,255,255,0.6)',
-        fontStyle: 'italic',
     },
     stickerPicker: {
         marginHorizontal: ox(16),

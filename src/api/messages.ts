@@ -1,6 +1,7 @@
 import { getRuntimeEnv, isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
 import { hasAuthTokenAsync } from '../utils/authTokenBridge';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
+import { laravelMessageIsRead } from '../utils/dmThreadStatus';
 
 /** Live inbox/thread fetches — never inject mock users when production/API mode is on. */
 function useLiveInboxApi(): boolean {
@@ -25,6 +26,8 @@ export interface ChatMessage {
     storyContextOwner?: string; // Original story/post owner for attribution
     replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string; thumbUrl?: string; mediaType?: 'image' | 'video' }; // Reply to another message; imageUrl/thumbUrl = thumbnail (or poster for video)
     sourcePostId?: string; // Post shared/anchored by this message (persisted server-side)
+    /** Recipient has opened the thread (1:1 DMs). Unset/false = delivered, not yet read. */
+    read?: boolean;
 }
 
 type ConversationId = string; // sorted `${a}|${b}`
@@ -85,6 +88,9 @@ function laravelMsgToChatMessage(m: {
     reply_to_message_id?: string | null;
     source_post_id?: string | null;
     sourcePostId?: string | null;
+    read?: boolean | number | string | null;
+    read_at?: string | null;
+    readAt?: string | null;
 }): ChatMessage {
     const sourcePostId = m.source_post_id ?? m.sourcePostId;
     return {
@@ -96,7 +102,23 @@ function laravelMsgToChatMessage(m: {
         isSystemMessage: !!m.is_system_message,
         replyTo: mapLaravelReplyTo(m),
         sourcePostId: sourcePostId ? String(sourcePostId) : undefined,
+        read: laravelMessageIsRead(m),
     };
+}
+
+async function emitMessagesRead(selfHandle: string, otherHandle: string): Promise<void> {
+    const payload = {
+        type: 'messagesRead',
+        readerHandle: selfHandle,
+        participants: [selfHandle, otherHandle],
+    };
+    try {
+        const { emitConversationUpdate } = await import('../services/socketio');
+        emitConversationUpdate(payload);
+    } catch {
+        // Socket is optional.
+    }
+    dispatchBrowserEvent('conversationUpdated', payload);
 }
 
 const conversations = new Map<ConversationId, ChatMessage[]>();
@@ -541,6 +563,60 @@ export async function editMessage(messageId: string, newText: string, from: stri
     return updatedMessage;
 }
 
+const DURABLE_MESSAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Unsend a message the current user sent. Removes it for both people in the thread. */
+export async function deleteChatMessage(
+    selfHandle: string,
+    messageId: string,
+    opts?: { otherHandle?: string; chatGroupId?: string },
+): Promise<void> {
+    const id = String(messageId || '').trim();
+    if (!id) return;
+
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync()) && DURABLE_MESSAGE_ID.test(id)) {
+        try {
+            const apiClient = await import('./client');
+            await apiClient.deleteMessage(id);
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            throw e;
+        }
+    } else if (!useLiveInboxApi()) {
+        if (opts?.chatGroupId) {
+            const list = mockGroupMessageLists.get(opts.chatGroupId) ?? [];
+            mockGroupMessageLists.set(
+                opts.chatGroupId,
+                list.filter((m) => m.id !== id || !sameHandle(m.senderHandle, selfHandle)),
+            );
+        } else if (opts?.otherHandle) {
+            const convId = getConversationId(selfHandle, opts.otherHandle);
+            const list = conversations.get(convId) || [];
+            conversations.set(
+                convId,
+                list.filter((m) => m.id !== id || !sameHandle(m.senderHandle, selfHandle)),
+            );
+        }
+    }
+
+    const payload: Record<string, unknown> = {
+        type: 'messageDeleted',
+        messageId: id,
+        chatGroupId: opts?.chatGroupId,
+        chat_group_id: opts?.chatGroupId,
+        participants: opts?.chatGroupId
+            ? [selfHandle]
+            : [selfHandle, opts?.otherHandle].filter(Boolean),
+    };
+    try {
+        const { emitConversationUpdate } = await import('../services/socketio');
+        emitConversationUpdate(payload);
+    } catch {
+        // Socket is optional.
+    }
+    dispatchBrowserEvent('conversationUpdated', payload);
+}
+
 export async function getUnreadTotal(handle: string): Promise<number> {
     if (useLiveInboxApi() && (await hasAuthTokenAsync())) {
         try {
@@ -563,22 +639,28 @@ export async function getUnreadTotal(handle: string): Promise<number> {
 
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
     unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 0);
+    let marked = 0;
     if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
-            await apiClient.markConversationRead(otherHandle);
+            const res = await apiClient.markConversationRead(otherHandle);
+            marked = Number((res as { marked?: number } | undefined)?.marked ?? 1);
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             console.warn('Laravel markConversationRead failed:', e);
         }
-        return;
+    } else if (!useLiveInboxApi()) {
+        const key = `${selfHandle}::${otherHandle}`;
+        lastReadByThread.set(key, Date.now());
+        unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
+        const { emitInboxUnreadChanged } = await import('../services/socketio');
+        emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
+        dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
+        marked = 1;
     }
-    const key = `${selfHandle}::${otherHandle}`;
-    lastReadByThread.set(key, Date.now());
-    unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
-    const { emitInboxUnreadChanged } = await import('../services/socketio');
-    emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
-    dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
+    if (marked > 0) {
+        await emitMessagesRead(selfHandle, otherHandle);
+    }
 }
 
 export async function markConversationUnread(selfHandle: string, otherHandle: string): Promise<void> {

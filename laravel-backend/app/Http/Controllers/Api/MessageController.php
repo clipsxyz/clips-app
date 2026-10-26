@@ -665,12 +665,47 @@ class MessageController extends Controller
         $user = Auth::user();
         $conversationId = Message::getConversationId($user->handle, $otherHandle);
 
-        Message::where('conversation_id', $conversationId)
+        $marked = Message::where('conversation_id', $conversationId)
             ->where('recipient_handle', $user->handle)
             ->whereNull('read_at')
             ->update(['read_at' => now()]);
 
-        return response()->json(['success' => true]);
+        return response()->json(['success' => true, 'marked' => $marked]);
+    }
+
+    /**
+     * Delete (unsend) a message the authenticated user sent.
+     */
+    public function destroy(string $messageId): JsonResponse
+    {
+        $validator = Validator::make(['messageId' => $messageId], [
+            'messageId' => 'required|uuid',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $message = Message::query()->find($messageId);
+
+        if (! $message) {
+            return response()->json(['error' => 'Message not found'], 404);
+        }
+
+        if ($message->sender_handle !== $user->handle) {
+            return response()->json(['error' => 'You can only delete your own messages'], 403);
+        }
+
+        $payload = [
+            'id' => (string) $message->id,
+            'chat_group_id' => $message->chat_group_id,
+            'conversation_id' => $message->conversation_id,
+        ];
+
+        $message->delete();
+
+        return response()->json(['success' => true] + $payload);
     }
 }
 

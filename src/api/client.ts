@@ -1401,6 +1401,12 @@ export async function markConversationRead(otherHandle: string) {
     });
 }
 
+export async function deleteMessage(messageId: string) {
+    return apiRequest(`/messages/${encodeURIComponent(messageId)}`, {
+        method: 'DELETE',
+    });
+}
+
 /** Group thread: metadata + messages array */
 export async function fetchGroupConversation(groupId: string) {
     return apiRequest(`/messages/group/${encodeURIComponent(groupId)}`);

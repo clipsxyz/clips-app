@@ -1731,6 +1731,20 @@ export default function MessagesPage() {
             const participants: string[] = e.detail?.participants || [];
             if (!participants.includes(user?.handle || '') || !participants.includes(handle || '')) return;
 
+            if (e.detail?.type === 'messagesRead') {
+                const reader = String(e.detail.readerHandle ?? e.detail.reader_handle ?? '');
+                if (reader && reader !== user?.handle) {
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            (m.isFromMe || m.senderHandle === user?.handle) && !m.read
+                                ? { ...m, read: true }
+                                : m,
+                        ),
+                    );
+                }
+                return;
+            }
+
             const newMessage = e.detail?.message;
             const isOurMessage = newMessage && newMessage.senderHandle === user?.handle;
 

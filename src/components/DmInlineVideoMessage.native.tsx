@@ -14,6 +14,10 @@ import CachedImage from './CachedImage.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
+import {
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { useDmTapSuppressed } from './DmMessagePressable.native';
 
@@ -111,7 +115,13 @@ export default function DmInlineVideoMessage({
 
     if (failed) {
         return (
-            <View style={[styles.frame, { width }]}>
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={[styles.frame, { width }]}
+            >
                 {poster && !posterFailed ? (
                     <CachedImage
                         source={{ uri: poster }}
@@ -123,7 +133,7 @@ export default function DmInlineVideoMessage({
                     <Icon name="videocam-off-outline" size={ox(24)} color="#E5E7EB" />
                     <Text style={styles.failedText}>Video unavailable</Text>
                 </View>
-            </View>
+            </LinearGradient>
         );
     }
 
@@ -133,7 +143,13 @@ export default function DmInlineVideoMessage({
     const mountVideo = started || !poster || posterFailed;
 
     return (
-        <View style={[styles.frame, { width }]}>
+        <LinearGradient
+            colors={[...UEFA_PASSPORT_GRADIENT]}
+            locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={[styles.frame, { width }]}
+        >
             {showPosterImage ? (
                 <CachedImage
                     source={{ uri: poster }}
@@ -240,7 +256,7 @@ export default function DmInlineVideoMessage({
                     </TouchableOpacity>
                 </View>
             </Modal>
-        </View>
+        </LinearGradient>
     );
 }
 
@@ -251,9 +267,8 @@ const styles = StyleSheet.create({
         marginTop: ox(6),
         borderRadius: ox(14),
         overflow: 'hidden',
-        backgroundColor: 'rgba(0,0,0,0.5)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.16)',
+        borderColor: 'rgba(255,255,255,0.14)',
     },
     fill: {
         ...StyleSheet.absoluteFill,

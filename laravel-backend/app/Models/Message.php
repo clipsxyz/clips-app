@@ -55,6 +55,7 @@ class Message extends Model
         $sourcePostId = $this->attributes['source_post_id'] ?? null;
         $array['source_post_id'] = $sourcePostId;
         $array['sourcePostId'] = $sourcePostId;
+        $array['read'] = $this->read_at !== null;
 
         return $array;
     }

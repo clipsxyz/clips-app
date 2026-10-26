@@ -325,6 +325,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/conversation/{otherHandle}/paged', [MessageController::class, 'getConversationPaged']);
         Route::post('/send', [MessageController::class, 'sendMessage']);
         Route::post('/conversation/{otherHandle}/read', [MessageController::class, 'markConversationRead']);
+        Route::delete('/{messageId}', [MessageController::class, 'destroy']);
     });
 
     // Community / WhatsApp-style chat groups
