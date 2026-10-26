@@ -79,6 +79,7 @@ import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
 import {
     UCL_CANVAS_NAVY,
+    UCL_PURPLE,
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
     UEFA_PASSPORT_GRADIENT,
@@ -101,6 +102,7 @@ import {
     setDmSentBubblePreference,
     type DmSentBubbleStyle,
 } from '../constants/dmImessageTheme.native';
+import { siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { toFileUri } from '../utils/ffmpegNative';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
@@ -159,6 +161,7 @@ function resolveReplyThumb(
 
     const candidates = [
         msg.imageUrl,
+        siblingJpegFromVideoUrl(msg.imageUrl),
         loose.thumbUrl as string | undefined,
         loose.thumbnailUrl as string | undefined,
         loose.thumbnail_url as string | undefined,
@@ -212,8 +215,10 @@ function thumbFromPost(post: Post | undefined): { thumbUrl?: string; isVideo: bo
         slide?.thumbnailUrl as string | undefined,
         slide?.thumbnail_url as string | undefined,
         post.mediaUrl,
+        siblingJpegFromVideoUrl(post.mediaUrl),
         loosePost.media_url as string | undefined,
         item?.url,
+        siblingJpegFromVideoUrl(item?.url),
         slide?.url as string | undefined,
     ];
     const isVideo =
@@ -258,19 +263,23 @@ function resolveReplyPreview(
     // The stored payload may carry the media URL under either key; a raw video
     // URL there is not renderable, so fall through to the parent's poster.
     const payloadThumb = firstThumbCandidate(replyTo?.imageUrl, replyTo?.thumbUrl);
+    const payloadStill =
+        payloadThumb && isVideoUrlString(payloadThumb)
+            ? siblingJpegFromVideoUrl(payloadThumb)
+            : payloadThumb;
     // Last resort: the parent row may be outside the loaded page, but the
     // server-rehydrated quote text for a shared-post parent IS the share URL —
     // resolve the post from it directly.
     const refFromQuoteText =
-        !payloadThumb && !fromParent.thumbUrl && replyTo?.text
+        !payloadStill && !fromParent.thumbUrl && replyTo?.text
             ? extractSharedPostRef(replyTo.text)
             : null;
     const fromQuotePost = thumbFromPost(
         refFromQuoteText ? sharedPosts[sharedPostRefKey(refFromQuoteText)] : undefined,
     );
     const thumbUrl =
-        payloadThumb && !isVideoUrlString(payloadThumb)
-            ? payloadThumb
+        payloadStill && !isVideoUrlString(payloadStill)
+            ? payloadStill
             : (fromParent.thumbUrl ?? fromQuotePost.thumbUrl);
     const isVideo =
         replyTo?.mediaType === 'video' ||
@@ -299,9 +308,16 @@ function previewFromMessage(msg: ChatMessage, sharedPosts: Record<string, Post>)
     };
 }
 
+function quoteStillUri(preview: DmReplyPreview): string | undefined {
+    const raw = (preview.imageUrl || preview.thumbUrl || '').trim();
+    if (!raw) return undefined;
+    if (isVideoUrlString(raw)) return siblingJpegFromVideoUrl(raw);
+    return raw;
+}
+
 /**
- * Instagram/WhatsApp-style quoted reply card. Shared by thread bubbles and the composer
- * strip so both read identically: dark translucent glass, left accent, sender + snippet.
+ * Quoted reply card shared by thread bubbles and the composer strip:
+ * CL purple→gold accent, tinted surface, text snippet, and a media thumb when present.
  */
 function DmQuotedReply({
     preview,
@@ -311,7 +327,18 @@ function DmQuotedReply({
     variant?: 'bubble' | 'composer';
 }) {
     const isComposer = variant === 'composer';
-    const senderLabel = preview.senderHandle ? `Replying to ${preview.senderHandle}` : 'Replying to';
+    const stillUri = quoteStillUri(preview);
+    const hasMedia = Boolean(stillUri) || preview.isVideo;
+    const snippet =
+        (preview.text || '').trim() || (preview.isVideo ? 'Video' : stillUri ? 'Photo' : 'Message');
+    const senderLabel = preview.senderHandle
+        ? isComposer
+            ? `Replying to ${preview.senderHandle}`
+            : preview.senderHandle
+        : isComposer
+          ? 'Replying to'
+          : 'Message';
+
     return (
         <View
             style={[
@@ -320,48 +347,49 @@ function DmQuotedReply({
             ]}
             testID="dm-quoted-reply"
         >
-            <View style={styles.quotedReplyAccent} />
-            {(() => {
-                const uri = preview.imageUrl || preview.thumbUrl;
-                const showImage =
-                    typeof uri === 'string' && uri.trim().length > 0 && !isVideoUrlString(uri);
-                if (!showImage && !preview.isVideo) return null;
-                return (
-                    <View
-                        style={[
-                            styles.quotedReplyThumb,
-                            isComposer && styles.quotedReplyThumbComposer,
-                        ]}
-                    >
-                        {showImage ? (
-                            <Image
-                                source={{ uri }}
-                                style={styles.quotedReplyThumbImage}
-                                resizeMode="cover"
+            <LinearGradient
+                colors={[UCL_PURPLE, DM_SENT_BRASS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.quotedReplyAccent}
+            />
+            {hasMedia ? (
+                <View
+                    style={[
+                        styles.quotedReplyThumb,
+                        isComposer && styles.quotedReplyThumbComposer,
+                    ]}
+                >
+                    {stillUri ? (
+                        <Image
+                            source={{ uri: stillUri }}
+                            style={styles.quotedReplyThumbImage}
+                            resizeMode="cover"
+                        />
+                    ) : (
+                        <View style={styles.quotedReplyThumbFallback}>
+                            <Icon
+                                name={preview.isVideo ? 'play' : 'image'}
+                                size={ox(isComposer ? 18 : 16)}
+                                color="#FFFFFF"
                             />
-                        ) : (
-                            <View style={styles.quotedReplyVideoBadge}>
-                                <Icon
-                                    name="videocam"
-                                    size={ox(isComposer ? 16 : 12)}
-                                    color="#FFFFFF"
-                                />
-                            </View>
-                        )}
-                        {showImage && preview.isVideo ? (
-                            <View style={styles.quotedReplyVideoBadgeOverlay}>
-                                <Icon name="videocam" size={ox(9)} color="#FFFFFF" />
-                            </View>
-                        ) : null}
+                        </View>
+                    )}
+                    <View style={styles.quotedReplyMediaBadge}>
+                        <Icon
+                            name={preview.isVideo ? 'videocam' : 'image-outline'}
+                            size={ox(10)}
+                            color="#FFFFFF"
+                        />
                     </View>
-                );
-            })()}
+                </View>
+            ) : null}
             <View style={styles.quotedReplyBody}>
                 <Text style={styles.quotedReplySender} numberOfLines={1}>
                     {senderLabel}
                 </Text>
-                <Text style={styles.quotedReplyText} numberOfLines={1}>
-                    {preview.text}
+                <Text style={styles.quotedReplyText} numberOfLines={2} ellipsizeMode="tail">
+                    {snippet}
                 </Text>
             </View>
         </View>
@@ -800,6 +828,9 @@ const DmMessageRow = React.memo(function DmMessageRow({
                                         }
                                       : null,
                                   reactions?.length ? { paddingBottom: ox(22) } : null,
+                                  replyPreview
+                                      ? { alignSelf: 'stretch', minWidth: ox(196) }
+                                      : null,
                               ]
                     }
                 >
@@ -4350,17 +4381,20 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         alignSelf: 'stretch',
-        borderRadius: ox(10),
-        backgroundColor: 'rgba(0,0,0,0.30)',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: 'rgba(255,255,255,0.14)',
-        paddingVertical: ox(6),
-        paddingLeft: ox(12),
-        paddingRight: ox(8),
+        width: '100%',
+        minWidth: ox(168),
+        minHeight: ox(56),
+        borderRadius: ox(12),
+        backgroundColor: 'rgba(35, 16, 79, 0.55)',
+        borderWidth: 1,
+        borderColor: 'rgba(112, 0, 255, 0.32)',
+        paddingVertical: ox(8),
+        paddingLeft: ox(14),
+        paddingRight: ox(10),
         overflow: 'hidden',
     },
     quotedReplyBubble: {
-        marginBottom: ox(6),
+        marginBottom: ox(8),
     },
     quotedReplyComposer: {
         flex: 1,
@@ -4373,55 +4407,60 @@ const styles = StyleSheet.create({
         top: 0,
         bottom: 0,
         width: 3,
-        backgroundColor: 'rgba(255,255,255,0.55)',
     },
     quotedReplyThumb: {
-        width: ox(34),
-        height: ox(34),
-        borderRadius: ox(6),
+        width: ox(48),
+        height: ox(48),
+        borderRadius: ox(8),
         overflow: 'hidden',
         backgroundColor: '#000000',
-        marginRight: ox(8),
+        marginRight: ox(10),
+        flexShrink: 0,
     },
     quotedReplyThumbComposer: {
-        width: ox(44),
-        height: ox(44),
-        borderRadius: ox(8),
+        width: ox(52),
+        height: ox(52),
+        borderRadius: ox(9),
     },
     quotedReplyThumbImage: {
         width: '100%',
         height: '100%',
     },
-    quotedReplyVideoBadge: {
-        flex: 1,
+    quotedReplyThumbFallback: {
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#111827',
-    },
-    quotedReplyVideoBadgeOverlay: {
-        position: 'absolute',
-        right: ox(2),
-        bottom: ox(2),
-        width: ox(16),
-        height: ox(16),
-        borderRadius: ox(8),
         backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    },
+    quotedReplyMediaBadge: {
+        position: 'absolute',
+        right: ox(3),
+        bottom: ox(3),
+        width: ox(18),
+        height: ox(18),
+        borderRadius: ox(9),
+        backgroundColor: 'rgba(0, 0, 0, 0.62)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.28)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     quotedReplyBody: {
-        flex: 1,
-        minWidth: 0,
+        flexGrow: 1,
+        flexShrink: 1,
+        minWidth: ox(96),
+        justifyContent: 'center',
     },
     quotedReplySender: {
-        color: 'rgba(255,255,255,0.88)',
+        color: DM_SENT_BRASS,
         fontSize: ox(11),
         fontWeight: '700',
-        marginBottom: ox(1),
+        marginBottom: ox(2),
     },
     quotedReplyText: {
-        color: 'rgba(255,255,255,0.62)',
-        fontSize: ox(12),
+        color: 'rgba(255,255,255,0.86)',
+        fontSize: ox(13),
+        lineHeight: ox(17),
     },
     swipeReplyCue: {
         width: ox(22),
