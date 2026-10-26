@@ -205,6 +205,45 @@ class StoryController extends Controller
     }
 
     /**
+     * Guest-safe preview of a single public story from a WhatsApp/web share link.
+     * Close-friends / only-me / private accounts / expired stories are 404.
+     */
+    public function showPublic(Request $request): JsonResponse
+    {
+        $handle = urldecode(trim((string) $request->query('user', '')));
+        $storyId = trim((string) $request->query('story', ''));
+
+        if ($handle === '' || $storyId === '') {
+            return response()->json(['error' => 'Story not found'], 404);
+        }
+
+        $user = User::query()
+            ->whereRaw('LOWER(handle) = ?', [mb_strtolower($handle)])
+            ->first();
+
+        if (! $user || $user->is_private) {
+            return response()->json(['error' => 'Story not found'], 404);
+        }
+
+        $story = Story::query()
+            ->where('id', $storyId)
+            ->where('user_id', $user->id)
+            ->active()
+            ->where(function ($q) {
+                $q->where('audience', 'public')->orWhereNull('audience');
+            })
+            ->withCount(['reactions', 'replies', 'views'])
+            ->with('user:id,handle,display_name,avatar_url')
+            ->first();
+
+        if (! $story) {
+            return response()->json(['error' => 'Story not found'], 404);
+        }
+
+        return response()->json($this->presentStory($story, false));
+    }
+
+    /**
      * Create a new story
      */
     /**

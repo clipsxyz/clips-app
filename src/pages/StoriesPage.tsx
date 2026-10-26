@@ -1,5 +1,6 @@
 import React from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { parsePublicShareLink } from '../utils/publicShareLink';
 import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock, FiUsers } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
@@ -190,8 +191,13 @@ export default function StoriesPage() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
-    const openUserHandle = location.state?.openUserHandle;
-    const openStoryId = location.state?.openStoryId;
+    const shareFromUrl = parsePublicShareLink(location.pathname, location.search);
+    const openUserHandle =
+        location.state?.openUserHandle ||
+        (shareFromUrl?.kind === 'story' ? shareFromUrl.handle : undefined);
+    const openStoryId =
+        location.state?.openStoryId ||
+        (shareFromUrl?.kind === 'story' ? shareFromUrl.storyId : undefined);
     const fromDmViewStory = location.state?.fromDmViewStory === true;
     const fromStories24Rail = location.state?.fromStories24Rail === true;
     const skipStories24RailReturn = location.state?.skipStories24RailReturn === true;
@@ -1722,21 +1728,9 @@ export default function StoriesPage() {
         loadViewerFollowState();
     }, [showInsightsSheet, insightsTab, user?.id, user?.handle, currentStoryForMeta?.id, (currentStoryForMeta?.viewerHandles || []).join('|')]);
 
-    // Guard: don't render if no user
+    // Guard: don't render if no user (share links are handled by AppGate → PublicStoryPage)
     if (!user) {
-        return (
-            <div className="flex items-center justify-center min-h-screen">
-                <div className="text-center">
-                    <p className="text-gray-600 dark:text-gray-400">Please sign in to view stories.</p>
-                    <button
-                        onClick={() => navigate('/login')}
-                        className="mt-4 px-4 py-2 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-medium hover:opacity-90 transition-opacity"
-                    >
-                        Sign In
-                    </button>
-                </div>
-            </div>
-        );
+        return <Navigate to="/landing" replace />;
     }
 
     // Feed rail → Stories: popping Stories icon (share-sheet style) while stories load (~2.6s min).

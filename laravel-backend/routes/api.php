@@ -222,6 +222,10 @@ Route::prefix('posts')->group(function () {
 Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken'])
     ->middleware('throttle:30,1');
 
+// Public story share-link preview (WhatsApp / web guest viewer).
+Route::get('/public/stories', [StoryController::class, 'showPublic'])
+    ->middleware('throttle:30,1');
+
 // Protected routes
 Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])->group(function () {
     Route::get('/boost/analytics/{postId}', [BoostController::class, 'analytics']);

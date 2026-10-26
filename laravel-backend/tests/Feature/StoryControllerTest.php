@@ -379,5 +379,47 @@ class StoryControllerTest extends TestCase
         $this->assertSame('http://192.168.1.13:8000/storage/uploads/clip.mp4', $story['media_url'] ?? null);
         $this->assertSame('http://192.168.1.13:8000/storage/uploads/clip.jpg', $story['video_poster_url'] ?? null);
     }
+
+    public function test_guest_can_view_public_shared_story(): void
+    {
+        $user = User::factory()->create(['is_private' => false]);
+        $story = Story::factory()->forUser($user)->create([
+            'text' => 'Shared to WhatsApp',
+            'audience' => 'public',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $response = $this->getJson(
+            '/api/public/stories?user='.rawurlencode($user->handle).'&story='.$story->id,
+        );
+
+        $response->assertStatus(200)
+            ->assertJsonFragment([
+                'id' => $story->id,
+                'text' => 'Shared to WhatsApp',
+            ]);
+    }
+
+    public function test_guest_cannot_view_close_friends_or_private_account_story(): void
+    {
+        $publicUser = User::factory()->create(['is_private' => false]);
+        $close = Story::factory()->forUser($publicUser)->create([
+            'audience' => 'close_friends',
+            'expires_at' => now()->addDay(),
+        ]);
+        $privateUser = User::factory()->create(['is_private' => true]);
+        $hidden = Story::factory()->forUser($privateUser)->create([
+            'audience' => 'public',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $this->getJson(
+            '/api/public/stories?user='.rawurlencode($publicUser->handle).'&story='.$close->id,
+        )->assertStatus(404);
+
+        $this->getJson(
+            '/api/public/stories?user='.rawurlencode($privateUser->handle).'&story='.$hidden->id,
+        )->assertStatus(404);
+    }
 }
 

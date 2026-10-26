@@ -969,6 +969,39 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
     };
 }
 
+/** Guest-safe single story from a WhatsApp/web share link. */
+export async function fetchPublicStory(userHandle: string, storyId: string): Promise<Story | null> {
+    const handle = (userHandle || '').trim();
+    const id = (storyId || '').trim();
+    if (!handle || !id) return null;
+
+    if (isLaravelApiEnabled()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const params = new URLSearchParams({ user: handle, story: id });
+            const response = await apiRequest(`/public/stories?${params.toString()}`);
+            if (!response || typeof response !== 'object') return null;
+            return mapLaravelStoryToStory(response);
+        } catch (error) {
+            console.warn('Failed to fetch public story from API, falling back to mock:', error);
+        }
+    }
+
+    lastStoriesLoadSource = 'mock';
+    await delay();
+    const now = Date.now();
+    const handleKey = handle.replace(/^@/, '').toLowerCase();
+    const idKey = id.toLowerCase();
+    const match = stories.find((s) => {
+        if ((s.id || '').toLowerCase() !== idKey) return false;
+        if ((s.userHandle || '').replace(/^@/, '').toLowerCase() !== handleKey) return false;
+        if (s.expiresAt <= now) return false;
+        const audience = s.audience || 'public';
+        return audience === 'public';
+    });
+    return match || null;
+}
+
 // Create a new story
 export async function createStory(
     userId: string,

@@ -1,6 +1,6 @@
 ﻿import React from 'react';
 import { createPortal } from 'react-dom';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
@@ -8729,11 +8729,7 @@ function FeedPageWrapper() {
 
   // Not logged in
   if (!user) {
-    return (
-      <div className="p-6">
-        <a href="/login" className="text-brand-600 underline">Sign in</a> to view your feed.
-      </div>
-    );
+    return <Navigate to="/landing" replace />;
   }
 
   return (
@@ -10075,11 +10071,7 @@ function BoostPageWrapper() {
 
   // Not logged in
   if (!user) {
-    return (
-      <div className="p-6">
-        <a href="/login" className="text-brand-600 underline">Sign in</a> to view your posts.
-      </div>
-    );
+    return <Navigate to="/landing" replace />;
   }
 
   if (loading) {

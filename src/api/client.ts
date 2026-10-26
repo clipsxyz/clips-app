@@ -55,6 +55,7 @@ const LIVE_API_PATH_PREFIXES = [
     '/boost/',
     '/render-jobs/',
     '/public/posts/',
+    '/public/stories',
 ] as const;
 
 export function isMigratedApiRequestPath(endpoint: string): boolean {

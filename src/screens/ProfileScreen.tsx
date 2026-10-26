@@ -47,6 +47,7 @@ import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
+import { resetRootToScreen } from '../navigation/rootNavigationRef';
 import { fetchPostsByUser, getFollowedUsers } from '../api/posts';
 import {
     getUserCollections,
@@ -428,7 +429,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             onConfirm: () => {
                 setProfileAlert(null);
                 logout();
-                navigation.replace('Login');
+                resetRootToScreen('Landing');
             },
         });
     };

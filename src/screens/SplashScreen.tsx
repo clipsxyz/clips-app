@@ -3,12 +3,14 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Linking,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
+import { parsePublicShareLink, type PublicShareLink } from '../utils/publicShareLink';
 import {
   UEFA_PASSPORT_GRADIENT,
   UEFA_PASSPORT_GRADIENT_LOCATIONS,
@@ -43,6 +45,7 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
   const finishedRef = useRef(false);
   const userRef = useRef(user);
   userRef.current = user;
+  const pendingShareRef = useRef<PublicShareLink | null>(null);
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -52,12 +55,29 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
       if (finishedRef.current) return;
       finishedRef.current = true;
       pulseLoop?.stop();
+      const share = pendingShareRef.current;
+      if (share?.kind === 'post') {
+        navigation.replace('PublicPost', { token: share.token, id: share.postId });
+        return;
+      }
+      if (share?.kind === 'story') {
+        navigation.replace('PublicStory', { handle: share.handle, storyId: share.storyId });
+        return;
+      }
       if (userRef.current) {
         navigation.replace('MainTabs');
       } else {
         navigation.replace('Landing');
       }
     };
+
+    void Linking.getInitialURL().then((url) => {
+      if (url) pendingShareRef.current = parsePublicShareLink(url);
+    });
+    const urlSub = Linking.addEventListener('url', ({ url }) => {
+      const share = parsePublicShareLink(url);
+      if (share) pendingShareRef.current = share;
+    });
 
     // Brand: rise + scale settle into center
     Animated.parallel([
@@ -182,6 +202,7 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
     );
 
     return () => {
+      urlSub.remove();
       timers.forEach(clearTimeout);
       pulseLoop?.stop();
       brandOpacity.stopAnimation();

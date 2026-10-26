@@ -15,6 +15,16 @@ import {
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 const USER_STORAGE_KEY = 'user';
 
+/** Legacy auto-login guest — must never restore a session after logout. */
+function isSyntheticGuestUser(parsed: unknown): boolean {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const row = parsed as { id?: unknown; handle?: unknown; email?: unknown };
+  const id = String(row.id || '');
+  const handle = String(row.handle || '');
+  const email = String(row.email || '');
+  return id === 'test-user' || handle === 'TestUser@Dublin' || email === 'test@example.com';
+}
+
 async function hydrateUserFromNativeStorage(): Promise<void> {
   try {
     if (typeof localStorage !== 'undefined' && localStorage.getItem(USER_STORAGE_KEY)) return;
@@ -49,11 +59,12 @@ function setSentryUser(user: { id: string; username?: string } | null) {
     /* Sentry optional on native */
   }
 }
-type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
+type AuthCtx = { user: User | null; ready: boolean; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null);
+  const [ready, setReady] = React.useState(false);
   const authRefreshGenRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -65,6 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshGen = authRefreshGenRef.current;
 
     void (async () => {
+      try {
       await Promise.all([hydratePrivacyStorage(), hydrateUserFromNativeStorage()]);
       if (cancelled) return;
 
@@ -78,36 +90,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const s = localStorage.getItem(USER_STORAGE_KEY);
         if (!s) {
-          // Create a test user if no user exists
-          const testUser: User = {
-            id: 'test-user',
-            name: 'Test User',
-            email: 'test@example.com',
-            password: '',
-            age: 25,
-            interests: ['Technology', 'Travel', 'Food'],
-            local: 'Finglas',
-            regional: 'Dublin',
-            national: 'Ireland',
-            handle: 'TestUser@Dublin',
-            countryFlag: '🇮🇪',
-            avatarUrl: undefined,
-            is_private: false,
-          };
-          if (cancelled) return;
-          setUser(testUser);
-          const testJson = JSON.stringify(testUser);
-          localStorage.setItem(USER_STORAGE_KEY, testJson);
-          persistUserToNativeStorage(testJson);
-          await hydrateFollowsStorage(testUser.id);
-          // Sync privacy setting
-          setProfilePrivacy(testUser.handle, false);
-          // Initialize mock private user for testing
-          initializePrivateMockUser();
           return;
         }
 
         const parsed = JSON.parse(s);
+        if (isSyntheticGuestUser(parsed)) {
+          localStorage.removeItem(USER_STORAGE_KEY);
+          void persistUserToNativeStorage(null);
+          return;
+        }
         const previewId =
           parsed?.id != null && String(parsed.id).trim() !== ''
             ? String(parsed.id)
@@ -271,6 +262,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Initialize mock private user for testing (Sarah@Artane)
       initializePrivateMockUser();
+      } finally {
+        if (!cancelled) setReady(true);
+      }
     })();
 
     return () => {
@@ -430,14 +424,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authRefreshGenRef.current += 1;
     const prevId = user?.id;
     disconnectSocket();
-    // Clear UI immediately, but keep Sanctum + AsyncStorage user until FCM unregister finishes.
     setUser(null);
     if (prevId) clearUserState(prevId);
-    localStorage.removeItem('user');
+    localStorage.removeItem(USER_STORAGE_KEY);
     try {
       localStorage.removeItem('clips_app_stable_uid');
     } catch (_) {}
     setSentryUser(null);
+    void persistUserToNativeStorage(null);
+    void clearAuthToken();
     void (async () => {
       try {
         const { clearNotificationSession } = await import('../services/notifications');
@@ -445,12 +440,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // still drop local credentials
       }
-      await persistUserToNativeStorage(null);
-      await clearAuthToken();
     })();
   };
 
-  return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, ready, login, logout }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth() {

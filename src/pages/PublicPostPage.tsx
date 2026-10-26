@@ -60,6 +60,14 @@ export default function PublicPostPage() {
     navigate(`/login?mode=${mode}`);
   };
 
+  const goFurther = () => {
+    if (user) {
+      navigate('/feed');
+      return;
+    }
+    navigate('/landing', { replace: true });
+  };
+
   if (loading) {
     return <div className="min-h-screen bg-black text-white flex items-center justify-center">Loading post…</div>;
   }
@@ -91,13 +99,13 @@ export default function PublicPostPage() {
             {post.caption && post.caption !== post.text && <p className="text-sm text-gray-300">{post.caption}</p>}
           </div>
           <div className="px-4 pb-4 flex items-center gap-6 text-gray-400">
-            <button type="button" onClick={() => goToAuth('signup')} className="flex items-center gap-2 hover:text-white">
+            <button type="button" onClick={goFurther} className="flex items-center gap-2 hover:text-white">
               <FiHeart /> <span>{post.stats.likes}</span>
             </button>
-            <button type="button" onClick={() => goToAuth('signup')} className="flex items-center gap-2 hover:text-white">
+            <button type="button" onClick={goFurther} className="flex items-center gap-2 hover:text-white">
               <FiMessageCircle /> <span>{post.stats.comments}</span>
             </button>
-            <button type="button" onClick={() => goToAuth('signup')} className="flex items-center gap-2 hover:text-white">
+            <button type="button" onClick={goFurther} className="flex items-center gap-2 hover:text-white">
               <FiShare2 /> <span>{post.stats.shares}</span>
             </button>
           </div>
@@ -105,23 +113,37 @@ export default function PublicPostPage() {
 
         <div className="mt-6 rounded-xl border border-sky-500/40 bg-sky-500/10 p-4">
           <p className="text-sm text-sky-100">
-            {user ? 'Sign in to unlock all interactions and feed navigation.' : 'Join now to like, comment, follow, and keep exploring.'}
+            {user
+              ? 'Open Gazetteer to like, comment, follow, and keep exploring.'
+              : 'Create an account to like, comment, follow, and keep exploring.'}
           </p>
           <div className="mt-3 flex gap-3">
-            <button
-              type="button"
-              onClick={() => goToAuth('signup')}
-              className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-white text-sm font-medium"
-            >
-              Sign up
-            </button>
-            <button
-              type="button"
-              onClick={() => goToAuth('login')}
-              className="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-500 text-sm"
-            >
-              Log in
-            </button>
+            {user ? (
+              <button
+                type="button"
+                onClick={() => navigate('/feed')}
+                className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-white text-sm font-medium"
+              >
+                Open Gazetteer
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => goToAuth('signup')}
+                  className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-white text-sm font-medium"
+                >
+                  Sign up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goToAuth('login')}
+                  className="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-500 text-sm"
+                >
+                  Log in
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

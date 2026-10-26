@@ -1,8 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import * as Sentry from '@sentry/react';
-import App from '../App';
 import { ThemeProvider } from '../theme/ThemeProvider';
 import { AuthProvider } from '../context/Auth';
+import AppGate from './AppGate';
+import RequireAccount from './RequireAccount';
 import { FeedPageWrapper as FeedPage, BoostPageWrapper as BoostPage } from '../App';
 import ClipPage from '../pages/ClipPage';
 import CreatePage from '../pages/CreatePage';
@@ -68,7 +69,7 @@ export default function Root() {
                             <Route path="/post/:id" element={<PublicPostPage />} />
                             {/* Cold start: go to splash without mounting App chrome first */}
                             <Route path="/" element={<Navigate to="/splash" replace />} />
-                            <Route element={<App />}>
+                            <Route element={<AppGate />}>
                                 <Route path="feed" element={<FeedPage />} />
                                 <Route path="create" element={<CreatePage />} />
                                 <Route path="create/instant" element={<InstantCreatePage />} />
@@ -95,9 +96,11 @@ export default function Root() {
                                 <Route path="user/:handle" element={<ViewProfilePage />} />
                                 <Route path="collection/:collectionId" element={<CollectionFeedPage />} />
                             </Route>
-                            <Route path="messages/group/:groupId" element={<MessagesPage />} />
-                            <Route path="messages/:handle" element={<MessagesPage />} />
-                            <Route path="inbox" element={<InboxPage />} />
+                            <Route element={<RequireAccount />}>
+                                <Route path="messages/group/:groupId" element={<MessagesPage />} />
+                                <Route path="messages/:handle" element={<MessagesPage />} />
+                                <Route path="inbox" element={<InboxPage />} />
+                            </Route>
                         </Routes>
                     </BrowserRouter>
                 </ThemeProvider>

@@ -8,7 +8,11 @@ import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, Dev
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, NavigationContainer } from '@react-navigation/native';
-import { rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
+import { resetRootToScreen, rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
+import {
+  getNativeShareNavState,
+  nativeShareLinkingPrefixes,
+} from './src/navigation/shareLinking.native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { enableFreeze } from 'react-native-screens';
@@ -51,6 +55,7 @@ import SplashScreen from './src/screens/SplashScreen';
 import LandingScreen from './src/screens/LandingScreen';
 import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
+import PublicStoryScreen from './src/screens/PublicStoryScreen';
 import ClipScreen from './src/screens/ClipScreen';
 import ClipPollScreen from './src/screens/ClipPollScreen';
 import Story24ComposerScreen from './src/screens/Story24ComposerScreen';
@@ -137,8 +142,13 @@ function CreateTabPlaceholder() {
 }
 
 function MainTabs() {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
   const [inboxBadgeCount, setInboxBadgeCount] = useState(0);
+
+  useEffect(() => {
+    if (!ready || user) return;
+    resetRootToScreen('Landing');
+  }, [ready, user]);
 
   useEffect(() => {
     if (!user?.handle) {
@@ -285,7 +295,14 @@ function App(): React.JSX.Element {
       <SafeAreaProvider>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
         <UploadProgressToast />
-        <NavigationContainer ref={navigationRef} theme={NAV_THEME}>
+        <NavigationContainer
+          ref={navigationRef}
+          theme={NAV_THEME}
+          linking={{
+            prefixes: nativeShareLinkingPrefixes(),
+            getStateFromPath: (path) => getNativeShareNavState(path),
+          }}
+        >
           <Stack.Navigator
             initialRouteName="Splash"
             screenOptions={{
@@ -421,6 +438,14 @@ function App(): React.JSX.Element {
           />
           <Stack.Screen name="Terms" component={TermsScreen} />
           <Stack.Screen name="PublicPost" component={PublicPostScreen} />
+          <Stack.Screen
+            name="PublicStory"
+            component={PublicStoryScreen}
+            options={{
+              presentation: 'fullScreenModal',
+              contentStyle: { backgroundColor: '#000000' },
+            }}
+          />
           <Stack.Screen
             name="Clip"
             component={ClipScreen}

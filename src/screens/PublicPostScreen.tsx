@@ -105,14 +105,26 @@ export default function PublicPostScreen({ navigation, route }: any) {
         navigation.navigate('Login', { mode });
     };
 
+    const goFurther = () => {
+        if (user) {
+            navigation.replace('MainTabs', { screen: 'Home' });
+            return;
+        }
+        navigation.replace('Landing');
+    };
+
     const openFullPost = () => {
         if (!post) return;
+        if (!user) {
+            goFurther();
+            return;
+        }
         navigation.navigate('PostDetail', { postId: post.id });
     };
 
     const openAuthorProfile = () => {
         if (!post?.userHandle || !user) {
-            goToAuth('login');
+            goFurther();
             return;
         }
         navigation.navigate('ViewProfile', { handle: post.userHandle });
@@ -151,7 +163,13 @@ export default function PublicPostScreen({ navigation, route }: any) {
     return (
         <GazetteerScreenShell>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <TouchableOpacity
+                    onPress={() => {
+                        if (user && navigation.canGoBack()) navigation.goBack();
+                        else goFurther();
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                     <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Shared post</Text>
@@ -220,7 +238,7 @@ export default function PublicPostScreen({ navigation, route }: any) {
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.secondaryBtn}
-                            onPress={() => navigation.replace('MainTabs', { screen: 'Home' })}
+                            onPress={goFurther}
                         >
                             <Text style={styles.secondaryBtnText}>Go to feed</Text>
                         </TouchableOpacity>
