@@ -145,14 +145,6 @@ function FadeCollapseRow({
 
     useEffect(() => {
         if (!exiting || exitedRef.current) return;
-        LayoutAnimation.configureNext({
-            duration: 260,
-            update: { type: LayoutAnimation.Types.easeInEaseOut },
-            delete: {
-                type: LayoutAnimation.Types.easeInEaseOut,
-                property: LayoutAnimation.Properties.opacity,
-            },
-        });
         Animated.timing(progress, {
             toValue: 0,
             duration: 280,
@@ -161,7 +153,9 @@ function FadeCollapseRow({
         }).start(({ finished }) => {
             if (!finished || exitedRef.current) return;
             exitedRef.current = true;
-            onExitedRef.current();
+            requestAnimationFrame(() => {
+                onExitedRef.current();
+            });
         });
     }, [exiting, progress]);
 
@@ -439,6 +433,93 @@ export default function InboxScreen({ navigation, route }: any) {
         });
     }, [notifications, conversations, dmAvatarMap, user?.id]);
 
+    const notificationPrefs = useMemo(() => getNotificationPreferences(), []);
+    const activityNotifications = useMemo<Notification[]>(() => {
+        return conversations
+            .filter((conv) => {
+                if (!conv.lastMessage || !conv.unread) return false;
+                if (conv.kind === 'group' && conv.chatGroupId) {
+                    return isNotificationTypeEnabled(notificationPrefs, 'group_chat');
+                }
+                if (!conv.otherHandle) return false;
+                const ownMessage = conv.lastMessage.senderHandle === user?.handle;
+                if (ownMessage) return false;
+                return isNotificationTypeEnabled(notificationPrefs, 'dm');
+            })
+            .map((conv) => {
+                const lastMsg = conv.lastMessage!;
+                return {
+                    id: `conv-notif-${conv.kind === 'group' ? conv.chatGroupId : conv.otherHandle}-${lastMsg.id}`,
+                    type: 'dm' as const,
+                    fromHandle: conv.kind === 'group' ? (conv.groupName || 'Group') : conv.otherHandle,
+                    toHandle: user?.handle || '',
+                    message: lastMsg.text,
+                    storyId: lastMsg.storyId,
+                    imageUrl: lastMsg.storyId ? lastMsg.imageUrl : undefined,
+                    storyContextText: lastMsg.storyContextText,
+                    storyContextOwner: lastMsg.storyContextOwner,
+                    chatGroupId: conv.kind === 'group' ? conv.chatGroupId : undefined,
+                    groupName: conv.kind === 'group' ? conv.groupName : undefined,
+                    timestamp: lastMsg.timestamp,
+                    read: conv.unread === 0,
+                };
+            });
+    }, [conversations, notificationPrefs, user?.handle]);
+    const allNotifications = useMemo(() => {
+        return [
+            ...notifications.filter((n) => countsTowardInboxNotificationBadge(n.type)),
+            ...activityNotifications,
+        ].sort((a, b) => b.timestamp - a.timestamp);
+    }, [notifications, activityNotifications]);
+    const inboxUnreadParts = inboxUnreadPartsFromLists(conversations, notifications);
+    const unreadMessages = inboxUnreadParts.messages;
+    const unreadGroups = inboxUnreadParts.groups;
+    const unreadNotifications = inboxUnreadParts.notifications;
+
+    useEffect(() => {
+        if (!user?.handle) return;
+        publishInboxUnreadParts({
+            handle: user.handle,
+            messages: unreadMessages,
+            groups: unreadGroups + pendingInvites.length,
+            notifications: unreadNotifications,
+        });
+    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications, pendingInvites.length]);
+
+    const openFollowedStoryFromRail = useCallback(
+        (group: StoryGroup) => {
+            const railHandles = storyGroups
+                .map((g) => g.userHandle)
+                .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
+            const latest = [...(group.stories || [])].sort(
+                (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+            )[0];
+            const mediaUrl = latest?.mediaUrl;
+            const isVideo =
+                latest?.mediaType === 'video' ||
+                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+            const params = {
+                openUserHandle: group.userHandle,
+                fromStories24Rail: true,
+                skipStories24RailReturn: true,
+                railHandles,
+                previewThumb:
+                    (!isVideo && mediaUrl) ||
+                    group.avatarUrl ||
+                    getAvatarForHandle(group.userHandle) ||
+                    undefined,
+                previewVideoUrl: isVideo && mediaUrl ? mediaUrl : undefined,
+                forceRefreshAt: Date.now(),
+            };
+            if (rootNavigationRef.isReady()) {
+                (rootNavigationRef as any).navigate('Stories', params);
+                return;
+            }
+            navigation.navigate('Stories', params);
+        },
+        [navigation, storyGroups],
+    );
+
     const loadData = async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
             setLoading(false);
@@ -581,42 +662,6 @@ export default function InboxScreen({ navigation, route }: any) {
         options.push({ text: 'Cancel', onPress: () => {} });
         Alert.alert('Story views', 'View profile', options);
     };
-
-    /** Same Stories 24 open format as the feed rail (hold screen + rail swipe chain). */
-    const openFollowedStoryFromRail = useCallback(
-        (group: StoryGroup) => {
-            const railHandles = storyGroups
-                .map((g) => g.userHandle)
-                .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
-            const latest = [...(group.stories || [])].sort(
-                (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
-            )[0];
-            const mediaUrl = latest?.mediaUrl;
-            const isVideo =
-                latest?.mediaType === 'video' ||
-                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
-            const params = {
-                openUserHandle: group.userHandle,
-                fromStories24Rail: true,
-                skipStories24RailReturn: true,
-                railHandles,
-                previewThumb:
-                    (!isVideo && mediaUrl) ||
-                    group.avatarUrl ||
-                    getAvatarForHandle(group.userHandle) ||
-                    undefined,
-                previewVideoUrl: isVideo && mediaUrl ? mediaUrl : undefined,
-                forceRefreshAt: Date.now(),
-            };
-            // Stories lives on the root stack — Inbox is nested under MainTabs.
-            if (rootNavigationRef.isReady()) {
-                (rootNavigationRef as any).navigate('Stories', params);
-                return;
-            }
-            navigation.navigate('Stories', params);
-        },
-        [navigation, storyGroups],
-    );
 
     const navigateToMessages = (params: { handle?: string; chatGroupId?: string; kind?: string }) => {
         if (rootNavigationRef.isReady()) {
@@ -781,14 +826,6 @@ export default function InboxScreen({ navigation, route }: any) {
     };
 
     const finishInviteExit = (inviteId: string) => {
-        LayoutAnimation.configureNext({
-            duration: 240,
-            update: { type: LayoutAnimation.Types.easeInEaseOut },
-            delete: {
-                type: LayoutAnimation.Types.easeInEaseOut,
-                property: LayoutAnimation.Properties.opacity,
-            },
-        });
         removeInviteFromUi(inviteId);
         const resolve = inviteExitResolversRef.current.get(inviteId);
         if (resolve) {
@@ -1009,64 +1046,12 @@ export default function InboxScreen({ navigation, route }: any) {
         }
     };
 
-    const notificationPrefs = useMemo(() => getNotificationPreferences(), []);
-    const activityNotifications = useMemo<Notification[]>(() => {
-        return conversations
-            .filter((conv) => {
-                if (!conv.lastMessage || !conv.unread) return false;
-                if (conv.kind === 'group' && conv.chatGroupId) {
-                    return isNotificationTypeEnabled(notificationPrefs, 'group_chat');
-                }
-                if (!conv.otherHandle) return false;
-                const ownMessage = conv.lastMessage.senderHandle === user?.handle;
-                if (ownMessage) return false;
-                return isNotificationTypeEnabled(notificationPrefs, 'dm');
-            })
-            .map((conv) => {
-                const lastMsg = conv.lastMessage!;
-                return {
-                    id: `conv-notif-${conv.kind === 'group' ? conv.chatGroupId : conv.otherHandle}-${lastMsg.id}`,
-                    type: 'dm' as const,
-                    fromHandle: conv.kind === 'group' ? (conv.groupName || 'Group') : conv.otherHandle,
-                    toHandle: user?.handle || '',
-                    message: lastMsg.text,
-                    storyId: lastMsg.storyId,
-                    imageUrl: lastMsg.storyId ? lastMsg.imageUrl : undefined,
-                    storyContextText: lastMsg.storyContextText,
-                    storyContextOwner: lastMsg.storyContextOwner,
-                    chatGroupId: conv.kind === 'group' ? conv.chatGroupId : undefined,
-                    groupName: conv.kind === 'group' ? conv.groupName : undefined,
-                    timestamp: lastMsg.timestamp,
-                    read: conv.unread === 0,
-                };
-            });
-    }, [conversations, notificationPrefs, user?.handle]);
-    const allNotifications = useMemo(() => {
-        return [
-            ...notifications.filter((n) => countsTowardInboxNotificationBadge(n.type)),
-            ...activityNotifications,
-        ].sort((a, b) => b.timestamp - a.timestamp);
-    }, [notifications, activityNotifications]);
     const sortedConversations = [...conversations].sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
         return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
     });
     const groupMessages = sortedConversations.filter((c) => c.kind === 'group');
-    const inboxUnreadParts = inboxUnreadPartsFromLists(conversations, notifications);
-    const unreadMessages = inboxUnreadParts.messages;
-    const unreadGroups = inboxUnreadParts.groups;
-    const unreadNotifications = inboxUnreadParts.notifications;
-
-    useEffect(() => {
-        if (!user?.handle) return;
-        publishInboxUnreadParts({
-            handle: user.handle,
-            messages: unreadMessages,
-            groups: unreadGroups + pendingInvites.length,
-            notifications: unreadNotifications,
-        });
-    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications, pendingInvites.length]);
 
     const filterConversationList = (list: ConversationSummary[]) => {
         if (messageFilter === 'groups') return list.filter((c) => c.kind === 'group');
@@ -1489,11 +1474,12 @@ export default function InboxScreen({ navigation, route }: any) {
                             {!item.read && <View style={styles.unreadDot} />}
                         </TouchableOpacity>
                         );
-                        if (!inviteId) return row;
                         return (
                             <FadeCollapseRow
-                                exiting={exitingInviteId === inviteId}
-                                onExited={() => finishInviteExit(inviteId)}
+                                exiting={!!inviteId && exitingInviteId === inviteId}
+                                onExited={() => {
+                                    if (inviteId) finishInviteExit(inviteId);
+                                }}
                             >
                                 {row}
                             </FadeCollapseRow>
