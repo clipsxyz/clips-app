@@ -70,6 +70,8 @@ class NotificationController extends Controller
         $count = Notification::query()
             ->where('user_id', $user->id)
             ->where('read', false)
+            // DMs/replies/stickers already badge the Messages tab via conversation unread.
+            ->whereNotIn('type', ['dm', 'sticker', 'reply'])
             ->count();
 
         return response()->json(['count' => $count]);

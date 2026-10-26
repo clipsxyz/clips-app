@@ -21,6 +21,10 @@ import { getSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
 import { markGroupConversationReadById } from '../api/messages';
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+import {
+    isThreadActivityNotificationType,
+    publishInboxUnreadParts,
+} from '../utils/inboxUnread';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -1007,8 +1011,26 @@ export default function InboxPage() {
         }
     }, [user?.handle, loadData]);
 
-    const unreadNotifications = notifications.filter(n => !n.read).length;
-    const unreadMessagesTotal = items.reduce((sum, c) => sum + c.unread, 0);
+    const unreadNotifications = notifications.filter(
+        (n) => !n.read && !isThreadActivityNotificationType(n.type),
+    ).length;
+    const unreadMessages = items
+        .filter((c) => c.kind !== 'group' && !c.isRequest)
+        .reduce((sum, c) => sum + (c.unread || 0), 0);
+    const unreadGroups = items
+        .filter((c) => c.kind === 'group')
+        .reduce((sum, c) => sum + (c.unread || 0), 0);
+    const unreadMessagesTotal = unreadMessages;
+
+    React.useEffect(() => {
+        if (!user?.handle) return;
+        publishInboxUnreadParts({
+            handle: user.handle,
+            messages: unreadMessages,
+            groups: unreadGroups,
+            notifications: unreadNotifications,
+        });
+    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications]);
     const normalizedQuery = conversationQuery.trim().toLowerCase();
     const queriedItems = normalizedQuery
         ? items.filter((c) => {

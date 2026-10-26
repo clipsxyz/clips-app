@@ -20,6 +20,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
 import { getUnreadTotal } from './src/api/messages';
 import { getUnreadNotificationCount } from './src/api/notifications';
+import { inboxBadgeFromEventPayload, inboxBadgeTotal } from './src/utils/inboxUnread';
 import {
   HomeTabStack,
   BoostTabStack,
@@ -168,11 +169,16 @@ function MainTabs() {
         ]);
         failed = results.filter((r) => r.status === 'rejected').length;
         if (mounted) {
-          const total = results.reduce<number>(
-            (sum, r) => sum + (r.status === 'fulfilled' ? r.value : 0),
-            0,
+          const notificationUnread =
+            results[0].status === 'fulfilled' ? results[0].value : 0;
+          const messageUnread = results[1].status === 'fulfilled' ? results[1].value : 0;
+          setInboxBadgeCount(
+            inboxBadgeTotal({
+              messages: messageUnread,
+              groups: 0,
+              notifications: notificationUnread,
+            }),
           );
-          setInboxBadgeCount(Math.max(0, total));
         }
       } catch {
         failed = 2;
@@ -188,9 +194,19 @@ function MainTabs() {
     };
     void refresh();
 
-    const onInboxUnread = (payload?: { handle?: string; unread?: number }) => {
+    const onInboxUnread = (payload?: {
+      handle?: string;
+      unread?: number;
+      messages?: number;
+      groups?: number;
+      notifications?: number;
+    }) => {
       if (payload?.handle && payload.handle !== handle) return;
-      // Prefer live message unread when provided; still refresh notifications.
+      const immediate = inboxBadgeFromEventPayload(payload);
+      if (immediate != null) {
+        setInboxBadgeCount(immediate);
+        return;
+      }
       void refresh();
     };
     const onNotificationsChanged = (payload?: { handle?: string }) => {

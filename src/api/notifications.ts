@@ -1,5 +1,6 @@
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
+import { isThreadActivityNotificationType } from '../utils/inboxUnread';
 
 export type NotificationType =
     | 'sticker'
@@ -192,48 +193,70 @@ export async function getNotifications(forHandle: string): Promise<Notification[
     return filterNotificationsByPreferences(forHandle, notifications.get(forHandle) || []);
 }
 
+function markLocalNotificationRead(notificationId: string, forHandle: string): void {
+    const userNotifications = notifications.get(forHandle) || [];
+    const notif = userNotifications.find((n) => n.id === notificationId);
+    if (notif) notif.read = true;
+}
+
+function markLocalAllNotificationsRead(forHandle: string): void {
+    const userNotifications = notifications.get(forHandle) || [];
+    userNotifications.forEach((n) => {
+        n.read = true;
+    });
+}
+
+function localOnlyUnreadCount(forHandle: string): number {
+    return (notifications.get(forHandle) || []).filter(
+        (n) =>
+            !n.read &&
+            String(n.id || '').startsWith('notif-') &&
+            !isThreadActivityNotificationType(n.type),
+    ).length;
+}
+
 export async function markNotificationRead(notificationId: string, forHandle: string): Promise<void> {
+    markLocalNotificationRead(notificationId, forHandle);
     const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
     if (isLaravelApiEnabled()) {
         try {
             const apiClient = await import('./client');
             await apiClient.markNotificationReadApi(notificationId);
-            dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
-            return;
         } catch (error) {
             console.warn('Failed to mark notification read via API, falling back to local store:', error);
         }
     }
-
-    const userNotifications = notifications.get(forHandle) || [];
-    const notif = userNotifications.find(n => n.id === notificationId);
-    if (notif) {
-        notif.read = true;
-        dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
-    }
+    dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
 }
 
 export async function markAllNotificationsRead(forHandle: string): Promise<void> {
+    markLocalAllNotificationsRead(forHandle);
     const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
     if (isLaravelApiEnabled()) {
         try {
             const apiClient = await import('./client');
             await apiClient.markAllNotificationsReadApi();
-            dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
-            return;
         } catch (error) {
             console.warn('Failed to mark all notifications read via API, falling back to local store:', error);
         }
     }
-
-    const userNotifications = notifications.get(forHandle) || [];
-    userNotifications.forEach(n => n.read = true);
     dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
 }
 
 export async function getUnreadNotificationCount(forHandle: string): Promise<number> {
+    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
+    if (isLaravelApiEnabled()) {
+        try {
+            const apiClient = await import('./client');
+            const response = await apiClient.fetchUnreadNotificationCount();
+            const apiCount = Math.max(0, Number(response?.count ?? 0) || 0);
+            return apiCount + localOnlyUnreadCount(forHandle);
+        } catch (error) {
+            console.warn('Failed to fetch unread notification count from API, falling back to local store:', error);
+        }
+    }
     const items = await getNotifications(forHandle);
-    return items.filter(n => !n.read).length;
+    return items.filter((n) => !n.read && !isThreadActivityNotificationType(n.type)).length;
 }
 
 export async function deleteNotification(notificationId: string, forHandle: string): Promise<void> {

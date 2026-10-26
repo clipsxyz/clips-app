@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Tests\TestCase;
 use App\Models\User;
+use App\Models\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -128,6 +129,38 @@ class NotificationControllerTest extends TestCase
                 'success' => true,
                 'preferences' => null,
             ]);
+    }
+
+    public function test_unread_count_excludes_thread_activity_notifications(): void
+    {
+        $user = User::factory()->create();
+
+        Notification::query()->create([
+            'user_id' => $user->id,
+            'type' => 'like',
+            'from_handle' => 'Alice@Cork',
+            'to_handle' => $user->handle,
+            'read' => false,
+        ]);
+        Notification::query()->create([
+            'user_id' => $user->id,
+            'type' => 'dm',
+            'from_handle' => 'Bob@Dublin',
+            'to_handle' => $user->handle,
+            'read' => false,
+        ]);
+        Notification::query()->create([
+            'user_id' => $user->id,
+            'type' => 'follow',
+            'from_handle' => 'Cara@Galway',
+            'to_handle' => $user->handle,
+            'read' => true,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/notifications/unread-count')
+            ->assertOk()
+            ->assertJson(['count' => 1]);
     }
 }
 

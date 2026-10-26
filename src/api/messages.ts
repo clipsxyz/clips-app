@@ -2,6 +2,7 @@ import { getRuntimeEnv, isLaravelApiEnabled, isMockMode } from '../config/runtim
 import { hasAuthTokenAsync } from '../utils/authTokenBridge';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 import { laravelMessageIsRead } from '../utils/dmThreadStatus';
+import { effectiveThreadUnread } from '../utils/inboxUnread';
 
 /** Live inbox/thread fetches — never inject mock users when production/API mode is on. */
 function useLiveInboxApi(): boolean {
@@ -623,7 +624,36 @@ export async function getUnreadTotal(handle: string): Promise<number> {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
             const items = res?.items ?? [];
-            return items.reduce((s: number, i: { unread_count?: number }) => s + (Number(i.unread_count) || 0), 0);
+            return items.reduce(
+                (
+                    s: number,
+                    i: {
+                        unread_count?: number;
+                        type?: string;
+                        other_user?: { handle?: string };
+                        latest_message?: { sender_handle?: string; senderHandle?: string };
+                    },
+                ) => {
+                    const other = String(i.other_user?.handle || '');
+                    const override =
+                        i.type !== 'group' && other
+                            ? unreadOverrideByThread.get(`${handle}::${other}`)
+                            : undefined;
+                    const raw = override !== undefined ? override : Number(i.unread_count) || 0;
+                    const lastSender =
+                        i.latest_message?.sender_handle || i.latest_message?.senderHandle || '';
+                    return (
+                        s +
+                        effectiveThreadUnread({
+                            unread: raw,
+                            lastSenderHandle: lastSender,
+                            viewerHandle: handle,
+                            markedUnread: override !== undefined && override > 0,
+                        })
+                    );
+                },
+                0,
+            );
         } catch (e: any) {
             if (e?.name === 'ConnectionRefused' || e?.message === 'CONNECTION_REFUSED') throw e;
             if (e?.status === 401) return 0;
@@ -906,7 +936,11 @@ export async function listConversations(forHandle: string): Promise<Conversation
                     }) => {
                         if (row.type === 'group' && row.chat_group_id) {
                             const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
-                            const unread = Number(row.unread_count) || 0;
+                            const unread = effectiveThreadUnread({
+                                unread: Number(row.unread_count) || 0,
+                                lastSenderHandle: lastMessage?.senderHandle,
+                                viewerHandle: forHandle,
+                            });
                             return {
                                 kind: 'group' as const,
                                 chatGroupId: row.chat_group_id,
@@ -923,13 +957,20 @@ export async function listConversations(forHandle: string): Promise<Conversation
                         }
                         const otherHandle = row.other_user?.handle ?? '';
                         const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
-                        const unread = Number(row.unread_count) || 0;
+                        const override = unreadOverrideByThread.get(`${forHandle}::${otherHandle}`);
+                        const raw = override !== undefined ? override : Number(row.unread_count) || 0;
+                        const unread = effectiveThreadUnread({
+                            unread: raw,
+                            lastSenderHandle: lastMessage?.senderHandle,
+                            viewerHandle: forHandle,
+                            markedUnread: override !== undefined && override > 0,
+                        });
                         const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
                         return {
                             kind: 'dm' as const,
                             otherHandle,
                             lastMessage,
-                            unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? unread,
+                            unread,
                             isPinned: false,
                             isRequest: false,
                             hasUnviewedStories,
@@ -977,10 +1018,18 @@ export async function listConversations(forHandle: string): Promise<Conversation
     const allConversations = await Promise.all(
         Array.from(summaries.entries()).map(async ([otherHandle, v]) => {
             const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+            const override = unreadOverrideByThread.get(`${forHandle}::${otherHandle}`);
+            const raw = override !== undefined ? override : v.unread;
             return {
                 otherHandle,
                 lastMessage: v.last,
-                unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? v.unread,
+                unread: effectiveThreadUnread({
+                    unread: raw,
+                    lastSenderHandle: v.last?.senderHandle,
+                    viewerHandle: forHandle,
+                    isRequest: v.isRequest || false,
+                    markedUnread: override !== undefined && override > 0,
+                }),
                 isPinned: pinned.has(otherHandle),
                 isRequest: v.isRequest || false,
                 hasUnviewedStories,

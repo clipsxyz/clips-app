@@ -142,12 +142,14 @@ class MessageController extends Controller
                         'avatar_url' => $otherUser->avatar_url,
                     ] : null,
                     'latest_message' => $latestMessage,
-                    'unread_count' => Message::where('conversation_id', $conversationId)
-                        ->whereNull('chat_group_id')
-                        ->where('recipient_handle', $user->handle)
-                        ->where('is_system_message', false)
-                        ->whereNull('read_at')
-                        ->count(),
+                    'unread_count' => $latestMessage->sender_handle === $user->handle
+                        ? 0
+                        : Message::where('conversation_id', $conversationId)
+                            ->whereNull('chat_group_id')
+                            ->where('recipient_handle', $user->handle)
+                            ->where('is_system_message', false)
+                            ->whereNull('read_at')
+                            ->count(),
                     'group_updated_at' => null,
                     '_cursor_key' => 'dm:' . $conversationId,
                 ];
@@ -170,11 +172,13 @@ class MessageController extends Controller
                 ->first();
 
             $since = $gm->last_read_at ?? \Carbon\Carbon::createFromTimestampUTC(0);
-            $unreadCount = Message::where('chat_group_id', $group->id)
-                ->where('is_system_message', false)
-                ->where('sender_handle', '!=', $user->handle)
-                ->where('created_at', '>', $since)
-                ->count();
+            $unreadCount = ($latestMessage && $latestMessage->sender_handle === $user->handle)
+                ? 0
+                : Message::where('chat_group_id', $group->id)
+                    ->where('is_system_message', false)
+                    ->where('sender_handle', '!=', $user->handle)
+                    ->where('created_at', '>', $since)
+                    ->count();
 
             $conversations[] = [
                 'type' => 'group',

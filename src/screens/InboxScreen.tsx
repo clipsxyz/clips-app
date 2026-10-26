@@ -62,6 +62,10 @@ import {
 } from '../api/chatGroups';
 import { ox } from '../constants/nativeOpticalScale';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
+import {
+    isThreadActivityNotificationType,
+    publishInboxUnreadParts,
+} from '../utils/inboxUnread';
 
 const insightsSeenKey = (handle: string) =>
     `clips:insights-seen:${String(handle || '').trim().toLowerCase()}`;
@@ -828,7 +832,9 @@ export default function InboxScreen({ navigation, route }: any) {
     const allNotifications = useMemo(() => {
         return [...notifications, ...activityNotifications].sort((a, b) => b.timestamp - a.timestamp);
     }, [notifications, activityNotifications]);
-    const unreadNotifications = allNotifications.filter(n => !n.read).length;
+    const unreadNotifications = notifications.filter(
+        (n) => !n.read && !isThreadActivityNotificationType(n.type),
+    ).length;
     const sortedConversations = [...conversations].sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
@@ -836,9 +842,20 @@ export default function InboxScreen({ navigation, route }: any) {
     });
     const directMessages = sortedConversations.filter((c) => c.kind !== 'group');
     const groupMessages = sortedConversations.filter((c) => c.kind === 'group');
-    const unreadMessages = directMessages.reduce((sum, c) => sum + (c.unread || 0), 0);
+    const unreadMessages = directMessages
+        .filter((c) => !c.isRequest)
+        .reduce((sum, c) => sum + (c.unread || 0), 0);
     const unreadGroups = groupMessages.reduce((sum, c) => sum + (c.unread || 0), 0);
-    const unreadMessagesTotal = unreadMessages + unreadGroups;
+
+    useEffect(() => {
+        if (!user?.handle) return;
+        publishInboxUnreadParts({
+            handle: user.handle,
+            messages: unreadMessages,
+            groups: unreadGroups,
+            notifications: unreadNotifications,
+        });
+    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications]);
 
     const filterConversationList = (list: ConversationSummary[]) => {
         if (messageFilter === 'groups') return list.filter((c) => c.kind === 'group');
@@ -1092,9 +1109,9 @@ export default function InboxScreen({ navigation, route }: any) {
                     style={[styles.tab, activeTab === 'messages' && styles.tabActive]}
                 >
                     <Text style={[styles.tabText, activeTab === 'messages' && styles.tabTextActive]}>Messages</Text>
-                    {unreadMessagesTotal > 0 && (
+                    {unreadMessages > 0 && (
                         <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{unreadMessagesTotal > 9 ? '9+' : unreadMessagesTotal}</Text>
+                            <Text style={styles.badgeText}>{unreadMessages > 9 ? '9+' : unreadMessages}</Text>
                         </View>
                     )}
                 </TouchableOpacity>
