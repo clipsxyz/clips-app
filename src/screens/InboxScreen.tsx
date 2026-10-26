@@ -9,6 +9,12 @@ import {
     Image,
     ScrollView,
     DeviceEventEmitter,
+    Animated,
+    Easing,
+    LayoutAnimation,
+    Platform,
+    UIManager,
+    ActivityIndicator,
 } from 'react-native';
 import { FlatList } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
@@ -116,6 +122,71 @@ function normalizeHandleKey(handle?: string): string {
     return value.replace(/^@/, '').toLowerCase();
 }
 
+if (
+    Platform.OS === 'android' &&
+    typeof UIManager.setLayoutAnimationEnabledExperimental === 'function'
+) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+function FadeCollapseRow({
+    exiting,
+    onExited,
+    children,
+}: {
+    exiting: boolean;
+    onExited: () => void;
+    children: React.ReactNode;
+}) {
+    const progress = useRef(new Animated.Value(1)).current;
+    const exitedRef = useRef(false);
+    const onExitedRef = useRef(onExited);
+    onExitedRef.current = onExited;
+
+    useEffect(() => {
+        if (!exiting || exitedRef.current) return;
+        LayoutAnimation.configureNext({
+            duration: 260,
+            update: { type: LayoutAnimation.Types.easeInEaseOut },
+            delete: {
+                type: LayoutAnimation.Types.easeInEaseOut,
+                property: LayoutAnimation.Properties.opacity,
+            },
+        });
+        Animated.timing(progress, {
+            toValue: 0,
+            duration: 280,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+        }).start(({ finished }) => {
+            if (!finished || exitedRef.current) return;
+            exitedRef.current = true;
+            onExitedRef.current();
+        });
+    }, [exiting, progress]);
+
+    return (
+        <Animated.View
+            pointerEvents={exiting ? 'none' : 'auto'}
+            style={{
+                overflow: 'hidden',
+                opacity: progress,
+                maxHeight: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 240] }),
+                transform: [
+                    {
+                        translateX: progress.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [18, 0],
+                        }),
+                    },
+                ],
+            }}
+        >
+            {children}
+        </Animated.View>
+    );
+}
+
 function canRenderStoryThumb(url?: string): boolean {
     if (!url) return false;
     const value = url.trim();
@@ -133,7 +204,11 @@ export default function InboxScreen({ navigation, route }: any) {
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [pendingInvites, setPendingInvites] = useState<ChatGroupInviteRow[]>([]);
     const [actingInviteId, setActingInviteId] = useState<string | null>(null);
+    const [actingInviteKind, setActingInviteKind] = useState<'accept' | 'decline' | null>(null);
+    const [exitingInviteId, setExitingInviteId] = useState<string | null>(null);
     const actingInviteIdRef = useRef<string | null>(null);
+    const dismissedInviteIdsRef = useRef<Set<string>>(new Set());
+    const inviteExitResolversRef = useRef<Map<string, () => void>>(new Map());
     const [inboxAlert, setInboxAlert] = useState<InboxAlertConfig | null>(null);
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [loading, setLoading] = useState(true);
@@ -380,7 +455,11 @@ export default function InboxScreen({ navigation, route }: any) {
                 fetchPendingGroupInvites(),
             ]);
             const pendingRows = Array.isArray(pending) ? pending : [];
-            setPendingInvites(pendingRows);
+            const dismissedInvites = dismissedInviteIdsRef.current;
+            const actingId = actingInviteIdRef.current;
+            setPendingInvites(
+                pendingRows.filter((row) => row.id === actingId || !dismissedInvites.has(row.id)),
+            );
             const pendingById = new Map(pendingRows.map((row) => [row.id, row]));
             const hydratedNotifs = notifs.map((n) => {
                 if (n.type !== 'group_invite') return n;
@@ -421,7 +500,19 @@ export default function InboxScreen({ navigation, route }: any) {
             } else {
                 setUnavailableStoryIds(new Set());
             }
-            setNotifications(hydratedNotifs);
+            setNotifications((prev) => {
+                const next = hydratedNotifs.filter((n) => {
+                    const inviteId = n.chatGroupInviteId;
+                    if (!inviteId) return true;
+                    if (inviteId === actingId) return true;
+                    return !dismissedInvites.has(inviteId);
+                });
+                if (actingId && !next.some((n) => n.chatGroupInviteId === actingId)) {
+                    const kept = prev.find((n) => n.chatGroupInviteId === actingId);
+                    if (kept) return [kept, ...next];
+                }
+                return next;
+            });
             setInsights(storyInsights);
             const convs = await listConversations(user.handle);
             setConversations(Array.isArray(convs) ? convs : []);
@@ -673,59 +764,122 @@ export default function InboxScreen({ navigation, route }: any) {
         );
     };
 
-    const beginInviteAction = (inviteId: string): boolean => {
+    const beginInviteAction = (inviteId: string, kind: 'accept' | 'decline'): boolean => {
         if (!inviteId || actingInviteIdRef.current) return false;
         actingInviteIdRef.current = inviteId;
+        dismissedInviteIdsRef.current.add(inviteId);
         setActingInviteId(inviteId);
-        removeInviteFromUi(inviteId);
+        setActingInviteKind(kind);
         return true;
     };
 
     const endInviteAction = () => {
         actingInviteIdRef.current = null;
         setActingInviteId(null);
+        setActingInviteKind(null);
+        setExitingInviteId(null);
+    };
+
+    const finishInviteExit = (inviteId: string) => {
+        LayoutAnimation.configureNext({
+            duration: 240,
+            update: { type: LayoutAnimation.Types.easeInEaseOut },
+            delete: {
+                type: LayoutAnimation.Types.easeInEaseOut,
+                property: LayoutAnimation.Properties.opacity,
+            },
+        });
+        removeInviteFromUi(inviteId);
+        const resolve = inviteExitResolversRef.current.get(inviteId);
+        if (resolve) {
+            inviteExitResolversRef.current.delete(inviteId);
+            resolve();
+        }
+    };
+
+    const runInviteAction = async (inviteId: string, kind: 'accept' | 'decline') => {
+        if (!beginInviteAction(inviteId, kind)) return;
+        let apiError: unknown = null;
+        const apiDone =
+            kind === 'accept'
+                ? acceptChatGroupInvite(inviteId).catch((error) => {
+                    apiError = error;
+                })
+                : declineChatGroupInvite(inviteId).catch((error) => {
+                    apiError = error;
+                });
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        setExitingInviteId(inviteId);
+        await Promise.all([
+            apiDone,
+            new Promise<void>((resolve) => {
+                inviteExitResolversRef.current.set(inviteId, resolve);
+                setTimeout(resolve, 420);
+            }),
+        ]);
+        if (apiError && !isAlreadyHandledInviteError(apiError)) {
+            dismissedInviteIdsRef.current.delete(inviteId);
+            setInboxAlert({
+                title: 'Invite',
+                message: apiError instanceof Error ? apiError.message : `Could not ${kind} this invite.`,
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        }
+        endInviteAction();
+        await loadData({ silent: true });
     };
 
     const handleAcceptGroupInvite = async (inviteId: string) => {
-        if (!beginInviteAction(inviteId)) return;
-        try {
-            await acceptChatGroupInvite(inviteId);
-            await loadData({ silent: true });
-        } catch (error) {
-            console.error('Failed to accept group invite:', error);
-            if (!isAlreadyHandledInviteError(error)) {
-                setInboxAlert({
-                    title: 'Invite',
-                    message: error instanceof Error ? error.message : 'Could not accept this invite.',
-                    icon: 'alert',
-                    confirmButtonText: 'OK',
-                });
-            }
-            await loadData({ silent: true });
-        } finally {
-            endInviteAction();
-        }
+        await runInviteAction(inviteId, 'accept');
     };
 
     const handleDeclineGroupInvite = async (inviteId: string) => {
-        if (!beginInviteAction(inviteId)) return;
-        try {
-            await declineChatGroupInvite(inviteId);
-            await loadData({ silent: true });
-        } catch (error) {
-            console.error('Failed to decline group invite:', error);
-            if (!isAlreadyHandledInviteError(error)) {
-                setInboxAlert({
-                    title: 'Invite',
-                    message: error instanceof Error ? error.message : 'Could not decline this invite.',
-                    icon: 'alert',
-                    confirmButtonText: 'OK',
-                });
-            }
-            await loadData({ silent: true });
-        } finally {
-            endInviteAction();
-        }
+        await runInviteAction(inviteId, 'decline');
+    };
+
+    const renderInviteButtons = (inviteId: string) => {
+        const busy = !!actingInviteId;
+        const thisBusy = actingInviteId === inviteId;
+        const showCheck = thisBusy && exitingInviteId === inviteId && actingInviteKind === 'accept';
+        return (
+            <View style={styles.followRequestActions}>
+                <TouchableOpacity
+                    style={[
+                        styles.followRequestBtn,
+                        styles.followRequestAcceptBtn,
+                        busy && styles.followRequestBtnDisabled,
+                    ]}
+                    disabled={busy}
+                    onPress={() => { void handleAcceptGroupInvite(inviteId); }}
+                >
+                    {thisBusy && actingInviteKind === 'accept' ? (
+                        showCheck ? (
+                            <Icon name="checkmark" size={ox(14)} color="#111827" />
+                        ) : (
+                            <ActivityIndicator size="small" color="#111827" />
+                        )
+                    ) : (
+                        <Text style={styles.followRequestAcceptText}>Accept</Text>
+                    )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[
+                        styles.followRequestBtn,
+                        styles.followRequestDenyBtn,
+                        busy && styles.followRequestBtnDisabled,
+                    ]}
+                    disabled={busy}
+                    onPress={() => { void handleDeclineGroupInvite(inviteId); }}
+                >
+                    {thisBusy && actingInviteKind === 'decline' ? (
+                        <ActivityIndicator size="small" color="#E5E7EB" />
+                    ) : (
+                        <Text style={styles.followRequestDenyText}>Decline</Text>
+                    )}
+                </TouchableOpacity>
+            </View>
+        );
     };
 
     const handleDenyFollowRequest = async (notif: Notification) => {
@@ -1226,7 +1380,9 @@ export default function InboxScreen({ navigation, route }: any) {
                             </View>
                         ) : null
                     }
-                    renderItem={({ item }) => (
+                    renderItem={({ item }) => {
+                        const inviteId = item.type === 'group_invite' ? item.chatGroupInviteId : undefined;
+                        const row = (
                         <TouchableOpacity
                             onPress={() => handleNotificationPress(item)}
                             style={[styles.item, !item.read && styles.itemUnread]}
@@ -1289,32 +1445,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                     </View>
                                 )}
                                 {item.type === 'group_invite' && !!item.chatGroupInviteId && (
-                                    <View style={styles.followRequestActions}>
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.followRequestBtn,
-                                                styles.followRequestAcceptBtn,
-                                                !!actingInviteId && styles.followRequestBtnDisabled,
-                                            ]}
-                                            disabled={!!actingInviteId}
-                                            onPress={() => { void handleAcceptGroupInvite(item.chatGroupInviteId!); }}
-                                        >
-                                            <Text style={styles.followRequestAcceptText}>
-                                                {actingInviteId === item.chatGroupInviteId ? '…' : 'Accept'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.followRequestBtn,
-                                                styles.followRequestDenyBtn,
-                                                !!actingInviteId && styles.followRequestBtnDisabled,
-                                            ]}
-                                            disabled={!!actingInviteId}
-                                            onPress={() => { void handleDeclineGroupInvite(item.chatGroupInviteId!); }}
-                                        >
-                                            <Text style={styles.followRequestDenyText}>Decline</Text>
-                                        </TouchableOpacity>
-                                    </View>
+                                    renderInviteButtons(item.chatGroupInviteId)
                                 )}
                             </View>
                             {!!item.storyId && !unavailableStoryIds.has(item.storyId) && !!item.imageUrl && (
@@ -1357,7 +1488,17 @@ export default function InboxScreen({ navigation, route }: any) {
                             )}
                             {!item.read && <View style={styles.unreadDot} />}
                         </TouchableOpacity>
-                    )}
+                        );
+                        if (!inviteId) return row;
+                        return (
+                            <FadeCollapseRow
+                                exiting={exitingInviteId === inviteId}
+                                onExited={() => finishInviteExit(inviteId)}
+                            >
+                                {row}
+                            </FadeCollapseRow>
+                        );
+                    }}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Text style={styles.emptyText}>No notifications yet.</Text>
@@ -1534,10 +1675,13 @@ export default function InboxScreen({ navigation, route }: any) {
                                 {pendingInvites.map((invite) => {
                                     const inviterHandle = pendingInviteInviterHandle(invite);
                                     const groupName = pendingInviteGroupName(invite);
-                                    const busy = !!actingInviteId;
-                                    const thisBusy = actingInviteId === invite.id;
                                     return (
-                                        <View key={invite.id} style={styles.pendingInviteCard}>
+                                        <FadeCollapseRow
+                                            key={invite.id}
+                                            exiting={exitingInviteId === invite.id}
+                                            onExited={() => finishInviteExit(invite.id)}
+                                        >
+                                        <View style={styles.pendingInviteCard}>
                                             <Avatar
                                                 src={
                                                     invite.inviter?.avatar_url ||
@@ -1556,34 +1700,10 @@ export default function InboxScreen({ navigation, route }: any) {
                                                         ? `@${inviterHandle} invited you to join`
                                                         : 'You were invited to join this group'}
                                                 </Text>
-                                                <View style={styles.followRequestActions}>
-                                                    <TouchableOpacity
-                                                        style={[
-                                                            styles.followRequestBtn,
-                                                            styles.followRequestAcceptBtn,
-                                                            busy && styles.followRequestBtnDisabled,
-                                                        ]}
-                                                        disabled={busy}
-                                                        onPress={() => { void handleAcceptGroupInvite(invite.id); }}
-                                                    >
-                                                        <Text style={styles.followRequestAcceptText}>
-                                                            {thisBusy ? '…' : 'Accept'}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        style={[
-                                                            styles.followRequestBtn,
-                                                            styles.followRequestDenyBtn,
-                                                            busy && styles.followRequestBtnDisabled,
-                                                        ]}
-                                                        disabled={busy}
-                                                        onPress={() => { void handleDeclineGroupInvite(invite.id); }}
-                                                    >
-                                                        <Text style={styles.followRequestDenyText}>Decline</Text>
-                                                    </TouchableOpacity>
-                                                </View>
+                                                {renderInviteButtons(invite.id)}
                                             </View>
                                         </View>
+                                        </FadeCollapseRow>
                                     );
                                 })}
                                 {groupMessages.length > 0 ? (
@@ -2063,6 +2183,10 @@ const styles = StyleSheet.create({
         borderRadius: ox(8),
         paddingHorizontal: ox(12),
         paddingVertical: ox(6),
+        minWidth: ox(64),
+        minHeight: ox(28),
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     followRequestBtnDisabled: {
         opacity: 0.45,
