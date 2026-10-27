@@ -42,6 +42,7 @@ import { fetchUserProfile } from '../api/client';
 import { acceptFollowRequest as acceptFollowRequestApi, denyFollowRequest as denyFollowRequestApi } from '../api/client';
 import { getFollowedUsers } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
+import { notificationKindIonicon, notificationKindLabel } from '../utils/notificationKind';
 import Avatar from '../components/Avatar';
 import {
     listConversations,
@@ -699,6 +700,21 @@ export default function InboxScreen({ navigation, route }: any) {
             }
             return;
         }
+        if (
+            (notif.type === 'like' || notif.type === 'share' || notif.type === 'reclip') &&
+            notif.postId
+        ) {
+            if (rootNavigationRef.isReady()) {
+                (rootNavigationRef as any).navigate('PostDetail', { postId: notif.postId });
+            } else {
+                navigation.navigate('PostDetail', { postId: notif.postId });
+            }
+            return;
+        }
+        if (notif.type === 'follow' || notif.type === 'follow_request') {
+            navigation.navigate('ViewProfile', { handle: notif.fromHandle });
+            return;
+        }
 
         if (notif.type === 'group_invite') {
             return;
@@ -1021,29 +1037,20 @@ export default function InboxScreen({ navigation, route }: any) {
                 return notif.message || 'posted a new clip';
             case 'group_invite':
                 return notif.message || `invited you to join ${notif.groupName || 'a group'}`;
+            case 'like':
+                return notif.message || 'liked your post';
+            case 'share':
+                return notif.message || 'shared your post';
+            case 'reclip':
+                return notif.message || 'reclipped your post';
+            case 'follow':
+                return notif.message || 'started following you';
             default:
                 return notif.message || '';
         }
     };
 
-    const getNotificationIcon = (type: Notification['type']) => {
-        switch (type) {
-            case 'sticker':
-                return 'happy';
-            case 'reply':
-                return 'arrow-undo';
-            case 'comment':
-                return 'chatbubble-ellipses';
-            case 'dm':
-                return 'chatbubble';
-            case 'follow_request':
-                return 'person-add';
-            case 'group_invite':
-                return 'people';
-            default:
-                return 'notifications';
-        }
-    };
+    const getNotificationIcon = (type: Notification['type']) => notificationKindIonicon(type);
 
     const sortedConversations = [...conversations].sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
@@ -1395,13 +1402,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                     </Text>
                                     <View style={styles.notifKindChip}>
                                         <Text style={styles.notifKindChipText}>
-                                            {item.type === 'group_invite'
-                                                ? 'Invite'
-                                                : item.chatGroupId
-                                                ? 'Group'
-                                                : item.postId && (item.type === 'comment' || item.type === 'reply') && !item.storyId
-                                                    ? 'Comment'
-                                                    : 'DM'}
+                                            {notificationKindLabel(item)}
                                         </Text>
                                     </View>
                                 </View>

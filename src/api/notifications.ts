@@ -11,7 +11,9 @@ export type NotificationType =
     | 'follow'
     | 'follow_request'
     | 'new_post'
-    | 'group_invite';
+    | 'group_invite'
+    | 'share'
+    | 'reclip';
 
 export interface Notification {
     id: string;
@@ -113,6 +115,10 @@ function normalizeNotificationChannel(notification: Pick<Notification, 'type' | 
             return 'follow' as const;
         case 'group_invite':
             return 'group_chat' as const;
+        case 'share':
+            return 'share' as const;
+        case 'reclip':
+            return 'reclip' as const;
         default:
             return 'dm' as const;
     }
@@ -142,7 +148,7 @@ export function normalizeLaravelNotification(n: Record<string, any>, forHandle: 
     const groupName = n.group_name || n.groupName || group?.name || undefined;
     return {
         id: n.id,
-        type: n.type,
+        type: (n.type || 'dm') as NotificationType,
         fromHandle: n.from_handle || n.fromHandle || '',
         toHandle: n.to_handle || n.toHandle || forHandle,
         message: n.message || undefined,

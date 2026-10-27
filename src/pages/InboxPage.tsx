@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark, FiHeart, FiRepeat, FiShare2, FiUsers } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
@@ -26,6 +26,7 @@ import {
     inboxUnreadPartsFromLists,
     publishInboxUnreadParts,
 } from '../utils/inboxUnread';
+import { notificationKindLabel } from '../utils/notificationKind';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -1084,6 +1085,13 @@ export default function InboxPage() {
             navigate(`/post/${encodeURIComponent(notif.postId)}`, {
                 state: { openComments: true, focusCommentId: notif.commentId },
             });
+        } else if (
+            (notif.type === 'like' || notif.type === 'share' || notif.type === 'reclip') &&
+            notif.postId
+        ) {
+            navigate(`/post/${encodeURIComponent(notif.postId)}`);
+        } else if (notif.type === 'follow' || notif.type === 'follow_request') {
+            navigate(`/user/${encodeURIComponent(notif.fromHandle)}`);
         } else if (notif.type === 'sticker' || notif.type === 'reply') {
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         } else if (notif.type === 'dm') {
@@ -1128,6 +1136,16 @@ export default function InboxPage() {
                 return `wants to follow you`;
             case 'new_post':
                 return notif.message || 'posted a new clip';
+            case 'like':
+                return notif.message || 'liked your post';
+            case 'share':
+                return notif.message || 'shared your post';
+            case 'reclip':
+                return notif.message || 'reclipped your post';
+            case 'follow':
+                return notif.message || 'started following you';
+            case 'group_invite':
+                return notif.message || `invited you to join ${notif.groupName || 'a group'}`;
             default:
                 return notif.message || '';
         }
@@ -1140,14 +1158,25 @@ export default function InboxPage() {
                 return <FiSmile className={cls} />;
             case 'reply':
                 return <FiCornerUpLeft className={cls} />;
-            case 'dm':
+            case 'comment':
                 return <FiMessageCircle className={cls} />;
+            case 'like':
+                return <FiHeart className={cls} />;
+            case 'share':
+                return <FiShare2 className={cls} />;
+            case 'reclip':
+                return <FiRepeat className={cls} />;
+            case 'follow':
             case 'follow_request':
                 return <FiUserPlus className={cls} />;
+            case 'group_invite':
+                return <FiUsers className={cls} />;
+            case 'dm':
+                return <FiMessageCircle className={cls} />;
             case 'new_post':
                 return <FiBell className={cls} />;
             default:
-                return <FiMessageCircle className={cls} />;
+                return <FiBell className={cls} />;
         }
     };
 
@@ -1780,7 +1809,7 @@ export default function InboxPage() {
                                                     ? 'bg-white/15 text-white/90 border border-white/20'
                                                     : 'bg-white/10 text-white/75 border border-white/15'
                                             }`}>
-                                                {notif.chatGroupId ? 'Group' : 'DM'}
+                                                {notificationKindLabel(notif)}
                                             </span>
                                         </div>
                                         <div className="text-xs text-gray-500 truncate">
