@@ -1,6 +1,7 @@
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 import { countsTowardInboxNotificationBadge } from '../utils/inboxUnread';
+import { extractNotificationPostId } from '../utils/inboxNotificationNav';
 
 export type NotificationType =
     | 'sticker'
@@ -21,6 +22,8 @@ export interface Notification {
     fromHandle: string;
     toHandle: string;
     message?: string;
+    body?: string;
+    data?: unknown;
     postId?: string;
     commentId?: string;
     storyId?: string;
@@ -151,8 +154,10 @@ export function normalizeLaravelNotification(n: Record<string, any>, forHandle: 
         type: (n.type || 'dm') as NotificationType,
         fromHandle: n.from_handle || n.fromHandle || '',
         toHandle: n.to_handle || n.toHandle || forHandle,
-        message: n.message || undefined,
-        postId: n.post_id || n.postId || undefined,
+        message: n.message || n.body || undefined,
+        body: n.body || undefined,
+        data: n.data,
+        postId: extractNotificationPostId(n) || n.post_id || n.postId || undefined,
         commentId: n.comment_id || n.commentId || undefined,
         storyId: n.story_id || n.storyId || undefined,
         imageUrl: n.image_url || n.imageUrl || undefined,

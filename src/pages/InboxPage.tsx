@@ -27,6 +27,7 @@ import {
     publishInboxUnreadParts,
 } from '../utils/inboxUnread';
 import { notificationKindLabel, resolveNotificationKind } from '../utils/notificationKind';
+import { resolveInboxNotificationRoute } from '../utils/inboxNotificationNav';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -1072,34 +1073,36 @@ export default function InboxPage() {
             setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
         }
 
-        if (notif.type === 'new_post') {
-            navigate(`/user/${encodeURIComponent(notif.fromHandle)}`, {
-                state: notif.postId ? { sourcePostId: notif.postId } : undefined,
+        const route = resolveInboxNotificationRoute(notif);
+        if (route.dest === 'post') {
+            navigate(`/post/${encodeURIComponent(route.postId)}`, {
+                state: {
+                    openComments: route.openComments,
+                    focusCommentId: route.focusCommentId,
+                },
             });
-        } else if (
-            (notif.type === 'comment' || notif.type === 'reply') &&
-            notif.postId &&
-            !notif.storyId
-        ) {
-            // Instagram-style Activity: open the post comments thread.
-            navigate(`/post/${encodeURIComponent(notif.postId)}`, {
-                state: { openComments: true, focusCommentId: notif.commentId },
+            return;
+        }
+        if (route.dest === 'profile') {
+            navigate(`/user/${encodeURIComponent(route.handle)}`, {
+                state: route.sourcePostId ? { sourcePostId: route.sourcePostId } : undefined,
             });
-        } else if (
-            (notif.type === 'like' || notif.type === 'share' || notif.type === 'reclip') &&
-            notif.postId
-        ) {
-            navigate(`/post/${encodeURIComponent(notif.postId)}`);
-        } else if (notif.type === 'follow' || notif.type === 'follow_request') {
-            navigate(`/user/${encodeURIComponent(notif.fromHandle)}`);
-        } else if (notif.type === 'sticker' || notif.type === 'reply') {
-            navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
-        } else if (notif.type === 'dm') {
-            if (notif.chatGroupId) {
-                navigate(`/messages/group/${encodeURIComponent(notif.chatGroupId)}`);
+            return;
+        }
+        if (route.dest === 'story') {
+            navigate('/stories', {
+                state: { openUserHandle: route.handle, openStoryId: route.storyId },
+            });
+            return;
+        }
+        if (route.dest === 'messages') {
+            if (route.chatGroupId) {
+                navigate(`/messages/group/${encodeURIComponent(route.chatGroupId)}`);
                 return;
             }
-            navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
+            if (route.handle) {
+                navigate(`/messages/${encodeURIComponent(route.handle)}`);
+            }
         }
     };
 
@@ -1784,13 +1787,26 @@ export default function InboxPage() {
                         {notifications.map(notif => (
                             <div
                                 key={notif.id}
-                                className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg transition-colors ${notif.read
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => { void handleNotificationClick(notif); }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        void handleNotificationClick(notif);
+                                    }
+                                }}
+                                className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg transition-colors cursor-pointer ${notif.read
                                         ? 'hover:bg-gray-100 dark:hover:bg-gray-800'
                                         : 'bg-white/10 hover:bg-white/15 border-l-4 border-white'
                                     }`}
                             >
                                 <button
-                                    onClick={() => handleNotificationClick(notif)}
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleNotificationClick(notif);
+                                    }}
                                     className="flex items-center gap-3 flex-1 min-w-0"
                                 >
                                     <div className="flex-shrink-0">

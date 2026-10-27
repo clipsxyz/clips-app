@@ -16,7 +16,7 @@ import {
     UIManager,
     ActivityIndicator,
 } from 'react-native';
-import { FlatList } from 'react-native-gesture-handler';
+import { FlatList, TouchableOpacity as GHTouchableOpacity } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -43,6 +43,7 @@ import { acceptFollowRequest as acceptFollowRequestApi, denyFollowRequest as den
 import { getFollowedUsers } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
 import { notificationKindIonicon, notificationKindLabel } from '../utils/notificationKind';
+import { resolveInboxNotificationRoute } from '../utils/inboxNotificationNav';
 import Avatar from '../components/Avatar';
 import {
     listConversations,
@@ -663,13 +664,22 @@ export default function InboxScreen({ navigation, route }: any) {
         Alert.alert('Story views', 'View profile', options);
     };
 
-    const navigateToMessages = (params: { handle?: string; chatGroupId?: string; kind?: string }) => {
+    const navigateRoot = (name: string, params?: object) => {
         if (rootNavigationRef.isReady()) {
-            // Messages lives on the root stack — Inbox is nested under MainTabs.
-            (rootNavigationRef as any).navigate('Messages', params);
+            (rootNavigationRef as any).navigate(name, params);
             return;
         }
-        navigation.navigate('Messages', params);
+        let nav: any = navigation;
+        for (let i = 0; i < 6 && nav?.getParent; i++) {
+            const parent = nav.getParent();
+            if (!parent) break;
+            nav = parent;
+        }
+        nav?.navigate?.(name, params);
+    };
+
+    const navigateToMessages = (params: { handle?: string; chatGroupId?: string; kind?: string }) => {
+        navigateRoot('Messages', params);
     };
 
     const handleNotificationPress = async (notif: Notification) => {
@@ -679,65 +689,37 @@ export default function InboxScreen({ navigation, route }: any) {
             setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
         }
 
-        // Instagram-style: comment / comment-reply → open post comments (not Messages).
-        if (
-            (notif.type === 'comment' || notif.type === 'reply') &&
-            notif.postId &&
-            !notif.storyId
-        ) {
-            if (rootNavigationRef.isReady()) {
-                (rootNavigationRef as any).navigate('PostDetail', {
-                    postId: notif.postId,
-                    openComments: true,
-                    focusCommentId: notif.commentId,
-                });
-            } else {
-                navigation.navigate('PostDetail', {
-                    postId: notif.postId,
-                    openComments: true,
-                    focusCommentId: notif.commentId,
-                });
-            }
-            return;
-        }
-        if (
-            (notif.type === 'like' || notif.type === 'share' || notif.type === 'reclip') &&
-            notif.postId
-        ) {
-            if (rootNavigationRef.isReady()) {
-                (rootNavigationRef as any).navigate('PostDetail', { postId: notif.postId });
-            } else {
-                navigation.navigate('PostDetail', { postId: notif.postId });
-            }
-            return;
-        }
-        if (notif.type === 'follow' || notif.type === 'follow_request') {
-            navigation.navigate('ViewProfile', { handle: notif.fromHandle });
-            return;
-        }
-
-        if (notif.type === 'group_invite') {
-            return;
-        }
-
-        if (notif.chatGroupId && user?.handle) {
-            await markGroupConversationReadById(notif.chatGroupId, user.handle);
-            navigateToMessages({ chatGroupId: notif.chatGroupId, kind: 'group' });
-            return;
-        }
-        if (notif.storyId && !unavailableStoryIds.has(notif.storyId)) {
-            navigation.navigate('Stories', { openUserHandle: notif.fromHandle, openStoryId: notif.storyId });
-            return;
-        }
-        if (notif.type === 'new_post') {
-            navigation.navigate('ViewProfile', {
-                handle: notif.fromHandle,
-                sourcePostId: notif.postId,
+        const route = resolveInboxNotificationRoute(notif);
+        if (route.dest === 'post') {
+            navigateRoot('PostDetail', {
+                postId: route.postId,
+                openComments: route.openComments,
+                focusCommentId: route.focusCommentId,
             });
             return;
         }
-        if (notif.type === 'sticker' || notif.type === 'reply' || notif.type === 'dm') {
-            navigateToMessages({ handle: notif.fromHandle });
+        if (route.dest === 'profile') {
+            navigateRoot('ViewProfile', {
+                handle: route.handle,
+                sourcePostId: route.sourcePostId,
+            });
+            return;
+        }
+        if (route.dest === 'story') {
+            if (!unavailableStoryIds.has(route.storyId)) {
+                navigation.navigate('Stories', { openUserHandle: route.handle, openStoryId: route.storyId });
+            }
+            return;
+        }
+        if (route.dest === 'messages') {
+            if (route.chatGroupId && user?.handle) {
+                await markGroupConversationReadById(route.chatGroupId, user.handle);
+                navigateToMessages({ chatGroupId: route.chatGroupId, kind: 'group' });
+                return;
+            }
+            if (route.handle) {
+                navigateToMessages({ handle: route.handle });
+            }
         }
     };
 
@@ -1374,9 +1356,10 @@ export default function InboxScreen({ navigation, route }: any) {
                     renderItem={({ item }) => {
                         const inviteId = item.type === 'group_invite' ? item.chatGroupInviteId : undefined;
                         const row = (
-                        <TouchableOpacity
-                            onPress={() => handleNotificationPress(item)}
+                        <GHTouchableOpacity
+                            onPress={() => { void handleNotificationPress(item); }}
                             style={[styles.item, !item.read && styles.itemUnread]}
+                            activeOpacity={0.7}
                         >
                             <View style={styles.itemIcon}>
                                 <View style={styles.notificationAvatarWrap}>
@@ -1472,7 +1455,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                 </TouchableOpacity>
                             )}
                             {!item.read && <View style={styles.unreadDot} />}
-                        </TouchableOpacity>
+                        </GHTouchableOpacity>
                         );
                         return (
                             <FadeCollapseRow
