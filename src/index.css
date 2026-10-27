@@ -133,6 +133,58 @@ video {
     background-color: #000000;
   }
 
+  /*
+    Chrome paints native text fields with a light system fill while this app
+    uses light (white) glyphs. Without an explicit color + dark color-scheme,
+    typed characters match that fill and disappear.
+  */
+  html {
+    color-scheme: dark;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not([type='range']):not([type='color']):not([type='button']):not([type='submit']):not([type='reset']):not([type='image']),
+  textarea,
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    color: #f4f4f5;
+    -webkit-text-fill-color: currentColor;
+    caret-color: currentColor;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af;
+    -webkit-text-fill-color: #9ca3af;
+    opacity: 1;
+  }
+
+  input.bg-white,
+  textarea.bg-white,
+  select.bg-white,
+  input.bg-gray-50,
+  textarea.bg-gray-50,
+  select.bg-gray-50,
+  input.bg-gray-100,
+  textarea.bg-gray-100,
+  select.bg-gray-100 {
+    color: #111827;
+    -webkit-text-fill-color: currentColor;
+    caret-color: currentColor;
+    color-scheme: light;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: #f4f4f5;
+    caret-color: #f4f4f5;
+    box-shadow: 0 0 0 1000px #18181b inset;
+    transition: background-color 99999s ease-out;
+  }
+
   h1,
   h2,
   h3 {
