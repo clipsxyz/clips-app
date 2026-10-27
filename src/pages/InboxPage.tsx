@@ -6,6 +6,11 @@ import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, deleteNotification } from '../api/notifications';
+import { getPostById, toggleLike, toggleFollowForPost, reclipPost } from '../api/posts';
+import type { Post } from '../types';
+import ScenesModal from '../components/ScenesModal';
+import CommentsModal from '../components/CommentsModal';
+import ShareModal from '../components/ShareModal';
 import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
 import { listConversations, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
@@ -27,7 +32,11 @@ import {
     publishInboxUnreadParts,
 } from '../utils/inboxUnread';
 import { notificationKindLabel, resolveNotificationKind } from '../utils/notificationKind';
-import { resolveInboxNotificationRoute } from '../utils/inboxNotificationNav';
+import {
+    isFollowInboxNotification,
+    isPostRelatedInboxNotification,
+    resolveInboxNotificationRoute,
+} from '../utils/inboxNotificationNav';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -444,6 +453,9 @@ export default function InboxPage() {
     const location = useLocation();
     const { user } = useAuth();
     const [notifications, setNotifications] = React.useState<Notification[]>([]);
+    const [inboxPost, setInboxPost] = React.useState<Post | null>(null);
+    const [inboxPostComments, setInboxPostComments] = React.useState(false);
+    const [inboxSharePost, setInboxSharePost] = React.useState<Post | null>(null);
     const [insights, setInsights] = React.useState<StoryInsight[]>([]);
     const [unavailableStoryIds, setUnavailableStoryIds] = React.useState<Set<string>>(new Set());
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
@@ -702,7 +714,12 @@ export default function InboxPage() {
             
             // Combine notifications and conversations, sorted by timestamp (newest first)
             const allNotifications = [
-                ...notifs.filter((n) => countsTowardInboxNotificationBadge(n.type)),
+                ...notifs.filter(
+                    (n) =>
+                        countsTowardInboxNotificationBadge(n.type) ||
+                        isPostRelatedInboxNotification(n) ||
+                        isFollowInboxNotification(n),
+                ),
                 ...conversationNotifications,
             ].sort((a, b) => b.timestamp - a.timestamp);
 
@@ -1067,42 +1084,40 @@ export default function InboxPage() {
         return <div className="p-6">Please sign in to view notifications.</div>;
     }
 
-    const handleNotificationClick = async (notif: Notification) => {
-        if (!notif.read && user?.handle) {
-            await markNotificationRead(notif.id, user.handle);
-            setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-        }
-
+    const handleNotificationClick = (notif: Notification) => {
         const route = resolveInboxNotificationRoute(notif);
+
         if (route.dest === 'post') {
-            navigate(`/post/${encodeURIComponent(route.postId)}`, {
-                state: {
-                    openComments: route.openComments,
-                    focusCommentId: route.focusCommentId,
-                },
+            void getPostById(route.postId).then((post) => {
+                if (post) {
+                    setInboxPost(post);
+                    setInboxPostComments(!!route.openComments);
+                    return;
+                }
+                console.warn('[inbox] notification missing loadable post', notif.id, route.postId);
+                if (notif.fromHandle) {
+                    navigate(`/user/${encodeURIComponent(notif.fromHandle)}`);
+                }
             });
-            return;
-        }
-        if (route.dest === 'profile') {
+        } else if (route.dest === 'profile') {
             navigate(`/user/${encodeURIComponent(route.handle)}`, {
                 state: route.sourcePostId ? { sourcePostId: route.sourcePostId } : undefined,
             });
-            return;
-        }
-        if (route.dest === 'story') {
+        } else if (route.dest === 'story') {
             navigate('/stories', {
                 state: { openUserHandle: route.handle, openStoryId: route.storyId },
             });
-            return;
-        }
-        if (route.dest === 'messages') {
+        } else if (route.dest === 'messages') {
             if (route.chatGroupId) {
                 navigate(`/messages/group/${encodeURIComponent(route.chatGroupId)}`);
-                return;
-            }
-            if (route.handle) {
+            } else if (route.handle) {
                 navigate(`/messages/${encodeURIComponent(route.handle)}`);
             }
+        }
+
+        if (!notif.read && user?.handle) {
+            setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n)));
+            void markNotificationRead(notif.id, user.handle);
         }
     };
 
@@ -1787,27 +1802,16 @@ export default function InboxPage() {
                         {notifications.map(notif => (
                             <div
                                 key={notif.id}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => { void handleNotificationClick(notif); }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        void handleNotificationClick(notif);
-                                    }
-                                }}
-                                className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg transition-colors cursor-pointer ${notif.read
-                                        ? 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                                        : 'bg-white/10 hover:bg-white/15 border-l-4 border-white'
-                                    }`}
+                                className={`w-full flex items-center justify-between gap-3 rounded-xl bg-[#161b22] p-3 mb-2 border ${
+                                    notif.read
+                                        ? 'border-white/5'
+                                        : 'border-l-4 border-l-emerald-400 border-white/10'
+                                }`}
                             >
                                 <button
                                     type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        void handleNotificationClick(notif);
-                                    }}
-                                    className="flex items-center gap-3 flex-1 min-w-0"
+                                    onClick={() => handleNotificationClick(notif)}
+                                    className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer"
                                 >
                                     <div className="flex-shrink-0">
                                         {getNotificationIcon(notif)}
@@ -1818,17 +1822,10 @@ export default function InboxPage() {
                                         size="sm"
                                     />
                                     <div className="flex-1 min-w-0">
-                                        <div className="font-medium truncate flex items-center gap-1.5">
-                                            <span className="truncate">{notif.groupName || notif.fromHandle}</span>
-                                            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none ${
-                                                notif.chatGroupId
-                                                    ? 'bg-white/15 text-white/90 border border-white/20'
-                                                    : 'bg-white/10 text-white/75 border border-white/15'
-                                            }`}>
-                                                {notificationKindLabel(notif)}
-                                            </span>
+                                        <div className="font-medium truncate text-white">
+                                            {notif.groupName || notif.fromHandle}
                                         </div>
-                                        <div className="text-xs text-gray-500 truncate">
+                                        <div className="text-xs text-gray-400 truncate">
                                             {formatNotificationMessage(notif)}
                                         </div>
                                         {notif.storyId && (
@@ -1887,22 +1884,40 @@ export default function InboxPage() {
                                         )}
                                     </div>
                                 </button>
-                                {notif.type === 'follow_request' && (
-                                    <div className="flex gap-2 flex-shrink-0">
-                                        <button
-                                            onClick={(e) => handleAcceptFollowRequest(notif, e)}
-                                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-medium transition-colors"
-                                        >
-                                            Accept
-                                        </button>
-                                        <button
-                                            onClick={(e) => handleDenyFollowRequest(notif, e)}
-                                            className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
-                                        >
-                                            Deny
-                                        </button>
-                                    </div>
-                                )}
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none bg-white/10 text-white/80 border border-white/15">
+                                        {notificationKindLabel(notif)}
+                                    </span>
+                                    {notif.type === 'follow_request' && (
+                                        <>
+                                            <button
+                                                onClick={(e) => handleAcceptFollowRequest(notif, e)}
+                                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                            >
+                                                Accept
+                                            </button>
+                                            <button
+                                                onClick={(e) => handleDenyFollowRequest(notif, e)}
+                                                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                            >
+                                                Deny
+                                            </button>
+                                        </>
+                                    )}
+                                    <button
+                                        type="button"
+                                        aria-label="Delete notification"
+                                        className="p-1.5 text-gray-400 hover:text-white"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            void deleteNotification(notif.id, user.handle).then(() => {
+                                                setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+                                            });
+                                        }}
+                                    >
+                                        <FiTrash2 className="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -2256,6 +2271,50 @@ export default function InboxPage() {
                         </button>
                     </div>
                 </div>
+            )}
+
+            {inboxPost && (
+                <ScenesModal
+                    post={inboxPost}
+                    isOpen={!!inboxPost}
+                    onClose={() => {
+                        setInboxPost(null);
+                        setInboxPostComments(false);
+                    }}
+                    onLike={async () => {
+                        if (!user?.id || !inboxPost) return;
+                        const updated = await toggleLike(user.id, inboxPost.id, inboxPost);
+                        setInboxPost((prev) => (prev ? { ...prev, ...updated } : prev));
+                    }}
+                    onFollow={async () => {
+                        if (!user?.id || !inboxPost) return;
+                        const updated = await toggleFollowForPost(user.id, inboxPost.id);
+                        setInboxPost((prev) => (prev ? { ...prev, ...updated } : prev));
+                    }}
+                    onShare={async () => {
+                        if (inboxPost) setInboxSharePost(inboxPost);
+                    }}
+                    onOpenComments={() => setInboxPostComments(true)}
+                    onReclip={async () => {
+                        if (!user?.id || !user?.handle || !inboxPost) return;
+                        const { originalPost } = await reclipPost(user.id, inboxPost.id, user.handle);
+                        setInboxPost((prev) => (prev ? { ...prev, ...originalPost } : prev));
+                    }}
+                />
+            )}
+            {inboxPost && (
+                <CommentsModal
+                    postId={inboxPost.id}
+                    isOpen={inboxPostComments}
+                    onClose={() => setInboxPostComments(false)}
+                />
+            )}
+            {inboxSharePost && (
+                <ShareModal
+                    post={inboxSharePost}
+                    isOpen={!!inboxSharePost}
+                    onClose={() => setInboxSharePost(null)}
+                />
             )}
 
             {insightLikersModal && (

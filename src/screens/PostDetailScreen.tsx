@@ -14,7 +14,7 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { useAuth } from '../context/Auth';
 import {
@@ -75,6 +75,7 @@ import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 
 export default function PostDetailScreen({ route, navigation }: any) {
     const { postId, openComments, fromCollection, initialPost } = route.params || {};
+    const isFocused = useIsFocused();
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
     const { width: screenWidth, height: windowHeight } = useWindowDimensions();
@@ -127,14 +128,27 @@ export default function PostDetailScreen({ route, navigation }: any) {
             }
             return () => {
                 flushScenesPostUpdates();
+                setActiveFeedVideoPostId(null);
             };
         }, []),
     );
 
     useEffect(() => {
-        if (!post || !isVideoPost(post)) return;
+        if (!isFocused) {
+            setActiveFeedVideoPostId(null);
+        }
+    }, [isFocused]);
+
+    useEffect(() => {
+        return () => {
+            setActiveFeedVideoPostId(null);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!isFocused || !post || !isVideoPost(post)) return;
         setActiveFeedVideoPostId(String(post.id));
-    }, [post]);
+    }, [isFocused, post]);
 
     const syncPostOut = useCallback((next: Post | null | undefined) => {
         if (next?.id) setScenesPostUpdate(next);
@@ -468,9 +482,9 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                 width={cardMediaWidth}
                                 height={detailMediaHeight}
                                 mode="detail"
-                                isActive
+                                isActive={isFocused}
                                 immediateVideoSurface
-                                muted={isMuted}
+                                muted={isMuted || !isFocused}
                             />
                             {isVideoPost(post) ? (
                                 <VideoMuteToggle

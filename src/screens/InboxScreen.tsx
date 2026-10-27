@@ -15,9 +15,11 @@ import {
     Platform,
     UIManager,
     ActivityIndicator,
+    Pressable,
+    FlatList as RNFlatList,
 } from 'react-native';
-import { FlatList, TouchableOpacity as GHTouchableOpacity } from 'react-native-gesture-handler';
-import { useFocusEffect } from '@react-navigation/native';
+import { FlatList } from 'react-native-gesture-handler';
+import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -43,7 +45,11 @@ import { acceptFollowRequest as acceptFollowRequestApi, denyFollowRequest as den
 import { getFollowedUsers } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
 import { notificationKindIonicon, notificationKindLabel } from '../utils/notificationKind';
-import { resolveInboxNotificationRoute } from '../utils/inboxNotificationNav';
+import {
+    isFollowInboxNotification,
+    isPostRelatedInboxNotification,
+    resolveInboxNotificationRoute,
+} from '../utils/inboxNotificationNav';
 import Avatar from '../components/Avatar';
 import {
     listConversations,
@@ -468,7 +474,12 @@ export default function InboxScreen({ navigation, route }: any) {
     }, [conversations, notificationPrefs, user?.handle]);
     const allNotifications = useMemo(() => {
         return [
-            ...notifications.filter((n) => countsTowardInboxNotificationBadge(n.type)),
+            ...notifications.filter(
+                (n) =>
+                    countsTowardInboxNotificationBadge(n.type) ||
+                    isPostRelatedInboxNotification(n) ||
+                    isFollowInboxNotification(n),
+            ),
             ...activityNotifications,
         ].sort((a, b) => b.timestamp - a.timestamp);
     }, [notifications, activityNotifications]);
@@ -665,61 +676,69 @@ export default function InboxScreen({ navigation, route }: any) {
     };
 
     const navigateRoot = (name: string, params?: object) => {
-        if (rootNavigationRef.isReady()) {
-            (rootNavigationRef as any).navigate(name, params);
+        try {
+            navigation.navigate(name, params);
             return;
+        } catch (err) {
+            console.warn('[inbox] local navigate failed', name, err);
+        }
+        if (rootNavigationRef.isReady()) {
+            try {
+                rootNavigationRef.dispatch(CommonActions.navigate({ name, params }));
+                return;
+            } catch (err) {
+                console.warn('[inbox] root navigate failed', name, err);
+            }
         }
         let nav: any = navigation;
         for (let i = 0; i < 6 && nav?.getParent; i++) {
             const parent = nav.getParent();
             if (!parent) break;
             nav = parent;
+            try {
+                nav.navigate?.(name, params);
+                return;
+            } catch {
+                // keep walking
+            }
         }
-        nav?.navigate?.(name, params);
     };
 
     const navigateToMessages = (params: { handle?: string; chatGroupId?: string; kind?: string }) => {
         navigateRoot('Messages', params);
     };
 
-    const handleNotificationPress = async (notif: Notification) => {
+    const handleNotificationPress = (notif: Notification) => {
         const isSyntheticConvNotif = notif.id.startsWith('conv-notif-');
-        if (!notif.read && user?.handle && !isSyntheticConvNotif) {
-            await markNotificationRead(notif.id, user.handle);
-            setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-        }
-
         const route = resolveInboxNotificationRoute(notif);
+
         if (route.dest === 'post') {
             navigateRoot('PostDetail', {
                 postId: route.postId,
                 openComments: route.openComments,
                 focusCommentId: route.focusCommentId,
             });
-            return;
-        }
-        if (route.dest === 'profile') {
+        } else if (route.dest === 'profile') {
             navigateRoot('ViewProfile', {
                 handle: route.handle,
                 sourcePostId: route.sourcePostId,
             });
-            return;
-        }
-        if (route.dest === 'story') {
+        } else if (route.dest === 'story') {
             if (!unavailableStoryIds.has(route.storyId)) {
-                navigation.navigate('Stories', { openUserHandle: route.handle, openStoryId: route.storyId });
+                navigateRoot('Stories', { openUserHandle: route.handle, openStoryId: route.storyId });
             }
-            return;
-        }
-        if (route.dest === 'messages') {
+        } else if (route.dest === 'messages') {
             if (route.chatGroupId && user?.handle) {
-                await markGroupConversationReadById(route.chatGroupId, user.handle);
+                void markGroupConversationReadById(route.chatGroupId, user.handle);
                 navigateToMessages({ chatGroupId: route.chatGroupId, kind: 'group' });
-                return;
-            }
-            if (route.handle) {
+            } else if (route.handle) {
                 navigateToMessages({ handle: route.handle });
             }
+        }
+
+        if (!notif.read && user?.handle && !isSyntheticConvNotif) {
+            setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n)));
+            void markNotificationRead(notif.id, user.handle);
         }
     };
 
@@ -1340,10 +1359,13 @@ export default function InboxScreen({ navigation, route }: any) {
 
             {/* Content */}
             {activeTab === 'notifications' ? (
-                <FlatList
+                <RNFlatList
                     key="notifications"
                     data={allNotifications}
                     keyExtractor={(item) => item.id}
+                    keyboardShouldPersistTaps="handled"
+                    removeClippedSubviews={false}
+                    contentContainerStyle={styles.notificationListContent}
                     ListHeaderComponent={
                         unreadNotifications > 0 ? (
                             <View style={styles.listActionRow}>
@@ -1356,10 +1378,13 @@ export default function InboxScreen({ navigation, route }: any) {
                     renderItem={({ item }) => {
                         const inviteId = item.type === 'group_invite' ? item.chatGroupInviteId : undefined;
                         const row = (
-                        <GHTouchableOpacity
-                            onPress={() => { void handleNotificationPress(item); }}
-                            style={[styles.item, !item.read && styles.itemUnread]}
-                            activeOpacity={0.7}
+                        <Pressable
+                            onPress={() => handleNotificationPress(item)}
+                            style={({ pressed }) => [
+                                styles.item,
+                                !item.read && styles.itemUnread,
+                                pressed && styles.itemPressed,
+                            ]}
                         >
                             <View style={styles.itemIcon}>
                                 <View style={styles.notificationAvatarWrap}>
@@ -1376,20 +1401,16 @@ export default function InboxScreen({ navigation, route }: any) {
                                             color="#111827"
                                         />
                                     </View>
+                                    {!item.read ? <View style={styles.unreadDot} pointerEvents="none" /> : null}
                                 </View>
                             </View>
                             <View style={styles.itemContent}>
-                                <View style={styles.itemHeader}>
-                                    <Text style={styles.itemTitle} numberOfLines={1}>
-                                        {item.groupName || item.fromHandle}
-                                    </Text>
-                                    <View style={styles.notifKindChip}>
-                                        <Text style={styles.notifKindChipText}>
-                                            {notificationKindLabel(item)}
-                                        </Text>
-                                    </View>
-                                </View>
-                                <Text style={styles.itemMessage}>{formatNotificationMessage(item)}</Text>
+                                <Text style={styles.itemTitle} numberOfLines={1}>
+                                    {item.groupName || item.fromHandle}
+                                </Text>
+                                <Text style={styles.itemMessage} numberOfLines={2}>
+                                    {formatNotificationMessage(item)}
+                                </Text>
                                 {!!item.storyId && unavailableStoryIds.has(item.storyId) && (
                                     <View style={styles.storyUnavailableChip}>
                                         <Text style={styles.storyUnavailableChipText}>Story unavailable</Text>
@@ -1433,35 +1454,43 @@ export default function InboxScreen({ navigation, route }: any) {
                                     )}
                                 </TouchableOpacity>
                             )}
-                            {!item.id.startsWith('conv-notif-') && (
-                                <TouchableOpacity
-                                    onPress={() =>
-                                        setInboxAlert({
-                                            title: 'Delete notification',
-                                            message: 'Remove this notification?',
-                                            icon: 'alert',
-                                            showCancelButton: true,
-                                            cancelButtonText: 'Cancel',
-                                            confirmButtonText: 'Delete',
-                                            confirmDestructive: true,
-                                            onConfirm: () => {
-                                                void handleDeleteNotification(item.id);
-                                            },
-                                        })
-                                    }
-                                    style={styles.rowActionIcon}
-                                >
-                                    <Icon name="trash-outline" size={ox(18)} color="#6B7280" />
-                                </TouchableOpacity>
-                            )}
-                            {!item.read && <View style={styles.unreadDot} />}
-                        </GHTouchableOpacity>
+                            <View style={styles.itemTrailing}>
+                                <View style={styles.notifKindChip}>
+                                    <Text style={styles.notifKindChipText}>
+                                        {notificationKindLabel(item)}
+                                    </Text>
+                                </View>
+                                {!item.id.startsWith('conv-notif-') && (
+                                    <TouchableOpacity
+                                        onPress={() =>
+                                            setInboxAlert({
+                                                title: 'Delete notification',
+                                                message: 'Remove this notification?',
+                                                icon: 'alert',
+                                                showCancelButton: true,
+                                                cancelButtonText: 'Cancel',
+                                                confirmButtonText: 'Delete',
+                                                confirmDestructive: true,
+                                                onConfirm: () => {
+                                                    void handleDeleteNotification(item.id);
+                                                },
+                                            })
+                                        }
+                                        style={styles.rowActionIcon}
+                                        hitSlop={8}
+                                    >
+                                        <Icon name="trash-outline" size={ox(18)} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </Pressable>
                         );
+                        if (!inviteId) return row;
                         return (
                             <FadeCollapseRow
-                                exiting={!!inviteId && exitingInviteId === inviteId}
+                                exiting={exitingInviteId === inviteId}
                                 onExited={() => {
-                                    if (inviteId) finishInviteExit(inviteId);
+                                    finishInviteExit(inviteId);
                                 }}
                             >
                                 {row}
@@ -1878,6 +1907,11 @@ const styles = StyleSheet.create({
         paddingBottom: ox(8),
         paddingTop: ox(4),
     },
+    notificationListContent: {
+        paddingHorizontal: ox(12),
+        paddingBottom: ox(24),
+        width: '100%',
+    },
     storiesRail: {
         paddingHorizontal: ox(12),
         paddingBottom: ox(4),
@@ -1968,18 +2002,24 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     item: {
+        width: '100%',
+        alignSelf: 'stretch',
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: ox(10),
-        paddingVertical: ox(12),
-        marginHorizontal: ox(6),
-        marginBottom: ox(6),
-        borderRadius: ox(12),
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        justifyContent: 'space-between',
+        padding: ox(12),
+        marginHorizontal: 0,
+        marginBottom: ox(8),
+        borderRadius: 12,
+        backgroundColor: '#161b22',
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.12)',
+        borderColor: 'rgba(255, 255, 255, 0.08)',
         gap: ox(10),
-        position: 'relative',
+        minHeight: ox(72),
+    },
+    itemPressed: {
+        opacity: 0.72,
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
     },
     itemUnread: {
         backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -2065,6 +2105,13 @@ const styles = StyleSheet.create({
     itemContent: {
         flex: 1,
         minWidth: 0,
+        justifyContent: 'center',
+    },
+    itemTrailing: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexShrink: 0,
+        gap: ox(6),
     },
     itemHeader: {
         flexDirection: 'row',
@@ -2229,12 +2276,13 @@ const styles = StyleSheet.create({
     },
     unreadDot: {
         position: 'absolute',
-        right: ox(12),
-        top: ox(20),
+        left: -2,
+        top: -2,
         width: 8,
         height: 8,
         borderRadius: ox(4),
         backgroundColor: '#10B981',
+        zIndex: 2,
     },
     unreadBadge: {
         backgroundColor: '#FFFFFF',

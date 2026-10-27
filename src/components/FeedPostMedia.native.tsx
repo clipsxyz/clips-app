@@ -541,11 +541,12 @@ const FeedPostMedia = React.memo(
     /** Live playback owner — drives pause/mute so audio focus follows the viewport. */
     const isAudioPrimary =
         !videoSuspended &&
-        (mode === 'detail' ||
-            (mode === 'feed' &&
-                ((storeAudioFocusPostId != null &&
-                    String(storeAudioFocusPostId) === String(post.id)) ||
-                    propIsActive)));
+        (mode === 'detail'
+            ? propIsActive
+            : mode === 'feed' &&
+              ((storeAudioFocusPostId != null &&
+                  String(storeAudioFocusPostId) === String(post.id)) ||
+                  propIsActive));
     // Only the audio-primary card actually plays.
     const isFeedAutoplayActive = isAudioPrimary;
     // Feed-only: hold the native surface mounted (paused) while a viewer route covers us.
@@ -943,10 +944,19 @@ const FeedPostMedia = React.memo(
 
     useEffect(() => {
         if (mode !== 'detail' || !video) return;
+        if (!propIsActive) {
+            setPaused(true);
+            try {
+                (feedVideoRef.current as { pause?: () => void } | null)?.pause?.();
+            } catch {
+                // Native player may already be torn down on blur.
+            }
+            return;
+        }
         setPaused(false);
         setPlayFailed(false);
         if (mediaUrl) beginUrlLoad(mediaUrl);
-    }, [beginUrlLoad, mediaUrl, mode, post.id, video]);
+    }, [beginUrlLoad, mediaUrl, mode, post.id, propIsActive, video]);
 
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
@@ -1360,10 +1370,10 @@ const FeedPostMedia = React.memo(
                 source={cachedVideoSource as object}
                 paused={
                     viewerSurface
-                        ? paused
+                        ? paused || !propIsActive
                         : !isAudioPrimary || slideDragHeld || feedVideoHeld
                 }
-                muted={viewerSurface ? muted : !soundOn || !videoSurfaceReady}
+                muted={viewerSurface ? muted || !propIsActive : !soundOn || !videoSurfaceReady}
                 soundOn={soundOn}
                 repeat
                 mode={mode}
