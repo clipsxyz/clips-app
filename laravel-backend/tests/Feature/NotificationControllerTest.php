@@ -162,5 +162,47 @@ class NotificationControllerTest extends TestCase
             ->assertOk()
             ->assertJson(['count' => 1]);
     }
+
+    public function test_owner_can_delete_a_notification(): void
+    {
+        $user = User::factory()->create();
+        $notification = Notification::query()->create([
+            'user_id' => $user->id,
+            'type' => 'like',
+            'from_handle' => 'Alice@Cork',
+            'to_handle' => $user->handle,
+            'read' => false,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->deleteJson('/api/notifications/' . $notification->id)
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseMissing('notifications', [
+            'id' => $notification->id,
+        ]);
+    }
+
+    public function test_user_cannot_delete_another_users_notification(): void
+    {
+        $owner = User::factory()->create();
+        $other = User::factory()->create();
+        $notification = Notification::query()->create([
+            'user_id' => $owner->id,
+            'type' => 'like',
+            'from_handle' => 'Alice@Cork',
+            'to_handle' => $owner->handle,
+            'read' => false,
+        ]);
+
+        $this->actingAs($other, 'sanctum')
+            ->deleteJson('/api/notifications/' . $notification->id)
+            ->assertStatus(404);
+
+        $this->assertDatabaseHas('notifications', [
+            'id' => $notification->id,
+        ]);
+    }
 }
 

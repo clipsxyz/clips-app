@@ -523,19 +523,15 @@ async function findOrCreateLaravelDefaultCollection(userId: string): Promise<Col
 
 export async function createCollection(userId: string, name: string, isPrivate: boolean = true, initialPostId?: string, initialPost?: Partial<Post>): Promise<Collection> {
     if (isLaravelApiEnabled()) {
-        try {
-            const payload = await apiClient.createCollectionApi({
-                name: name.trim(),
-                isPrivate,
-                is_private: isPrivate,
-                ...(initialPostId ? { postId: initialPostId, post_id: initialPostId } : {}),
-            });
-            const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload, userId);
-            emitCollectionsUpdated(userId);
-            return mapped;
-        } catch (error) {
-            console.warn('Laravel createCollection failed, falling back to local collections:', error);
-        }
+        const payload = await apiClient.createCollectionApi({
+            name: name.trim(),
+            isPrivate,
+            is_private: isPrivate,
+            ...(initialPostId ? { postId: initialPostId, post_id: initialPostId } : {}),
+        });
+        const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload, userId);
+        emitCollectionsUpdated(userId);
+        return mapped;
     }
 
     await delay(200);
@@ -592,12 +588,8 @@ export async function createCollection(userId: string, name: string, isPrivate: 
  */
 export async function getUserCollections(userId: string): Promise<Collection[]> {
     if (isLaravelApiEnabled()) {
-        try {
-            const payload = await apiClient.fetchCollections();
-            return mapApiCollections(payload, userId).sort((a, b) => b.updatedAt - a.updatedAt);
-        } catch (error) {
-            console.warn('Laravel getUserCollections failed, falling back to local collections:', error);
-        }
+        const payload = await apiClient.fetchCollections();
+        return mapApiCollections(payload, userId).sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
     await delay(100);
@@ -635,17 +627,13 @@ export async function getUserCollections(userId: string): Promise<Collection[]> 
  */
 export async function addPostToCollection(collectionId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
     if (isLaravelApiEnabled()) {
-        try {
-            const payload = await apiClient.addPostToCollectionApi(collectionId, postId);
-            const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
-            if (!mapped.postIds.includes(postId)) {
-                mapped.postIds = [postId, ...mapped.postIds];
-            }
-            emitCollectionsUpdated(mapped.userId);
-            return mapped;
-        } catch (error) {
-            console.warn('Laravel addPostToCollection failed, falling back to local collections:', error);
+        const payload = await apiClient.addPostToCollectionApi(collectionId, postId);
+        const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+        if (!mapped.postIds.includes(postId)) {
+            mapped.postIds = [postId, ...mapped.postIds];
         }
+        emitCollectionsUpdated(mapped.userId);
+        return mapped;
     }
 
     await delay(150);
@@ -694,14 +682,10 @@ export async function removePostFromCollection(
     opts?: { unsaveMaster?: boolean }
 ): Promise<Collection> {
     if (isLaravelApiEnabled()) {
-        try {
-            const payload = await apiClient.removePostFromCollectionApi(collectionId, postId);
-            const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
-            emitCollectionsUpdated(mapped.userId);
-            return mapped;
-        } catch (error) {
-            console.warn('Laravel removePostFromCollection failed, falling back to local collections:', error);
-        }
+        const payload = await apiClient.removePostFromCollectionApi(collectionId, postId);
+        const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+        emitCollectionsUpdated(mapped.userId);
+        return mapped;
     }
 
     await delay(150);
@@ -753,12 +737,8 @@ export async function getCollection(
     if (!id && !collectionName) return null;
 
     if (id && isLaravelApiEnabled()) {
-        try {
-            const payload = await apiClient.fetchCollection(id);
-            return mapApiCollection(payload?.data ?? payload?.collection ?? payload);
-        } catch (error) {
-            console.warn('Laravel getCollection failed, falling back to local collections:', error);
-        }
+        const payload = await apiClient.fetchCollection(id);
+        return mapApiCollection(payload?.data ?? payload?.collection ?? payload);
     }
 
     await delay(50);
@@ -769,12 +749,8 @@ export async function getCollection(
 export async function savePostToDefaultCollection(userId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
     const normalizedUserId = normalizeUserId(userId);
     if (isLaravelApiEnabled()) {
-        try {
-            const defaults = await findOrCreateLaravelDefaultCollection(normalizedUserId);
-            return await addPostToCollection(defaults.id, postId, postSnapshot);
-        } catch (error) {
-            console.warn('Laravel savePostToDefaultCollection failed, falling back to local collections:', error);
-        }
+        const defaults = await findOrCreateLaravelDefaultCollection(normalizedUserId);
+        return await addPostToCollection(defaults.id, postId, postSnapshot);
     }
 
     await delay(120);
@@ -805,19 +781,13 @@ export async function getCollectionPosts(
     if (!id && !collectionName) return [];
 
     if (id && isLaravelApiEnabled()) {
-        try {
-            const payload = await apiClient.fetchCollection(id);
-            const list = Array.isArray(payload?.posts)
-                ? payload.posts
-                : Array.isArray(payload?.data?.posts)
-                    ? payload.data.posts
-                    : null;
-            if (Array.isArray(list)) {
-                return list.map(normalizeCollectionPost);
-            }
-        } catch (error) {
-            console.warn('Laravel getCollectionPosts failed, falling back to local collections:', error);
-        }
+        const payload = await apiClient.fetchCollection(id);
+        const list = Array.isArray(payload?.posts)
+            ? payload.posts
+            : Array.isArray(payload?.data?.posts)
+                ? payload.data.posts
+                : [];
+        return list.map(normalizeCollectionPost);
     }
 
     await delay(100);
@@ -905,14 +875,10 @@ export async function isPostInCollection(collectionId: string, postId: string): 
  */
 export async function getCollectionsForPost(userId: string, postId: string): Promise<Collection[]> {
     if (isLaravelApiEnabled()) {
-        try {
-            const payload = await apiClient.fetchCollections();
-            return mapApiCollections(payload, userId)
-                .filter((c) => c.postIds.includes(postId))
-                .sort((a, b) => b.updatedAt - a.updatedAt);
-        } catch (error) {
-            console.warn('Laravel getCollectionsForPost failed, falling back to local collections:', error);
-        }
+        const payload = await apiClient.fetchCollections();
+        return mapApiCollections(payload, userId)
+            .filter((c) => c.postIds.includes(postId))
+            .sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
     await delay(100);
@@ -929,12 +895,8 @@ export async function getCollectionsForPost(userId: string, postId: string): Pro
  */
 export async function deleteCollection(collectionId: string): Promise<void> {
     if (isLaravelApiEnabled()) {
-        try {
-            await apiClient.deleteCollectionApi(collectionId);
-            return;
-        } catch (error) {
-            console.warn('Laravel deleteCollection failed, falling back to local collections:', error);
-        }
+        await apiClient.deleteCollectionApi(collectionId);
+        return;
     }
 
     await delay(150);

@@ -39,10 +39,13 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/users/check-follows-me',
     '/link-preview',
     '/v1/parse-link',
+    '/health',
+    '/feed-content-preferences',
 ]);
 
 /** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
 const LIVE_API_PATH_PREFIXES = [
+    '/feed-content-preferences/',
     '/posts/',
     '/users/',
     '/comments/',
@@ -1362,6 +1365,12 @@ export async function markNotificationReadApi(notificationId: string) {
 export async function markAllNotificationsReadApi() {
     return apiRequest('/notifications/mark-all-read', {
         method: 'POST',
+    });
+}
+
+export async function deleteNotificationApi(notificationId: string) {
+    return apiRequest(`/notifications/${encodeURIComponent(notificationId)}`, {
+        method: 'DELETE',
     });
 }
 

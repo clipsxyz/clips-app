@@ -2429,14 +2429,8 @@ export async function deletePost(_userId: string, postId: string, userHandle?: s
         purgeLocalPost(postId);
         return;
       }
-      const offline =
-        error?.name === 'ConnectionRefused' ||
-        String(error?.message || '').includes('CONNECTION_REFUSED');
-      if (!offline) {
-        console.warn('Laravel API delete failed:', status, error?.message || error);
-        throw error;
-      }
-      // Offline: fall through to the local-only removal below.
+      console.warn('Laravel API delete failed:', status, error?.message || error);
+      throw error;
     }
   }
 
@@ -2530,11 +2524,7 @@ const handle = updated.userHandle;
       setFollowStateKey(s.follows, handle, false);
       saveFollowsToStorage(userId, s.follows);
       if (isLaravelApiEnabled()) {
-        try {
-          await apiClient.toggleFollow(handle);
-        } catch {
-          // Keep local cancel even if the server call fails.
-        }
+        await apiClient.toggleFollow(handle);
       }
       if (p) return { ...decorateForUser(userId, p), isFollowing: false };
       return {
@@ -2587,8 +2577,8 @@ const handle = updated.userHandle;
             userLiked: false,
           } as Post;
         }
-      } catch {
-        // Fall through to local mock request.
+      } catch (error) {
+        throw error;
       }
     }
 
@@ -2653,8 +2643,8 @@ const handle = updated.userHandle;
         if (viewer) removeFollowRequest(viewer, handle);
         return applyFollowState(result.following);
       }
-    } catch {
-      // Server unreachable — fall back to the optimistic local toggle below.
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -2840,11 +2830,10 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
       const response = await apiClient.reclipPost(id);
       return transformLaravelPost(response);
     } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
       if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
+        console.warn('Laravel reclip increment failed:', error);
       }
-      // Fall through to mock implementation
+      throw error;
     }
   }
 
@@ -2899,11 +2888,7 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
 
       return { originalPost: decorateForUser(userId, originalPost), reclippedPost };
     } catch (error: any) {
-      if (error?.name === 'ConnectionRefused' || error?.message?.includes('CONNECTION_REFUSED') || error?.message?.includes('Failed to fetch')) {
-        // Fall through to mock
-      } else {
-        throw error;
-      }
+      throw error;
     }
   }
 
@@ -3196,8 +3181,9 @@ export async function fetchCommentsPage(
       };
     } catch (error: any) {
       if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('fetchCommentsPage API failed, falling back to mock:', error);
+        console.warn('fetchCommentsPage API failed:', error);
       }
+      return { items: [], nextCursor: null, hasMore: false };
     }
   }
 

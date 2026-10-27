@@ -178,19 +178,13 @@ function filterNotificationsByPreferences(forHandle: string, items: Notification
 export async function getNotifications(forHandle: string): Promise<Notification[]> {
     const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
     if (isLaravelApiEnabled()) {
-        try {
-            const apiClient = await import('./client');
-            const response = await apiClient.fetchNotifications(0, 100);
-            const items = Array.isArray(response?.items) ? response.items : [];
-            const normalized = items.map((n: any) => normalizeLaravelNotification(n, forHandle));
-            const local = notifications.get(forHandle) || [];
-            const merged = [...local, ...normalized].sort((a, b) => b.timestamp - a.timestamp);
-            const byId = new Map<string, Notification>();
-            for (const n of merged) byId.set(n.id, n);
-            return filterNotificationsByPreferences(forHandle, Array.from(byId.values()));
-        } catch (error) {
-            console.warn('Failed to fetch notifications from API, falling back to local store:', error);
-        }
+        const apiClient = await import('./client');
+        const response = await apiClient.fetchNotifications(0, 100);
+        const items = Array.isArray(response?.items) ? response.items : [];
+        const normalized = items.map((n: any) => normalizeLaravelNotification(n, forHandle));
+        const byId = new Map<string, Notification>();
+        for (const n of normalized) byId.set(n.id, n);
+        return filterNotificationsByPreferences(forHandle, Array.from(byId.values()));
     }
     return filterNotificationsByPreferences(forHandle, notifications.get(forHandle) || []);
 }
@@ -246,6 +240,15 @@ export async function getUnreadNotificationCount(forHandle: string): Promise<num
 }
 
 export async function deleteNotification(notificationId: string, forHandle: string): Promise<void> {
+    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
+    if (isLaravelApiEnabled()) {
+        const apiClient = await import('./client');
+        try {
+            await apiClient.deleteNotificationApi(notificationId);
+        } catch (error: any) {
+            if (Number(error?.status) !== 404) throw error;
+        }
+    }
     const userNotifications = notifications.get(forHandle) || [];
     const filtered = userNotifications.filter(n => n.id !== notificationId);
     notifications.set(forHandle, filtered);

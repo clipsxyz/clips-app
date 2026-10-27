@@ -699,7 +699,7 @@ export async function markConversationRead(selfHandle: string, otherHandle: stri
             await apiClient.markConversationRead(otherHandle);
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
-            console.warn('Laravel markConversationRead failed:', e);
+            throw e;
         }
     } else if (!useLiveInboxApi()) {
         unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
@@ -786,7 +786,8 @@ export async function fetchGroupThreadMessagesPage(
             };
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
-            console.warn('Laravel fetchGroupThreadMessagesPage failed, using full thread fallback:', e);
+            console.warn('Laravel fetchGroupThreadMessagesPage failed:', e);
+            return { groupName: 'Group', groupAvatarUrl: null, items: [], nextCursor: null, hasMore: false };
         }
     }
 
@@ -851,6 +852,7 @@ export async function fetchGroupThread(groupId: string): Promise<{ groupName: st
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             console.warn('Laravel fetchGroupThread failed:', e);
+            return { groupName: 'Group', groupAvatarUrl: null, messages: [] };
         }
     }
     const meta = mockChatGroups.get(groupId);
@@ -927,7 +929,7 @@ export async function markGroupConversationReadById(groupId: string, viewerHandl
             await apiClient.markGroupConversationRead(groupId);
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
-            console.warn('Laravel markGroupConversationRead failed:', e);
+            throw e;
         }
         return;
     }

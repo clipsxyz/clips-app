@@ -906,7 +906,9 @@ export async function fetchUserStories(
             lastStoriesLoadSource = 'api-user';
             return targetGroup ? sortStoriesNewestFirst(targetGroup.stories) : [];
         } catch (error) {
-            console.warn('Failed to fetch user stories from API, falling back to mock:', error);
+            console.warn('Failed to fetch user stories from API:', error);
+            lastStoriesLoadSource = 'api-user';
+            return [];
         }
     }
 
@@ -947,7 +949,9 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
                 stories: sortStoriesNewestFirst(stories),
             };
         } catch (error) {
-            console.warn('Failed to fetch story group by handle from API, falling back to mock:', error);
+            console.warn('Failed to fetch story group by handle from API:', error);
+            lastStoriesLoadSource = 'api-user';
+            return null;
         }
     }
 
@@ -983,7 +987,8 @@ export async function fetchPublicStory(userHandle: string, storyId: string): Pro
             if (!response || typeof response !== 'object') return null;
             return mapLaravelStoryToStory(response);
         } catch (error) {
-            console.warn('Failed to fetch public story from API, falling back to mock:', error);
+            console.warn('Failed to fetch public story from API:', error);
+            return null;
         }
     }
 
@@ -1175,62 +1180,8 @@ export async function createStory(
           clearActiveStoryProbes();
           return newStory;
       } catch (error: any) {
-        const isConnectionFallback =
-            error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
-        if (!isConnectionFallback) {
-            console.warn('createStory API failed, falling back to mock:', error);
-        }
-        // Fallback to mock implementation if API fails
-        await delay();
-
-        const now = Date.now();
-        const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
-
-        const newStory: Story = {
-            id: `story-${Date.now()}`,
-            userId,
-            userHandle,
-            mediaUrl: mediaUrl || undefined,
-            mediaType: mediaType || undefined,
-            text,
-            textColor,
-            textSize,
-            textStyle: textStyle || undefined,
-            stickers: stickers || undefined,
-            taggedUsers: taggedUsers || undefined,
-            createdAt: now,
-            expiresAt,
-            location,
-            venue: venue || undefined,
-            videoPosterUrl: videoPosterUrl || undefined,
-            audience: audience || 'public',
-            views: 0,
-            viewerHandles: [],
-            hasViewed: false,
-            reactions: [],
-            replies: [],
-            userReaction: undefined,
-            sharedFromPost,
-            sharedFromUser,
-            poll: poll ? {
-                question: poll.question,
-                option1: poll.option1,
-                option2: poll.option2,
-                option3: poll.option3,
-                votes1: 0,
-                votes2: 0,
-                votes3: poll.option3 ? 0 : undefined,
-                userVote: undefined
-            } : undefined,
-            question: question ? {
-                prompt: question,
-                responses: []
-            } : undefined
-        };
-
-        stories.push(newStory);
-
-        return newStory;
+        console.warn('createStory API failed:', error);
+        throw error;
     }
 }
 
@@ -1292,9 +1243,7 @@ export async function addStoryReaction(storyId: string, userId: string, userHand
             pushMockReaction();
             return;
         } catch (error: any) {
-            const isConnectionFallback =
-                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
-            if (!isConnectionFallback) throw error;
+            throw error;
         }
     }
 
@@ -1328,9 +1277,7 @@ export async function addStoryReply(storyId: string, userId: string, userHandle:
             pushMockReply();
             return;
         } catch (error: any) {
-            const isConnectionFallback =
-                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
-            if (!isConnectionFallback) throw error;
+            throw error;
         }
     }
 
@@ -1644,9 +1591,6 @@ export async function fetchFollowedUsersStoryGroups(
                 if (!page.hasMore) break;
             } while (cursor && pages < maxPages);
 
-            const followedSet = new Set(
-                (followedUserHandles || []).map((h) => (h || '').trim().toLowerCase()).filter(Boolean),
-            );
             // The API (/stories/paged) is already scoped server-side to the viewer plus their
             // accepted follows, so trust its results. The local follow cache can be empty or
             // stale (e.g. follows made on another device), which previously hid followed users'
@@ -1656,28 +1600,8 @@ export async function fetchFollowedUsersStoryGroups(
                 return (story.audience || 'public') !== 'only_me';
             });
 
-            // Merge in local stories so createStory mock fallbacks (API create failed) still show
-            // immediately in RN Stories 24 rail/viewer while API mode is enabled.
-            const now = Date.now();
-            const localActive = stories.filter((s) => {
-                if (s.expiresAt <= now) return false;
-                const audience = s.audience || 'public';
-                if (s.userId === userId) return true;
-                if (!followedSet.has((s.userHandle || '').trim().toLowerCase())) return false;
-                if (audience === 'only_me') return false;
-                return true;
-            });
-            const merged = [...filtered];
-            const seenIds = new Set(filtered.map((s) => String(s.id)));
-            for (const local of localActive) {
-                const key = String(local.id);
-                if (seenIds.has(key)) continue;
-                merged.push(local);
-                seenIds.add(key);
-            }
-
             const byUser = new Map<string, StoryGroup>();
-            for (const story of merged) {
+            for (const story of filtered) {
                 const existing = byUser.get(story.userId);
                 if (existing) {
                     existing.stories.push(story);
@@ -1696,7 +1620,9 @@ export async function fetchFollowedUsersStoryGroups(
             lastStoriesLoadSource = 'api-paged';
             return sortGroupStoriesNewestFirst(Array.from(byUser.values()));
         } catch (error) {
-            console.warn('Failed to fetch followed users stories from API, falling back to mock:', error);
+            console.warn('Failed to fetch followed users stories from API:', error);
+            lastStoriesLoadSource = 'api-paged';
+            return [];
         }
     }
 
