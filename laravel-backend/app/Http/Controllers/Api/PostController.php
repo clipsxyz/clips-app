@@ -1200,6 +1200,13 @@ class PostController extends Controller
             BoostAnalyticsService::incrementForPost($post->id, 'shares_count');
         });
 
+        if ($user instanceof User && $post->user_id && $post->user_id !== $user->id) {
+            $owner = User::find($post->user_id);
+            if ($owner) {
+                app(InteractionPushService::class)->notifyShare($user, $owner, (string) $post->id);
+            }
+        }
+
         $post->load(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national', 'taggedUsers:id,handle,display_name,avatar_url']);
         $post->loadCount(Post::engagementWithCounts());
         Post::bumpFeedCache();
@@ -1314,6 +1321,13 @@ class PostController extends Controller
 
         $originalPost->refresh();
         $reclippedPost->load(['user', 'originalPost']);
+
+        if ($created && $originalPost->user_id && $originalPost->user_id !== $user->id) {
+            $owner = User::find($originalPost->user_id);
+            if ($owner) {
+                app(InteractionPushService::class)->notifyReclip($user, $owner, (string) $originalPost->id);
+            }
+        }
 
         $payload = self::toApiArray($reclippedPost, $user);
         $payload['original_post'] = self::toApiArray($originalPost, $user);

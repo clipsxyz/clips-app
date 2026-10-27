@@ -86,3 +86,33 @@ describe('navigateFromPushNotificationData group', () => {
     });
 });
 
+describe('navigateFromPushNotificationData share and reclip', () => {
+    it('opens PostDetail for share using post_id', () => {
+        const navigate = vi.fn();
+        const ok = navigateFromPushNotificationData(
+            { isReady: () => true, navigate },
+            { type: 'share', post_id: 'post-uuid-1' },
+        );
+        expect(ok).toBe(true);
+        expect(navigate).toHaveBeenCalledWith('PostDetail', {
+            postId: 'post-uuid-1',
+            openComments: false,
+            focusCommentId: undefined,
+        });
+    });
+
+    it('opens PostDetail for reclip using postId', () => {
+        const navigate = vi.fn();
+        const ok = navigateFromPushNotificationData(
+            { isReady: () => true, navigate },
+            { type: 'reclip', postId: 'post-uuid-2' },
+        );
+        expect(ok).toBe(true);
+        expect(navigate).toHaveBeenCalledWith('PostDetail', {
+            postId: 'post-uuid-2',
+            openComments: false,
+            focusCommentId: undefined,
+        });
+    });
+});
+

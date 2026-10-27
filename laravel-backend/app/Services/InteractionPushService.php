@@ -48,6 +48,60 @@ class InteractionPushService
         );
     }
 
+    public function notifyReclip(User $actor, User $recipient, string $postId): void
+    {
+        if ($actor->id === $recipient->id) {
+            return;
+        }
+        if (! $this->prefAllows($recipient, 'reclips')) {
+            return;
+        }
+
+        $title = $this->actorLabel($actor);
+        $this->createAndPush(
+            recipient: $recipient,
+            type: 'reclip',
+            fromHandle: (string) $actor->handle,
+            message: "{$actor->handle} reclipped your post",
+            postId: $postId,
+            title: $title,
+            body: 'reclipped your post',
+            data: [
+                'type' => 'reclip',
+                'post_id' => $postId,
+                'postId' => $postId,
+                'fromHandle' => (string) $actor->handle,
+            ]
+        );
+    }
+
+    public function notifyShare(User $actor, User $recipient, string $postId): void
+    {
+        if ($actor->id === $recipient->id) {
+            return;
+        }
+        if (! $this->prefAllows($recipient, 'shares')) {
+            return;
+        }
+
+        $title = $this->actorLabel($actor);
+        $this->createAndPush(
+            recipient: $recipient,
+            type: 'share',
+            fromHandle: (string) $actor->handle,
+            message: "{$actor->handle} shared your post",
+            postId: $postId,
+            title: $title,
+            body: 'shared your post',
+            data: [
+                'type' => 'share',
+                'post_id' => $postId,
+                'postId' => $postId,
+                'fromHandle' => (string) $actor->handle,
+            ]
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $extra
      */
@@ -276,6 +330,17 @@ class InteractionPushService
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    private function actorLabel(User $actor): string
+    {
+        $handle = trim((string) ($actor->handle ?? ''));
+        if ($handle !== '') {
+            return $handle;
+        }
+        $name = trim((string) ($actor->display_name ?? $actor->name ?? ''));
+
+        return $name !== '' ? $name : 'Someone';
     }
 
     private function directMessagePreview(Message $message): string
