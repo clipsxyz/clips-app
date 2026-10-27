@@ -1631,7 +1631,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                             ['follows', 'Follows'],
                                             ['followRequests', 'Follow Requests'],
                                             ['storyInsights', 'Story Insights'],
-                                            ['questions', 'Questions'],
                                             ['shares', 'Shares'],
                                             ['reclips', 'Reclips'],
                                         ].map(([key, label]) => (

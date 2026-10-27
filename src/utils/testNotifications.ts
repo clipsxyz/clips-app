@@ -291,7 +291,6 @@ export function testNotificationPreferences(): void {
     follows: true,
     followRequests: true,
     storyInsights: true,
-    questions: true,
     shares: true,
     reclips: true,
   };

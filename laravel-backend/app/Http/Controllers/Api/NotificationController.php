@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
 class NotificationController extends Controller
@@ -233,6 +234,17 @@ class NotificationController extends Controller
             'userId' => 'required|string',
             'userHandle' => 'required|string',
             'preferences' => 'required|array',
+            'preferences.enabled' => 'sometimes|boolean',
+            'preferences.directMessages' => 'sometimes|boolean',
+            'preferences.groupChats' => 'sometimes|boolean',
+            'preferences.likes' => 'sometimes|boolean',
+            'preferences.comments' => 'sometimes|boolean',
+            'preferences.replies' => 'sometimes|boolean',
+            'preferences.follows' => 'sometimes|boolean',
+            'preferences.followRequests' => 'sometimes|boolean',
+            'preferences.storyInsights' => 'sometimes|boolean',
+            'preferences.shares' => 'sometimes|boolean',
+            'preferences.reclips' => 'sometimes|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -251,7 +263,7 @@ class NotificationController extends Controller
                     'user_handle' => $request->userHandle,
                 ],
                 [
-                    'preferences' => json_encode($request->preferences),
+                    'preferences' => json_encode($this->sanitizePreferencePayload($request->input('preferences', []))),
                     'updated_at' => now(),
                     'created_at' => now(),
                 ]
@@ -280,9 +292,11 @@ class NotificationController extends Controller
                 ->first();
 
             if ($prefs) {
+                $decoded = json_decode($prefs->preferences, true);
+
                 return response()->json([
                     'success' => true,
-                    'preferences' => json_decode($prefs->preferences, true)
+                    'preferences' => is_array($decoded) ? $this->sanitizePreferencePayload($decoded) : null,
                 ]);
             }
 
@@ -296,6 +310,29 @@ class NotificationController extends Controller
                 'message' => 'Error fetching preferences: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Keep only known preference toggles. Legacy `questions` keys are dropped.
+     *
+     * @param  array<string, mixed>  $preferences
+     * @return array<string, mixed>
+     */
+    private function sanitizePreferencePayload(array $preferences): array
+    {
+        return Arr::only($preferences, [
+            'enabled',
+            'directMessages',
+            'groupChats',
+            'likes',
+            'comments',
+            'replies',
+            'follows',
+            'followRequests',
+            'storyInsights',
+            'shares',
+            'reclips',
+        ]);
     }
 
     private function decodeCursor(?string $cursor): array

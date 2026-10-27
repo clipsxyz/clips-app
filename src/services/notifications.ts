@@ -25,7 +25,6 @@ export interface NotificationPreferences {
   follows: boolean;
   followRequests: boolean;
   storyInsights: boolean;
-  questions: boolean;
   shares: boolean;
   reclips: boolean;
 }
@@ -40,7 +39,6 @@ export type NotificationPreferenceChannel =
   | 'follow'
   | 'follow_request'
   | 'story_insight'
-  | 'question'
   | 'share'
   | 'reclip';
 
@@ -55,7 +53,6 @@ const defaultPreferences: NotificationPreferences = {
   follows: true,
   followRequests: true,
   storyInsights: true,
-  questions: true,
   shares: true,
   reclips: true,
 };
@@ -68,7 +65,9 @@ export function getNotificationPreferences(): NotificationPreferences {
   try {
     const stored = localStorage.getItem(NOTIFICATION_PREFS_KEY);
     if (stored) {
-      return { ...defaultPreferences, ...JSON.parse(stored) };
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      delete parsed.questions;
+      return { ...defaultPreferences, ...parsed };
     }
   } catch (error) {
     console.error('Error reading notification preferences:', error);
@@ -99,8 +98,6 @@ export function isNotificationTypeEnabled(
       return !!prefs.followRequests;
     case 'story_insight':
       return !!prefs.storyInsights;
-    case 'question':
-      return !!prefs.questions;
     case 'share':
       return !!prefs.shares;
     case 'reclip':

@@ -15,7 +15,6 @@ export interface NotificationPreferences {
   follows: boolean;
   followRequests: boolean;
   storyInsights: boolean;
-  questions: boolean;
   shares: boolean;
   reclips: boolean;
 }
@@ -30,7 +29,6 @@ export type NotificationPreferenceChannel =
   | 'follow'
   | 'follow_request'
   | 'story_insight'
-  | 'question'
   | 'share'
   | 'reclip';
 
@@ -50,7 +48,6 @@ const defaultPreferences: NotificationPreferences = {
   follows: true,
   followRequests: true,
   storyInsights: true,
-  questions: true,
   shares: true,
   reclips: true,
 };
@@ -153,7 +150,9 @@ async function hydratePreferencesOnce(): Promise<void> {
   try {
     const stored = await AsyncStorage.getItem(NOTIFICATION_PREFS_KEY);
     if (stored) {
-      inMemoryNotificationPrefs = { ...defaultPreferences, ...JSON.parse(stored) };
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      delete parsed.questions;
+      inMemoryNotificationPrefs = { ...defaultPreferences, ...parsed };
     }
   } catch (error) {
     console.error('Error hydrating notification preferences:', error);
@@ -197,8 +196,6 @@ export function isNotificationTypeEnabled(
       return !!prefs.followRequests;
     case 'story_insight':
       return !!prefs.storyInsights;
-    case 'question':
-      return !!prefs.questions;
     case 'share':
       return !!prefs.shares;
     case 'reclip':

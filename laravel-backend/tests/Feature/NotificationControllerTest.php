@@ -118,6 +118,30 @@ class NotificationControllerTest extends TestCase
             ]);
     }
 
+    public function test_save_preferences_drops_legacy_questions_key(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/notifications/preferences', [
+                'userId' => $user->id,
+                'userHandle' => $user->handle,
+                'preferences' => [
+                    'likes' => true,
+                    'questions' => false,
+                ],
+            ])
+            ->assertOk();
+
+        $prefs = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/notifications/preferences/' . $user->handle)
+            ->assertOk()
+            ->assertJsonPath('preferences.likes', true)
+            ->json('preferences');
+
+        $this->assertIsArray($prefs);
+        $this->assertArrayNotHasKey('questions', $prefs);
+    }
+
     public function test_get_preferences_returns_null_when_none_exist(): void
     {
         $user = User::factory()->create();

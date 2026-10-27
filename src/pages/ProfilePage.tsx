@@ -3301,16 +3301,6 @@ export default function ProfilePage() {
                         }}
                       />
                       <NotificationToggle
-                        label="Questions"
-                        description="When someone answers your question"
-                        enabled={notificationPrefs.questions}
-                        onChange={(enabled) => {
-                          const newPrefs = { ...notificationPrefs, questions: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
-                        }}
-                      />
-                      <NotificationToggle
                         label="Shares"
                         description="When someone shares your post"
                         enabled={notificationPrefs.shares}
