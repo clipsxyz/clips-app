@@ -2974,7 +2974,7 @@ export default function StoriesPage() {
                                             const isTagged = currentStory.taggedUsers?.includes(handle);
                                             
                                             // Debug logging
-                                            if (process.env.NODE_ENV === 'development') {
+                                            if (import.meta.env.DEV) {
                                                 console.log('Story mention check:', {
                                                     text,
                                                     handle,

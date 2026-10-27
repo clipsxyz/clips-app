@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { clearLaravelUnreachable, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
+import { clearLaravelUnreachable, getRuntimeEnv, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from './apiBaseUrl';
 import { isMockMode } from './apiMode';
@@ -697,7 +697,7 @@ export async function fetchPostsPage(
     userId?: string,
 ) {
     console.log('[fetchPostsPage/client] IS_MOCK=', isMockMode(), {
-        EXPO_PUBLIC_USE_MOCK: process.env.EXPO_PUBLIC_USE_MOCK,
+        EXPO_PUBLIC_USE_MOCK: getRuntimeEnv('EXPO_PUBLIC_USE_MOCK'),
         cursor,
         limit,
         filter,

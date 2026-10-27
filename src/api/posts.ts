@@ -2,6 +2,7 @@ import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import { evaluateCommentModeration } from '../utils/commentModeration';
 import {
+  getRuntimeEnv,
   isLaravelApiEnabled,
   isLaravelUnreachableThisSession,
   isViteDevMode,
@@ -1908,7 +1909,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
   const useLaravelAPI = !mockMode;
   console.log('[fetchPostsPage/posts]', {
     IS_MOCK: mockMode,
-    EXPO_PUBLIC_USE_MOCK: process.env.EXPO_PUBLIC_USE_MOCK,
+    EXPO_PUBLIC_USE_MOCK: getRuntimeEnv('EXPO_PUBLIC_USE_MOCK'),
     tab,
     t,
     useLaravelAPI,

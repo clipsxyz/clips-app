@@ -7,6 +7,10 @@ import { firebaseSwPlugin } from './vite-plugin-firebase-sw'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), noCache(), firebaseSwPlugin()],
+  // Residual Node `process.env` reads (logs, libraries) must not crash the browser.
+  define: {
+    'process.env': '{}',
+  },
   // Expose both Vite and Expo-style public env keys to the client bundle.
   envPrefix: ['VITE_', 'EXPO_PUBLIC_'],
   resolve: {

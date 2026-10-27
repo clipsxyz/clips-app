@@ -68,17 +68,7 @@ export function isLaravelUnreachableThisSession(): boolean {
 
 /** True when EXPO_PUBLIC_USE_MOCK is explicitly `'true'` (mock data fallback; no Laravel). */
 export function isMockMode(): boolean {
-  let raw: string | undefined;
-  try {
-    if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_USE_MOCK !== undefined) {
-      raw = String(process.env.EXPO_PUBLIC_USE_MOCK);
-    }
-  } catch {
-    /* ignore */
-  }
-  if (raw === undefined || raw === '') {
-    raw = getRuntimeEnv('EXPO_PUBLIC_USE_MOCK');
-  }
+  const raw = getRuntimeEnv('EXPO_PUBLIC_USE_MOCK');
   return String(raw ?? '').trim().toLowerCase() === 'true';
 }
 
