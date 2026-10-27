@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Message;
 use App\Models\Notification;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -100,6 +101,38 @@ class InteractionPushService
         );
     }
 
+    public function notifyDirectMessage(User $actor, User $recipient, Message $message): void
+    {
+        if ($actor->id === $recipient->id) {
+            return;
+        }
+        if ($message->is_system_message) {
+            return;
+        }
+        if (! $this->prefAllows($recipient, 'directMessages')) {
+            return;
+        }
+
+        $conversationId = (string) ($message->conversation_id ?? '');
+        $preview = $this->directMessagePreview($message);
+        try {
+            $this->fcm->sendToUser((string) $recipient->id, (string) $actor->handle, $preview, [
+                'type' => 'dm',
+                'conversation_id' => $conversationId,
+                'conversationId' => $conversationId,
+                'sender_id' => (string) $actor->id,
+                'senderId' => (string) $actor->id,
+                'fromHandle' => (string) $actor->handle,
+                'sender_handle' => (string) $actor->handle,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to dispatch FCM', [
+                'type' => 'dm',
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function notifyFollow(User $actor, User $recipient): void
     {
         if ($actor->id === $recipient->id) {
@@ -163,6 +196,16 @@ class InteractionPushService
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    private function directMessagePreview(Message $message): string
+    {
+        $text = trim((string) ($message->text ?? ''));
+        if ($text !== '') {
+            return mb_strlen($text) > 120 ? mb_substr($text, 0, 117).'…' : $text;
+        }
+
+        return 'Sent an attachment';
     }
 
     private function prefAllows(User $recipient, string $prefKey): bool

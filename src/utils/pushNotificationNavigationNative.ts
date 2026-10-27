@@ -7,6 +7,21 @@ type NavLike = {
     navigate: (name: string, params?: object) => void;
 };
 
+/** Other party in Laravel DM conversation_id (`handleA|handleB`). */
+export function peerHandleFromConversationId(
+    conversationId: string | undefined | null,
+    selfHandle?: string | null,
+): string | undefined {
+    const raw = String(conversationId || '').trim();
+    if (!raw) return undefined;
+    const parts = raw.split('|').map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 0) return undefined;
+    if (parts.length === 1) return parts[0];
+    const self = String(selfHandle || '').trim().toLowerCase();
+    if (!self) return parts[0];
+    return parts.find((p) => p.toLowerCase() !== self) || parts[0];
+}
+
 function pickString(data: PushNotificationData, ...keys: string[]): string | undefined {
     for (const key of keys) {
         const raw = data[key];
@@ -42,6 +57,8 @@ export function navigateFromPushNotificationData(nav: NavLike, data: PushNotific
     const storyId = pickString(data, 'storyId', 'story_id');
     const postId = pickString(data, 'postId', 'post_id');
     const commentId = pickString(data, 'commentId', 'comment_id');
+    const conversationId = pickString(data, 'conversation_id', 'conversationId');
+    const senderId = pickString(data, 'sender_id', 'senderId');
 
     if (type === 'group_chat' || chatGroupId) {
         if (chatGroupId) {
@@ -66,9 +83,14 @@ export function navigateFromPushNotificationData(nav: NavLike, data: PushNotific
         type === 'sticker' ||
         type === 'reply_message'
     ) {
-        const handle = fromHandle || userId;
-        if (handle) {
-            nav.navigate('Messages', { handle });
+        const handle = fromHandle || userId || peerHandleFromConversationId(conversationId);
+        if (handle || conversationId) {
+            nav.navigate('Messages', {
+                handle,
+                conversation_id: conversationId,
+                conversationId,
+                sender_id: senderId,
+            });
             return true;
         }
     }

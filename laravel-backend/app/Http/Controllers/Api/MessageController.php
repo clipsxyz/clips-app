@@ -8,10 +8,12 @@ use App\Models\ChatGroupMember;
 use App\Models\Message;
 use App\Models\User;
 use App\Services\BoostAnalyticsService;
+use App\Services\InteractionPushService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -606,6 +608,17 @@ class MessageController extends Controller
 
             return $message;
         });
+
+        if (! $request->boolean('is_system_message', false)) {
+            try {
+                app(InteractionPushService::class)->notifyDirectMessage($user, $recipient, $message);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to dispatch DM push', [
+                    'message_id' => $message->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         $payload = $message->toArray();
         $payload['source_post_id'] = $message->source_post_id;

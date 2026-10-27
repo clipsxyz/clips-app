@@ -30,6 +30,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { dedupeChatMessages, upsertChatMessage } from '../utils/dedupeChatMessages';
 import { formatDmPresenceLabel } from '../utils/dmThreadStatus';
+import { peerHandleFromConversationId } from '../utils/pushNotificationNavigationNative';
 import {
     fetchConversationMessagesPage,
     fetchGroupThreadMessagesPage,
@@ -930,7 +931,9 @@ type SheetMenuState = {
 
 export default function MessagesScreen({ route, navigation }: any) {
     const {
-        handle,
+        handle: routeHandle,
+        conversation_id: routeConversationId,
+        conversationId: routeConversationIdCamel,
         chatGroupId,
         groupName: routeGroupName,
         communityCreated,
@@ -938,6 +941,15 @@ export default function MessagesScreen({ route, navigation }: any) {
     } = route.params || {};
     const isGroupThread = Boolean(chatGroupId);
     const { user } = useAuth();
+    const handle: string =
+        (typeof routeHandle === 'string' ? routeHandle.trim() : '') ||
+        peerHandleFromConversationId(
+            (typeof routeConversationId === 'string' ? routeConversationId : '') ||
+                (typeof routeConversationIdCamel === 'string' ? routeConversationIdCamel : '') ||
+                undefined,
+            user?.handle,
+        ) ||
+        '';
     const insets = useSafeAreaInsets();
     const initialGroupName =
         (typeof routeGroupName === 'string' && routeGroupName.trim()) ||

@@ -349,6 +349,19 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     }
   }
 
+  unsubscribeForeground = await onForegroundMessage((payload: NotificationPayload) => {
+    const data = payload?.data || {};
+    const type = String(data.type || data.notificationType || '').toLowerCase();
+    if (type !== 'dm' && type !== 'message') return;
+    void import('../utils/dispatchBrowserEvent').then(({ dispatchBrowserEvent }) => {
+      dispatchBrowserEvent('conversationUpdated', {
+        conversation_id: data.conversation_id || data.conversationId,
+        sender_id: data.sender_id || data.senderId,
+      });
+      dispatchBrowserEvent('inboxUnreadChanged', {});
+    });
+  });
+
   if (!prefs.enabled) {
     return;
   }
@@ -365,10 +378,6 @@ export async function initializeNotifications(options?: NotificationInitOptions)
   } catch (error) {
     console.warn('Native notification permission request failed:', error);
   }
-
-  unsubscribeForeground = await onForegroundMessage(() => {
-    // Keep listener active for future in-app badges/refresh hooks.
-  });
 
   if (typeof messaging.onTokenRefresh === 'function') {
     unsubscribeTokenRefresh = messaging.onTokenRefresh((token: string) => {
