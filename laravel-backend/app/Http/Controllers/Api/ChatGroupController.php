@@ -8,11 +8,13 @@ use App\Models\ChatGroupInvite;
 use App\Models\ChatGroupMember;
 use App\Models\Notification;
 use App\Models\User;
+use App\Services\InteractionPushService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class ChatGroupController extends Controller
@@ -203,6 +205,20 @@ class ChatGroupController extends Controller
 
             return $invite->load(['chatGroup', 'inviter', 'invitee']);
         });
+
+        try {
+            app(InteractionPushService::class)->notifyGroupInvite(
+                $user,
+                $invitee,
+                $group,
+                (string) $invite->id
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Failed to dispatch group invite push', [
+                'invite_id' => $invite->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json([
             ...$invite->toArray(),

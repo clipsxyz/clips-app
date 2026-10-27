@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ChatGroup;
 use App\Models\Message;
 use App\Models\Notification;
 use App\Models\User;
@@ -130,6 +131,85 @@ class InteractionPushService
                 'type' => 'dm',
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    public function notifyGroupInvite(User $inviter, User $invitee, ChatGroup $group, ?string $inviteId = null): void
+    {
+        if ($inviter->id === $invitee->id) {
+            return;
+        }
+        if (! $this->prefAllows($invitee, 'groupChats')) {
+            return;
+        }
+
+        $groupId = (string) $group->id;
+        $groupName = trim((string) ($group->name ?? '')) ?: 'Group';
+        $title = $groupName;
+        $body = "{$inviter->handle} invited you to join {$groupName}";
+
+        try {
+            $this->fcm->sendToUser((string) $invitee->id, $title, $body, [
+                'type' => 'group_invite',
+                'group_id' => $groupId,
+                'chatGroupId' => $groupId,
+                'chat_group_id' => $groupId,
+                'invite_id' => (string) ($inviteId ?? ''),
+                'chatGroupInviteId' => (string) ($inviteId ?? ''),
+                'fromHandle' => (string) $inviter->handle,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to dispatch FCM', [
+                'type' => 'group_invite',
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public function notifyGroupMessage(User $actor, ChatGroup $group, Message $message): void
+    {
+        if ($message->is_system_message) {
+            return;
+        }
+
+        $groupId = (string) $group->id;
+        $groupName = trim((string) ($group->name ?? '')) ?: 'Group';
+        $preview = $this->directMessagePreview($message);
+        $title = $groupName;
+        $body = $preview === 'Sent an attachment'
+            ? "{$actor->handle}: {$preview}"
+            : "{$actor->handle}: {$preview}";
+
+        $memberIds = $group->activeMembers()
+            ->where('user_id', '!=', $actor->id)
+            ->pluck('user_id')
+            ->filter()
+            ->values();
+        if ($memberIds->isEmpty()) {
+            return;
+        }
+
+        $members = User::query()->whereIn('id', $memberIds)->get();
+        foreach ($members as $member) {
+            if (! $this->prefAllows($member, 'groupChats')) {
+                continue;
+            }
+            try {
+                $this->fcm->sendToUser((string) $member->id, $title, $body, [
+                    'type' => 'group_chat',
+                    'group_id' => $groupId,
+                    'chatGroupId' => $groupId,
+                    'chat_group_id' => $groupId,
+                    'fromHandle' => (string) $actor->handle,
+                    'sender_id' => (string) $actor->id,
+                    'senderId' => (string) $actor->id,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to dispatch FCM', [
+                    'type' => 'group_chat',
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 

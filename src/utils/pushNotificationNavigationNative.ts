@@ -60,9 +60,23 @@ export function navigateFromPushNotificationData(nav: NavLike, data: PushNotific
     const conversationId = pickString(data, 'conversation_id', 'conversationId');
     const senderId = pickString(data, 'sender_id', 'senderId');
 
-    if (type === 'group_chat' || chatGroupId) {
+    if (type === 'group_invite') {
+        navigateMainTab(nav, 'Inbox', {
+            initialTab: 'notifications',
+            group_id: chatGroupId,
+            chatGroupId,
+            inviteId: pickString(data, 'invite_id', 'inviteId', 'chatGroupInviteId'),
+        });
+        return true;
+    }
+
+    if (type === 'group_chat' || (chatGroupId && type !== 'dm' && type !== 'message')) {
         if (chatGroupId) {
-            nav.navigate('Messages', { chatGroupId, kind: 'group' });
+            nav.navigate('Messages', {
+                chatGroupId,
+                kind: 'group',
+                groupName: pickString(data, 'groupName', 'group_name'),
+            });
             return true;
         }
     }

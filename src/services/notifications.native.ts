@@ -352,10 +352,18 @@ export async function initializeNotifications(options?: NotificationInitOptions)
   unsubscribeForeground = await onForegroundMessage((payload: NotificationPayload) => {
     const data = payload?.data || {};
     const type = String(data.type || data.notificationType || '').toLowerCase();
-    if (type !== 'dm' && type !== 'message') return;
+    if (type === 'group_invite') {
+      void import('../utils/dispatchBrowserEvent').then(({ dispatchBrowserEvent }) => {
+        dispatchBrowserEvent('notificationsUpdated', {});
+        dispatchBrowserEvent('inboxUnreadChanged', {});
+      });
+      return;
+    }
+    if (type !== 'dm' && type !== 'message' && type !== 'group_chat') return;
     void import('../utils/dispatchBrowserEvent').then(({ dispatchBrowserEvent }) => {
       dispatchBrowserEvent('conversationUpdated', {
         conversation_id: data.conversation_id || data.conversationId,
+        chat_group_id: data.group_id || data.chatGroupId || data.chat_group_id,
         sender_id: data.sender_id || data.senderId,
       });
       dispatchBrowserEvent('inboxUnreadChanged', {});

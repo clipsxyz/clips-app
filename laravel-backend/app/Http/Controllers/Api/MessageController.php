@@ -678,6 +678,18 @@ class MessageController extends Controller
 
         $message = Message::create($attributes);
 
+        if (! $request->boolean('is_system_message', false)) {
+            try {
+                app(InteractionPushService::class)->notifyGroupMessage($user, $group, $message);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to dispatch group chat push', [
+                    'message_id' => $message->id ?? null,
+                    'group_id' => $group->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         return response()->json($message, 201);
     }
 
