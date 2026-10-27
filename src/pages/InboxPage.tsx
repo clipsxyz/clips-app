@@ -26,7 +26,7 @@ import {
     inboxUnreadPartsFromLists,
     publishInboxUnreadParts,
 } from '../utils/inboxUnread';
-import { notificationKindLabel } from '../utils/notificationKind';
+import { notificationKindLabel, resolveNotificationKind } from '../utils/notificationKind';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -1151,9 +1151,9 @@ export default function InboxPage() {
         }
     };
 
-    const getNotificationIcon = (type: Notification['type']) => {
+    const getNotificationIcon = (notif: Notification) => {
         const cls = 'w-5 h-5 text-gray-700 dark:text-white';
-        switch (type) {
+        switch (resolveNotificationKind(notif)) {
             case 'sticker':
                 return <FiSmile className={cls} />;
             case 'reply':
@@ -1794,7 +1794,7 @@ export default function InboxPage() {
                                     className="flex items-center gap-3 flex-1 min-w-0"
                                 >
                                     <div className="flex-shrink-0">
-                                        {getNotificationIcon(notif.type)}
+                                        {getNotificationIcon(notif)}
                                     </div>
                                     <Avatar
                                         name={notif.groupName || notif.fromHandle}

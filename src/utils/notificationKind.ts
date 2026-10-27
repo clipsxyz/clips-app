@@ -5,10 +5,68 @@ export type NotificationKindInput = {
     chatGroupId?: string | null;
     postId?: string | null;
     storyId?: string | null;
+    message?: string | null;
+    body?: string | null;
 };
 
-export function notificationKindLabel(item: NotificationKindInput): string {
+export type ResolvedNotificationKind =
+    | 'like'
+    | 'comment'
+    | 'reply'
+    | 'reclip'
+    | 'share'
+    | 'follow'
+    | 'follow_request'
+    | 'new_post'
+    | 'group_invite'
+    | 'dm'
+    | 'sticker'
+    | 'unknown';
+
+function notificationBodyText(item: NotificationKindInput): string {
+    return `${item.message || ''} ${item.body || ''}`.trim().toLowerCase();
+}
+
+/** Legacy Laravel rows were stored as `type: dm` with an action phrase in the message. */
+export function inferNotificationKindFromText(text: string): ResolvedNotificationKind | null {
+    const hay = String(text || '').toLowerCase();
+    if (!hay) return null;
+    if (hay.includes('liked your post')) return 'like';
+    if (hay.includes('reclipped your post')) return 'reclip';
+    if (hay.includes('shared your post')) return 'share';
+    if (hay.includes('commented')) return 'comment';
+    return null;
+}
+
+export function resolveNotificationKind(item: NotificationKindInput): ResolvedNotificationKind {
     const type = String(item.type || '').trim().toLowerCase();
+    const known: ResolvedNotificationKind[] = [
+        'like',
+        'comment',
+        'reply',
+        'reclip',
+        'share',
+        'follow',
+        'follow_request',
+        'new_post',
+        'group_invite',
+        'dm',
+        'sticker',
+    ];
+    const typed = known.includes(type as ResolvedNotificationKind)
+        ? (type as ResolvedNotificationKind)
+        : 'unknown';
+
+    if (typed === 'dm' || typed === 'unknown') {
+        const inferred = inferNotificationKindFromText(notificationBodyText(item));
+        if (inferred) return inferred;
+    }
+
+    return typed;
+}
+
+export function notificationKindLabel(item: NotificationKindInput): string {
+    const type = resolveNotificationKind(item);
     switch (type) {
         case 'like':
             return 'Like';
@@ -37,8 +95,12 @@ export function notificationKindLabel(item: NotificationKindInput): string {
 }
 
 /** Ionicons name for the avatar corner badge on native Inbox. */
-export function notificationKindIonicon(type?: string | null): string {
-    switch (String(type || '').trim().toLowerCase()) {
+export function notificationKindIonicon(item: NotificationKindInput | string | null | undefined): string {
+    const type =
+        typeof item === 'string' || item == null
+            ? String(item || '').trim().toLowerCase()
+            : resolveNotificationKind(item);
+    switch (type) {
         case 'like':
             return 'heart';
         case 'comment':

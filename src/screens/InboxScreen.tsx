@@ -1050,7 +1050,7 @@ export default function InboxScreen({ navigation, route }: any) {
         }
     };
 
-    const getNotificationIcon = (type: Notification['type']) => notificationKindIonicon(type);
+    const getNotificationIcon = (item: Notification) => notificationKindIonicon(item);
 
     const sortedConversations = [...conversations].sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
@@ -1388,7 +1388,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                     />
                                     <View style={styles.notificationTypeBadge}>
                                         <Icon
-                                            name={getNotificationIcon(item.type)}
+                                            name={getNotificationIcon(item)}
                                             size={ox(10)}
                                             color="#111827"
                                         />
