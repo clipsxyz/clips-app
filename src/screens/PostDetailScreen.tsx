@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { useAuth } from '../context/Auth';
 import {
@@ -76,9 +77,11 @@ import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 export default function PostDetailScreen({ route, navigation }: any) {
     const { postId, openComments, fromCollection, initialPost } = route.params || {};
     const isFocused = useIsFocused();
+    const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
     const { width: screenWidth, height: windowHeight } = useWindowDimensions();
+    const tabBarClearance = 80 + Math.max(insets.bottom, 8);
     const hideSaveAction = Boolean(fromCollection);
 
     const [post, setPost] = useState<Post | null>(() =>
@@ -403,7 +406,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const portraitFillHeight = feedMediaHeight(cardMediaWidth, post.width, post.height, {
         fullscreenPortrait: true,
     });
-    const reservedChrome = ox(56) + ox(52) + ox(118) + ox(24);
+    const reservedChrome = ox(56) + ox(52) + ox(118) + ox(24) + tabBarClearance;
     const viewportFillHeight = Math.max(
         windowHeight - reservedChrome,
         Math.round(cardMediaWidth / RATIO_PORTRAIT_9_16),
@@ -436,7 +439,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 <View style={styles.headerSide} />
             </View>
 
-            <View style={styles.page}>
+            <View style={[styles.page, { paddingBottom: tabBarClearance }]}>
                 <View style={styles.card} collapsable={false}>
                     {textOnlyPost ? (
                         <FeedTextOnlyFeedLayout
@@ -556,6 +559,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                 {post?.stats?.reclips ?? 0} reclips
                             </Text>
                         </View>
+                        <View style={styles.tabBarSpacer} />
                     </View>
                 </View>
             </View>
@@ -899,6 +903,9 @@ const styles = StyleSheet.create({
         fontSize: ox(13),
         color: '#94A3B8',
         fontWeight: '600',
+    },
+    tabBarSpacer: {
+        height: ox(12),
     },
     errorText: {
         fontSize: ox(16),

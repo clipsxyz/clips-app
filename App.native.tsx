@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { DarkTheme, NavigationContainer } from '@react-navigation/native';
+import { CommonActions, DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { resetRootToScreen, rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
 import {
   getNativeShareNavState,
@@ -123,6 +123,38 @@ const TAB_BAR_STYLE = {
   right: 0,
   bottom: 0,
 };
+
+function inboxStackIndex(state: { routes?: Array<{ name: string; state?: { index?: number } }> } | undefined): number {
+  const inbox = state?.routes?.find((route) => route.name === 'Inbox');
+  const nested = inbox?.state;
+  if (!nested || typeof nested.index !== 'number') return 0;
+  return nested.index;
+}
+
+/** Drop PostDetail / ViewProfile from Inbox without refocusing the Inbox tab. */
+function popInboxStackToList(navigation: { dispatch: (action: any) => void }) {
+  navigation.dispatch((state: any) => {
+    const inboxIndex = state.routes.findIndex((route: { name: string }) => route.name === 'Inbox');
+    if (inboxIndex < 0) return state;
+    const inboxRoute = state.routes[inboxIndex];
+    const nested = inboxRoute.state;
+    if (!nested || nested.index === 0) return state;
+    const nextRoutes = state.routes.slice();
+    nextRoutes[inboxIndex] = {
+      ...inboxRoute,
+      state: {
+        ...nested,
+        index: 0,
+        routes: nested.routes.slice(0, 1),
+      },
+    };
+    return CommonActions.reset({
+      ...state,
+      routes: nextRoutes,
+      index: state.index,
+    });
+  });
+}
 
 /** Keep nav chrome transparent so FeedAmbientCanvas shows through frosted bars. */
 const NAV_THEME = {
@@ -253,6 +285,18 @@ function MainTabs() {
         name="Inbox"
         component={InboxTabStack}
         options={{ title: 'Inbox' }}
+        listeners={({ navigation }) => ({
+          blur: () => {
+            popInboxStackToList(navigation);
+          },
+          tabPress: (e) => {
+            const nestedIndex = inboxStackIndex(navigation.getState());
+            if (nestedIndex > 0) {
+              e.preventDefault();
+              navigation.navigate('Inbox', { screen: 'InboxMain' });
+            }
+          },
+        })}
       />
     </Tab.Navigator>
   );
