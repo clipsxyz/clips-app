@@ -70,8 +70,6 @@ export default function StoryLinkCreatePage() {
                 undefined,
                 undefined,
                 undefined,
-                undefined,
-                undefined,
                 'public',
             );
             window.dispatchEvent(new CustomEvent('storyCreated', { detail: { userHandle: user.handle } }));

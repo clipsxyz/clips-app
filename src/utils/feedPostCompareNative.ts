@@ -132,7 +132,6 @@ export function stickersEqual(
             x.textContent !== y.textContent ||
             x.textColor !== y.textColor ||
             x.fontSize !== y.fontSize ||
-            x.isQuestionCard !== y.isQuestionCard ||
             x.sticker?.url !== y.sticker?.url ||
             x.sticker?.emoji !== y.sticker?.emoji
         ) {

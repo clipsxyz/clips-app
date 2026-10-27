@@ -486,7 +486,7 @@ let stories: Story[] = [
             }
         ]
     },
-    // Stories for Sarah@Artane – include a poll story to match the new poll card style
+    // Stories for Sarah@Artane
     {
         id: 'story-sarah-1',
         userId: 'sarah-artane-1',
@@ -522,13 +522,6 @@ let stories: Story[] = [
                 fontSize: 'small'
             }
         ],
-        poll: {
-            question: 'Where should I go later?',
-            option1: 'Howth',
-            option2: 'Malahide',
-            votes1: 32,
-            votes2: 21
-        }
     },
     {
         id: 'story-sarah-2',
@@ -1022,9 +1015,7 @@ export async function createStory(
     textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string }, // Text style for text-only stories
     stickers?: StickerOverlay[], // Stickers/GIFs for stories
     taggedUsers?: string[], // Tagged users (handles only)
-    poll?: { question: string; option1: string; option2: string; option3?: string }, // Poll data
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>, // Tagged users with positions
-    question?: string, // Question prompt (e.g., "Ask me anything")
     venue?: string, // Venue / place name (for metadata when story is shown on feed)
     videoPosterUrl?: string, // Still for Stories 24 rail thumbs
     audience: 'public' | 'close_friends' | 'only_me' = 'public'
@@ -1070,20 +1061,6 @@ export async function createStory(
             userReaction: undefined,
             sharedFromPost,
             sharedFromUser,
-            poll: poll ? {
-                question: poll.question,
-                option1: poll.option1,
-                option2: poll.option2,
-                option3: poll.option3,
-                votes1: 0,
-                votes2: 0,
-                votes3: poll.option3 ? 0 : undefined,
-                userVote: undefined
-            } : undefined,
-            question: question ? {
-                prompt: question,
-                responses: []
-            } : undefined
         };
 
         stories.push(newStory);
@@ -1114,8 +1091,6 @@ export async function createStory(
                 stickers: stickers || undefined,
                 taggedUsers: taggedUsers || undefined, // Send tagged users to backend
                 taggedUsersPositions: taggedUsersPositions || undefined, // Send tagged users with positions
-                poll: poll || undefined,
-                question: question || undefined, // Question prompt
                 venue: venue || undefined,
                 video_poster_url: videoPosterUrl || undefined,
                 audience: audience || 'public',
@@ -1157,20 +1132,6 @@ export async function createStory(
             userReaction: response.user_reaction || undefined,
             sharedFromPost: response.shared_from_post_id || sharedFromPost || undefined,
             sharedFromUser: response.shared_from_user_handle || sharedFromUser || undefined,
-            poll: response.poll || (poll ? {
-                question: poll.question,
-                option1: poll.option1,
-                option2: poll.option2,
-                option3: poll.option3,
-                votes1: 0,
-                votes2: 0,
-                votes3: poll.option3 ? 0 : undefined,
-                userVote: undefined
-            } : undefined),
-            question: response.question || (question ? {
-                prompt: question,
-                responses: []
-            } : undefined),
         };
 
           // Also add to local stories array for immediate UI update
@@ -1285,67 +1246,6 @@ export async function addStoryReply(storyId: string, userId: string, userHandle:
     pushMockReply();
 }
 
-// Add answer to question in story - stores question in questions API (not messages)
-export async function addQuestionAnswer(storyId: string, userId: string, userHandle: string, text: string): Promise<void> {
-    await delay();
-
-    const story = stories.find(s => s.id === storyId);
-    if (story && story.question) {
-        const storyCreatorHandle = story.userHandle;
-        
-        // Store question in questions API (not messages)
-        const { addQuestion } = await import('./questions');
-        await addQuestion(
-            storyId,
-            story.question.prompt || 'Ask me anything',
-            storyCreatorHandle,
-            userId,
-            userHandle,
-            text
-        );
-        
-        // Also store in story for insights (optional, for tracking)
-        if (!story.question.responses) {
-            story.question.responses = [];
-        }
-        story.question.responses.push({
-            id: `answer-${Date.now()}`,
-            userId,
-            userHandle,
-            text,
-            createdAt: Date.now()
-        });
-    }
-}
-
-// Vote on a poll in a story
-export async function voteOnPoll(storyId: string, _userId: string, option: 'option1' | 'option2' | 'option3'): Promise<void> {
-    await delay();
-
-    const story = stories.find(s => s.id === storyId);
-    if (story && story.poll) {
-        // If user already voted, remove their previous vote
-        if (story.poll.userVote === 'option1') {
-            story.poll.votes1 = (story.poll.votes1 || 0) - 1;
-        } else if (story.poll.userVote === 'option2') {
-            story.poll.votes2 = (story.poll.votes2 || 0) - 1;
-        } else if (story.poll.userVote === 'option3') {
-            story.poll.votes3 = (story.poll.votes3 || 0) - 1;
-        }
-
-        // Add new vote
-        if (option === 'option1') {
-            story.poll.votes1 = (story.poll.votes1 || 0) + 1;
-        } else if (option === 'option2') {
-            story.poll.votes2 = (story.poll.votes2 || 0) + 1;
-        } else if (option === 'option3') {
-            story.poll.votes3 = (story.poll.votes3 || 0) + 1;
-        }
-
-        story.poll.userVote = option;
-    }
-}
-
 // Story insights for a given user (likes on their stories)
 export interface StoryInsight {
     storyId: string;
@@ -1360,17 +1260,6 @@ export interface StoryInsight {
     /** All emoji reactions (Instagram-style attribution). */
     reactions: Array<{ userHandle: string; emoji: string; createdAt: number }>;
     replies: Array<{ userHandle: string; text: string; createdAt: number }>;
-    question?: {
-        prompt: string;
-        responseCount: number;
-        responses: Array<{
-            id: string;
-            userId: string;
-            userHandle: string;
-            text: string;
-            createdAt: number;
-        }>;
-    };
 }
 
 export async function getStoryInsightsForUser(userHandle: string): Promise<StoryInsight[]> {
@@ -1416,7 +1305,6 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                     text: r.text,
                     createdAt: r.createdAt,
                 }));
-            const questionResponseCount = story.question?.responses?.length || 0;
             return {
                 storyId: story.id,
                 mediaUrl: story.mediaUrl,
@@ -1429,11 +1317,6 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 likers,
                 reactions: reactionRows,
                 replies: replyRows,
-                question: story.question ? {
-                    prompt: story.question.prompt,
-                    responseCount: questionResponseCount,
-                    responses: story.question.responses || []
-                } : undefined
             };
         })
         // Surface stories with real other-person activity (or views).
@@ -1442,8 +1325,7 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 item.views > 0 ||
                 item.likes > 0 ||
                 item.reactions.length > 0 ||
-                item.replies.length > 0 ||
-                (item.question?.responseCount || 0) > 0,
+                item.replies.length > 0,
         )
         // Newest stories first
         .sort((a, b) => b.createdAt - a.createdAt);

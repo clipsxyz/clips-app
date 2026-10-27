@@ -22,8 +22,7 @@ export function storyTextFontSize(size?: string): number {
 export function getStoryTextContent(story: Story | undefined): string {
     if (!story) return '';
     return (
-        (story.text || (story as { text_content?: string }).text_content || '').trim() ||
-        (story.poll?.question || '').trim()
+        (story.text || (story as { text_content?: string }).text_content || '').trim()
     );
 }
 

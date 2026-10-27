@@ -498,19 +498,11 @@ export default function ClipPage() {
   }, [location.state]);
 
   const handleCameraClick = async () => {
-    // In poll mode, use file picker (for selecting background images)
-    if (pollMode) {
-    fileInputRef.current?.click();
-    } else {
-      // In regular story mode, use camera input with capture attribute
       if (cameraInputRef.current) {
-        // Force click on camera input which has capture attribute
         cameraInputRef.current.click();
       } else {
-        // Fallback to regular file input
         fileInputRef.current?.click();
       }
-    }
   };
 
   const textColors = {
@@ -529,13 +521,6 @@ export default function ClipPage() {
   const handleMediaSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // In poll mode, only allow images
-      if (pollMode && !file.type.startsWith('image/')) {
-        alert('Only images can be used as background for polls. Please select an image file.');
-        event.target.value = '';
-        return;
-      }
-      
       const reader = new FileReader();
       reader.onload = (e) => {
         setSelectedMedia(e.target?.result as string);
@@ -544,8 +529,6 @@ export default function ClipPage() {
         } else if (file.type.startsWith('video/')) {
           setMediaType('video');
         }
-        // If in poll mode, stay in poll mode - don't switch to regular story mode
-        // The poll card will show on top of the media
       };
       reader.readAsDataURL(file);
       // Reset the input so the same file can be selected again if needed
@@ -660,10 +643,9 @@ export default function ClipPage() {
         selectedMedia ? undefined : (text.trim() ? ({ color: textColor, size: textSize, background: background, fontFamily: textFontFamily } as any) : undefined),
         allStickers.length > 0 ? allStickers : undefined, // stickers (including text and location)
         taggedUsers.length > 0 ? taggedUsers.map(tu => tu.handle) : undefined, // taggedUsers (send handles for API compatibility)
-        undefined, // poll
         taggedUsers.length > 0 ? taggedUsers.map(tu => ({ handle: tu.handle, x: tu.x, y: tu.y })) : undefined, // taggedUsersPositions
-        undefined, // question
         venue.trim() || undefined, // venue for metadata carousel
+        undefined,
         storyAudience
       );
 
@@ -760,9 +742,9 @@ export default function ClipPage() {
           undefined, // textStyle (not needed for video segments with stickers)
           allStickers.length > 0 ? allStickers : undefined, // stickers (including text and location)
           undefined, // taggedUsers
-          undefined, // poll
           undefined, // taggedUsersPositions
-          undefined, // question
+          undefined, // venue
+          undefined, // videoPosterUrl
           storyAudience
         );
 
@@ -794,12 +776,6 @@ export default function ClipPage() {
   };
 
   const [textOnlyMode, setTextOnlyMode] = React.useState(false);
-  const [pollMode, setPollMode] = React.useState(false);
-  const [pollQuestion, setPollQuestion] = React.useState('');
-  const [pollOption1, setPollOption1] = React.useState('Yes');
-  const [pollOption2, setPollOption2] = React.useState('No');
-  const [pollOption3, setPollOption3] = React.useState('');
-  const [showPollOption3, setShowPollOption3] = React.useState(false);
   // Update container size for GIF overlays and stickers
   React.useEffect(() => {
     if (containerRef.current) {
@@ -976,234 +952,6 @@ export default function ClipPage() {
     }
   };
 
-  // Check poll mode - it should work with or without media
-  if (pollMode) {
-    // Poll creation mode
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-black">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-black/20 backdrop-blur-sm">
-          <button
-            onClick={() => {
-              setPollMode(false);
-              setPollQuestion('');
-              setPollOption1('Yes');
-              setPollOption2('No');
-              setPollOption3('');
-              setShowPollOption3(false);
-              setSelectedMedia(null);
-              setMediaType(null);
-            }}
-            className="p-2 -ml-2 text-white hover:bg-white/10 rounded-full transition-colors"
-            aria-label="Back"
-          >
-            <FiX className="w-6 h-6" />
-          </button>
-          <h1 className="text-white font-bold text-lg">Create Poll</h1>
-          <button
-            onClick={handleCameraClick}
-            className="p-2 text-white hover:bg-white/10 rounded-full transition-colors"
-            aria-label="Add Background"
-            title="Add Background Photo/Video"
-          >
-            <FiCamera className="w-5 h-5" />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleMediaSelect}
-            className="hidden"
-          />
-          {/* Hidden Camera Input for Poll Mode */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="user"
-            onChange={handleMediaSelect}
-            className="hidden"
-          />
-        </div>
-
-        {/* Main Content Area */}
-        <div 
-          className="flex-1 flex items-center justify-center relative overflow-hidden"
-          style={{
-            background: selectedMedia && mediaType === 'image'
-              ? undefined
-              : 'linear-gradient(to bottom right, rgba(255, 78, 203, 0.2), rgba(0, 0, 0, 0.9), rgba(143, 91, 255, 0.2))'
-          }}
-        >
-          {/* Background Image Preview - only images allowed for poll backgrounds */}
-          {selectedMedia && mediaType === 'image' && (
-            <img
-              src={selectedMedia}
-              alt="Poll background"
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-          )}
-
-          {/* Poll Content Overlay */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-6 z-10">
-            {/* Poll Card Container */}
-            <div className="backdrop-blur-md bg-white/95 rounded-2xl p-6 border border-white/30 shadow-2xl max-w-md w-full">
-              {/* Poll Question Input */}
-              <div className="mb-6">
-                <input
-                  type="text"
-                  value={pollQuestion}
-                  onChange={(e) => setPollQuestion(e.target.value)}
-                  placeholder="Ask a question..."
-                  className="w-full px-4 py-3 bg-gray-50 text-gray-900 placeholder-gray-500 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:outline-none text-lg font-medium"
-                  maxLength={200}
-                />
-              </div>
-
-              {/* Poll Options */}
-              <div className="space-y-4">
-                {/* Option 1 */}
-                <div>
-                  <input
-                    type="text"
-                    value={pollOption1}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value.length <= 26) {
-                        setPollOption1(value);
-                      }
-                    }}
-                    placeholder=""
-                    className="w-full px-4 py-4 bg-gray-50 text-gray-900 placeholder-gray-400 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:outline-none text-lg font-semibold text-center"
-                    maxLength={26}
-                  />
-                  <p className="text-gray-500 text-xs mt-1 text-center">{pollOption1.length}/26</p>
-                </div>
-
-                {/* Option 2 */}
-                <div>
-                  <input
-                    type="text"
-                    value={pollOption2}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value.length <= 26) {
-                        setPollOption2(value);
-                      }
-                    }}
-                    placeholder=""
-                    className="w-full px-4 py-4 bg-gray-50 text-gray-900 placeholder-gray-400 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:outline-none text-lg font-semibold text-center"
-                    maxLength={26}
-                  />
-                  <p className="text-gray-500 text-xs mt-1 text-center">{pollOption2.length}/26</p>
-                </div>
-
-                {/* Option 3 - Show when added */}
-                {showPollOption3 && (
-                  <div>
-                    <input
-                      type="text"
-                      value={pollOption3}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value.length <= 26) {
-                          setPollOption3(value);
-                        }
-                      }}
-                      placeholder=""
-                      className="w-full px-4 py-4 bg-gray-50 text-gray-900 placeholder-gray-400 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:outline-none text-lg font-semibold text-center"
-                      maxLength={26}
-                      autoFocus
-                    />
-                    <p className="text-gray-500 text-xs mt-1 text-center">{pollOption3.length}/26</p>
-                  </div>
-                )}
-
-                {/* Add Option Button - Instagram style */}
-                {!showPollOption3 && (
-                  <button
-                    onClick={() => setShowPollOption3(true)}
-                    className="w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl border-2 border-dashed border-gray-300 text-lg font-semibold transition-colors flex items-center justify-center gap-2"
-                  >
-                    <FiPlus className="w-5 h-5" />
-                    Add option
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Bar */}
-          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-6 p-4 bg-black/20 backdrop-blur-sm z-10">
-            {/* Submit Button */}
-            <button
-              onClick={async () => {
-                if (!pollQuestion.trim()) {
-                  alert('Please enter a question for your poll.');
-                  return;
-                }
-                if (!pollOption1.trim() || !pollOption2.trim()) {
-                  alert('Please enter at least two poll options.');
-                  return;
-                }
-                if (showPollOption3 && !pollOption3.trim()) {
-                  alert('Please enter the third poll option or remove it.');
-                  return;
-                }
-                if (!user) return;
-
-                setIsUploading(true);
-                try {
-                  // Create poll story
-                  await createStory(
-                    user.id,
-                    user.handle,
-                    selectedMedia || undefined,
-                    mediaType || undefined,
-                    undefined, // text
-                    storyLocation.trim() || undefined,
-                    undefined, // textColor
-                    undefined, // textSize
-                    sharedPostInfo?.postId,
-                    sharedPostInfo?.userId,
-                    undefined, // textStyle
-                    undefined, // stickers
-                    undefined, // taggedUsers
-                    {
-                      question: pollQuestion.trim(),
-                      option1: pollOption1.trim(),
-                      option2: pollOption2.trim(),
-                      option3: showPollOption3 && pollOption3.trim() ? pollOption3.trim() : undefined
-                    }, // poll data
-                    undefined, // taggedUsersPositions
-                    undefined, // question
-                    undefined, // venue
-                    storyAudience
-                  );
-
-                  // Dispatch event to refresh story indicators
-                  window.dispatchEvent(new CustomEvent('storyCreated', {
-                    detail: { userHandle: user.handle }
-                  }));
-
-                  navigate('/feed');
-                } catch (error) {
-                  console.error('Error creating poll story:', error);
-                  alert('Failed to create poll. Please try again.');
-                } finally {
-                  setIsUploading(false);
-                }
-              }}
-              disabled={isUploading || !pollQuestion.trim() || !pollOption1.trim() || !pollOption2.trim() || (showPollOption3 && !pollOption3.trim())}
-              className="px-6 py-3 bg-white text-black rounded-full font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isUploading ? 'Posting...' : 'Post Poll'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (!selectedMedia) {
     // Initial state - no media selected
@@ -1865,7 +1613,7 @@ export default function ClipPage() {
               className="hidden"
             />
 
-            {/* Text-only, Ask a Question, and Poll stickers have been removed to keep stories focused on photo and video only */}
+            {/* Text-only stickers have been removed to keep stories focused on photo and video only */}
           </div>
         </div>
 
@@ -1876,7 +1624,7 @@ export default function ClipPage() {
   }
 
   // Media selected - new full screen editing mode (similar to text-only mode)
-  if (selectedMedia && !pollMode) {
+  if (selectedMedia) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-black">
         {/* Header */}

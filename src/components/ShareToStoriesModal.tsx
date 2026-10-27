@@ -72,8 +72,6 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         undefined,
         undefined,
         undefined,
-        undefined,
-        undefined,
         payload.venue,
         payload.videoPosterUrl,
       );

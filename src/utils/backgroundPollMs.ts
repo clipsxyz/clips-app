@@ -15,7 +15,7 @@ export function getFeedNewPostsPollMs(): number {
     return isDevRuntime() ? 90_000 : 45_000;
 }
 
-/** Header counts (questions, etc.) on web shell. */
+/** Header notification/insights counts on web shell. */
 export function getHeaderCountsPollMs(): number {
     return isDevRuntime() ? 60_000 : 30_000;
 }

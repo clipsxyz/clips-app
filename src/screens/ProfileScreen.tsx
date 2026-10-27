@@ -1508,7 +1508,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             <View style={styles.safetySection}>
                                 <Text style={styles.safetySectionTitle}>Stories</Text>
                                 <Text style={styles.toggleDescription}>
-                                    Photo, video, text, and poll stories (Clip studio)
+                                    Photo, video, and text stories (Clip studio)
                                 </Text>
                                 <TouchableOpacity
                                     style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}

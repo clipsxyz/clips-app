@@ -234,7 +234,6 @@ export async function buildStories24RailItems(
         }
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
-            (latest.poll?.question || '').trim() ||
             (latest.sharedFromPost ? 'Shared a post' : 'New story');
         const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
         const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);

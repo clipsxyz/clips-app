@@ -98,9 +98,7 @@ export async function publishMediaStory24(options: {
         undefined, // textStyle
         composerStickers.length > 0 ? composerStickers : undefined,
         options.taggedUsers?.length ? options.taggedUsers : undefined,
-        undefined, // poll
         options.taggedUsersPositions?.length ? options.taggedUsersPositions : undefined,
-        undefined, // question
         options.venue,
         options.videoPosterUrl,
         options.audience ?? 'public',
@@ -141,51 +139,8 @@ export async function publishTextStory24(options: {
         undefined,
         options.taggedUsers?.length ? options.taggedUsers : undefined,
         undefined,
-        undefined,
-        undefined,
         options.venue || options.landmark,
         undefined, // videoPosterUrl
         options.audience ?? 'public',
     );
-}
-
-export async function publishPollStory24(options: {
-    userId: string;
-    userHandle: string;
-    question: string;
-    option1: string;
-    option2: string;
-    option3?: string;
-    backgroundUri?: string;
-    location?: string;
-    audience?: 'public' | 'close_friends' | 'only_me';
-}): Promise<Story> {
-    const story = await createStory(
-        options.userId,
-        options.userHandle,
-        options.backgroundUri,
-        options.backgroundUri ? 'image' : undefined,
-        undefined, // text
-        options.location,
-        undefined, // textColor
-        undefined, // textSize
-        undefined, // sharedFromPost
-        undefined, // sharedFromUser
-        undefined, // textStyle
-        undefined, // stickers
-        undefined, // taggedUsers
-        {
-            question: options.question,
-            option1: options.option1,
-            option2: options.option2,
-            option3: options.option3,
-        },
-        undefined, // taggedUsersPositions
-        undefined, // question prompt
-        undefined, // venue
-        undefined, // videoPosterUrl
-        options.audience ?? 'public',
-    );
-    notifyStoryCreated(options.userHandle);
-    return story;
 }

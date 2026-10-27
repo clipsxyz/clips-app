@@ -450,7 +450,6 @@ export default function InboxPage() {
     const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages' | 'groups'>('messages');
     const [messageFilter, setMessageFilter] = React.useState<'all' | 'groups' | 'unread' | 'requests' | 'pinned'>('all');
     const [conversationQuery, setConversationQuery] = React.useState('');
-    const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
     const [openSwipeHandle, setOpenSwipeHandle] = React.useState<string | null>(null);
     const [inboxChatInfo, setInboxChatInfo] = React.useState<ConversationSummary | null>(null);
     const [compactPhone, setCompactPhone] = React.useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
@@ -571,7 +570,6 @@ export default function InboxPage() {
                     .flatMap((insight) => [
                         ...(insight.likers || []),
                         ...(insight.viewers || []),
-                        ...(insight.question?.responses || []).map((r) => r.userHandle),
                     ])
                     .filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
             )
@@ -1057,7 +1055,8 @@ export default function InboxPage() {
                 (insight) =>
                     (insight.views || 0) > 0 ||
                     (insight.likes > 0 && Array.isArray(insight.likers) && insight.likers.length > 0) ||
-                    (!!insight.question && (insight.question.responseCount || 0) > 0)
+                    (Array.isArray(insight.reactions) && insight.reactions.length > 0) ||
+                    (Array.isArray(insight.replies) && insight.replies.length > 0)
             ),
         [insights]
     );
@@ -1931,24 +1930,14 @@ export default function InboxPage() {
                             key={insight.storyId}
                             onClick={() => {
                                 markInsightSeen(insight.storyId);
-                                if (insight.question && insight.question.responseCount > 0) {
-                                    setSelectedQuestionInsight(insight);
-                                }
                             }}
                             className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${
                                 seenInsightIds.has(insight.storyId)
                                     ? 'opacity-80'
                                     : 'bg-white/10 border-l-4 border-white'
-                            } ${insight.question && insight.question.responseCount > 0 ? 'cursor-pointer' : ''}`}
+                            }`}
                         >
-                            {/* Show avatar from first responder if question, otherwise from first liker */}
-                            {insight.question && insight.question.responses && insight.question.responses.length > 0 ? (
-                                <Avatar
-                                    name={insight.question.responses[0].userHandle}
-                                    src={resolveInsightAvatar(insight.question.responses[0].userHandle)}
-                                    size="sm"
-                                />
-                            ) : primaryHandle ? (
+                            {primaryHandle ? (
                                 <button
                                     type="button"
                                     onClick={(e) => {
@@ -1969,18 +1958,12 @@ export default function InboxPage() {
                             )}
                             <div className="flex-1 min-w-0">
                                 <div className="font-medium truncate">
-                                    {insight.question 
-                                        ? `Q: ${insight.question.prompt.length > 30 ? insight.question.prompt.slice(0, 30) + '…' : insight.question.prompt}`
-                                        : insight.text 
+                                    {insight.text 
                                         ? (insight.text.length > 40 ? insight.text.slice(0, 40) + '…' : insight.text) 
                                         : 'Story'}
                                 </div>
                                 <div className="text-xs text-gray-500 truncate">
-                                    {insight.question && insight.question.responseCount > 0 ? (
-                                        insight.question.responseCount === 1
-                                            ? `1 answer`
-                                            : `${insight.question.responseCount} answers`
-                                    ) : insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
+                                    {insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
                                         <>
                                             Liked by{' '}
                                             <button
@@ -2266,70 +2249,6 @@ export default function InboxPage() {
                 </div>
             )}
 
-            {/* Question Responses Modal */}
-            {selectedQuestionInsight && selectedQuestionInsight.question && (
-                <div 
-                    className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-                    onClick={() => setSelectedQuestionInsight(null)}
-                >
-                    <div 
-                        className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                                Question Responses
-                            </h2>
-                            <button
-                                onClick={() => setSelectedQuestionInsight(null)}
-                                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                            >
-                                <FiX className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                            </button>
-                        </div>
-                        
-                        {/* Question Prompt */}
-                        <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl p-4 mb-4 text-center">
-                            <p className="text-white font-semibold">{selectedQuestionInsight.question.prompt}</p>
-                        </div>
-
-                        {/* Responses List */}
-                        <div className="flex-1 overflow-y-auto space-y-3">
-                            {selectedQuestionInsight.question.responses && selectedQuestionInsight.question.responses.length > 0 ? (
-                                selectedQuestionInsight.question.responses.map((response) => (
-                                    <div
-                                        key={response.id}
-                                        className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700"
-                                    >
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <Avatar
-                                                name={response.userHandle}
-                                                src={resolveInsightAvatar(response.userHandle)}
-                                                size="sm"
-                                            />
-                                            <div className="flex-1">
-                                                <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">
-                                                    {response.userHandle}
-                                                </p>
-                                                <p className="text-xs text-gray-500">
-                                                    {timeAgo(response.createdAt)}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <p className="text-gray-900 dark:text-gray-100 text-sm">
-                                            {response.text}
-                                        </p>
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="text-center text-gray-500 py-8">
-                                    No responses yet
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

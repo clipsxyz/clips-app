@@ -4,7 +4,7 @@ import { parsePublicShareLink } from '../utils/publicShareLink';
 import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock, FiUsers } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, sortStoriesNewestFirst, getLastStoriesLoadSource } from '../api/stories';
+import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, sortStoriesNewestFirst, getLastStoriesLoadSource } from '../api/stories';
 import {
     deliverStoryReactionToInbox,
     deliverStoryReplyToInbox,
@@ -322,7 +322,6 @@ export default function StoriesPage() {
     }>({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
     const [isFollowingStoryUser, setIsFollowingStoryUser] = React.useState<boolean>(false);
     const [isFollowLoading, setIsFollowLoading] = React.useState<boolean>(false);
-    const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | 'option3' | null>(null);
     const [showStoryProfileCard, setShowStoryProfileCard] = React.useState(false);
 
     // Metadata carousel for story viewer: location → venue → audience → timestamp
@@ -358,9 +357,6 @@ export default function StoriesPage() {
         }, 3000);
         return () => clearInterval(t);
     }, [storyMetadataItems.length]);
-    const [showQuestionAnswerModal, setShowQuestionAnswerModal] = React.useState(false);
-    const [questionAnswer, setQuestionAnswer] = React.useState('');
-    const [selectedResponse, setSelectedResponse] = React.useState<{ id: string; userHandle: string; text: string; createdAt: number } | null>(null);
     const [localReactionByStoryId, setLocalReactionByStoryId] = React.useState<Record<string, string>>({});
     const [deliveryFx, setDeliveryFx] = React.useState<{
         kind: 'message' | 'like';
@@ -374,9 +370,7 @@ export default function StoriesPage() {
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
     const elapsedTimeRef = React.useRef<number>(0);
     const pausedRef = React.useRef<boolean>(false);
-    const isVotingRef = React.useRef<boolean>(false);
     const nextStoryTimeoutRef = React.useRef<number | null>(null);
-    const voteStartTimeRef = React.useRef<number | null>(null); // Track when voting started
     const lastStoryIdRef = React.useRef<string | null>(null); // Track last story ID to preserve timer
     const hasEnteredStoryViewerRef = React.useRef(false);
     const lastMuteToggleAtRef = React.useRef<number>(0);
@@ -385,7 +379,6 @@ export default function StoriesPage() {
     // Swipe gesture tracking for story navigation
     const swipeStartXRef = React.useRef<number | null>(null);
     const swipeStartYRef = React.useRef<number | null>(null);
-    const swipeStartedOnPollRef = React.useRef<boolean>(false);
     const mentionTouchStartRef = React.useRef<{ x: number; y: number } | null>(null);
     const mentionTouchMovedRef = React.useRef(false);
     const holdPauseTimerRef = React.useRef<number | null>(null);
@@ -841,12 +834,6 @@ export default function StoriesPage() {
 
     // Navigate to next story
     function nextStory() {
-        // Don't advance if user is voting
-        if (isVotingRef.current) {
-            console.log('nextStory blocked: user is voting');
-            return;
-        }
-        
         // Use refs to get latest values (avoid stale closures)
         const currentIdx = currentGroupIndexRef.current;
         const currentStoryIdx = currentStoryIndexRef.current;
@@ -890,21 +877,13 @@ export default function StoriesPage() {
 
     function handleSwipeStart(e: React.TouchEvent | React.MouseEvent) {
         if (!viewingStories) return;
-        // Check if touch started on poll area
         const target = e.target as HTMLElement;
         const isInteractiveArea = target.closest(
             '[data-story-interactive],button,input,textarea,select,a,[role="button"],[contenteditable="true"]'
         );
         if (isInteractiveArea) {
-            swipeStartedOnPollRef.current = true;
             return;
         }
-        const isOnPoll = target.closest('[data-poll-container]');
-        if (isOnPoll) {
-            swipeStartedOnPollRef.current = true;
-            return;
-        }
-        swipeStartedOnPollRef.current = false;
         const point = 'touches' in e ? e.touches[0] : (e as React.MouseEvent);
         swipeStartXRef.current = point.clientX;
         swipeStartYRef.current = point.clientY;
@@ -912,20 +891,6 @@ export default function StoriesPage() {
 
     function handleSwipeEnd(e: React.TouchEvent | React.MouseEvent) {
         if (!viewingStories) return;
-        // Don't navigate if user is voting
-        if (isVotingRef.current) {
-            swipeStartXRef.current = null;
-            swipeStartYRef.current = null;
-            swipeStartedOnPollRef.current = false;
-            return;
-        }
-        // Don't navigate if swipe started on poll
-        if (swipeStartedOnPollRef.current) {
-            swipeStartedOnPollRef.current = false;
-            swipeStartXRef.current = null;
-            swipeStartYRef.current = null;
-            return;
-        }
         if (swipeStartXRef.current === null || swipeStartYRef.current === null) return;
 
         const point = 'changedTouches' in e ? e.changedTouches[0] : (e as React.MouseEvent);
@@ -937,11 +902,6 @@ export default function StoriesPage() {
 
         // Only consider primarily horizontal swipes
         if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) {
-            return;
-        }
-
-        // Double check voting state before navigating
-        if (isVotingRef.current) {
             return;
         }
 
@@ -957,7 +917,6 @@ export default function StoriesPage() {
     function handleSwipeCancel() {
         swipeStartXRef.current = null;
         swipeStartYRef.current = null;
-        swipeStartedOnPollRef.current = false;
     }
 
     function handleHoldPauseStart(e?: React.PointerEvent) {
@@ -1099,7 +1058,6 @@ export default function StoriesPage() {
             setProgress(0);
             setIsMuted(getGlobalVideoMuted());
             elapsedTimeRef.current = 0;
-            // Reset paused state for new story (poll check will handle pausing if needed)
             setPaused(false);
             pausedRef.current = false;
         } else {
@@ -1111,7 +1069,6 @@ export default function StoriesPage() {
                 setProgress(0);
                 setIsMuted(getGlobalVideoMuted());
                 elapsedTimeRef.current = 0;
-                // Reset paused state for new story (poll check will handle pausing if needed)
                 setPaused(false);
                 pausedRef.current = false;
             }
@@ -1120,10 +1077,6 @@ export default function StoriesPage() {
 
     // Navigate to next user's stories (Instagram style - skip remaining stories from current user)
     function nextUserStories() {
-        if (isVotingRef.current) {
-            return;
-        }
-        
         if (currentGroupIndex < storyGroups.length - 1) {
             setCurrentGroupIndex(currentGroupIndex + 1);
             setCurrentStoryIndex(0);
@@ -1374,8 +1327,7 @@ export default function StoriesPage() {
         const currentStory = currentGroup.stories[currentStoryIndex];
         if (!currentStory) return;
 
-        // For poll stories, allow timer to run but it will pause when voting
-        // Only reset elapsed time if this is a new story (not resuming after vote)
+        // Only reset elapsed time if this is a new story
         const storyId = currentStory.id;
         
         if (lastStoryIdRef.current !== storyId) {
@@ -1384,7 +1336,7 @@ export default function StoriesPage() {
         setProgress(0);
             lastStoryIdRef.current = storyId;
         }
-        // If same story, preserve elapsedTimeRef (for resuming after vote)
+        // If same story, preserve elapsedTimeRef
 
         // Mark story as viewed for real user stories only (skip Gazetteer mock stories)
         if (currentStory.userId !== GAZETTEER_WORLD_USER_ID) {
@@ -1397,8 +1349,7 @@ export default function StoriesPage() {
         const interval = 50;
 
         const timer = setInterval(() => {
-            // Don't update progress when paused, voting, or ScenesModal is open
-            if (pausedRef.current || showScenesModal || isVotingRef.current) {
+            if (pausedRef.current || showScenesModal) {
                 return;
             }
 
@@ -1406,11 +1357,9 @@ export default function StoriesPage() {
             const newProgress = Math.min((elapsedTimeRef.current / duration) * 100, 100);
             setProgress(newProgress);
 
-            // Only advance if not voting and progress is complete
             if (newProgress >= 100) {
-                // Double check voting state before scheduling navigation
-                if (isVotingRef.current || pausedRef.current) {
-                    return; // Don't advance if voting or paused
+                if (pausedRef.current) {
+                    return;
                 }
                 clearInterval(timer);
                 elapsedTimeRef.current = 0; // Reset for next story
@@ -1422,8 +1371,7 @@ export default function StoriesPage() {
 
                 // Schedule a small delay before moving to the next story
                 nextStoryTimeoutRef.current = window.setTimeout(() => {
-                    // Triple check before actually calling nextStory
-                    if (!isVotingRef.current && !pausedRef.current) {
+                    if (!pausedRef.current) {
                         nextStory();
                     }
                     nextStoryTimeoutRef.current = null;
@@ -1643,10 +1591,6 @@ export default function StoriesPage() {
         }
     }, [originalPost, isMuted, viewingStories, currentGroupIndex, currentStoryIndex, storyGroups]);
 
-    // Reset optimistic vote when story changes - MUST be before conditional returns
-    React.useEffect(() => {
-        setOptimisticVote(null);
-    }, [currentStoryIndex, currentGroupIndex]);
 
     // Sort story groups: new (unviewed) stories first, then by latest (most recent) last
     const sortedGroups = React.useMemo(() => {
@@ -2246,7 +2190,6 @@ export default function StoriesPage() {
                                     }
                                     
                                     // Not a shared post - show regular story content
-                                    // Poll story with media - show media (poll overlay will be shown separately)
                                     if (currentStory?.mediaUrl) {
                                         return currentStory.mediaType === 'video' ? (
                                             <video
@@ -2304,19 +2247,6 @@ export default function StoriesPage() {
                                         );
                                     }
                                     
-                                    // Poll story without media - show poll background with Gazetteer gradient (poll overlay will show the content)
-                                    if (currentStory?.poll && !currentStory.mediaUrl) {
-                                        return (
-                                            <div
-                                                className="w-full h-full flex items-center justify-center p-4"
-                                                style={{
-                                                    background: 'linear-gradient(to bottom right, rgba(255, 78, 203, 0.2), rgba(0, 0, 0, 0.9), rgba(143, 91, 255, 0.2))'
-                                                }}
-                                            >
-                                                {/* Poll overlay will render the question and options below */}
-                                            </div>
-                                        );
-                                    }
 
                                     // Text-only story — full-screen template background + centered text (pre–speech-bubble stories UX)
                                     if (currentStoryText) {
@@ -2445,37 +2375,6 @@ export default function StoriesPage() {
                                 {currentStory?.stickers && currentStory.stickers.length > 0 && !currentStory?.sharedFromPost && (
                                     <>
                                         {currentStory.stickers.map((overlay) => {
-                                            // Render question cards (special card style)
-                                            if (overlay.isQuestionCard && overlay.textContent) {
-                                                const lines = overlay.textContent.split('\n');
-                                                const questionLine = lines.find(l => l.startsWith('Q:'));
-                                                const answerLine = lines.find(l => l.startsWith('A:'));
-                                                const question = questionLine?.replace('Q: ', '') || '';
-                                                const answer = answerLine?.replace('A: ', '') || '';
-                                                
-                                                return (
-                                                    <div
-                                                        key={overlay.id}
-                                                        className="absolute pointer-events-none"
-                                                        style={{
-                                                            left: `${overlay.x}%`,
-                                                            top: `${overlay.y}%`,
-                                                            transform: `translate(-50%, -50%) scale(${overlay.scale || 1}) rotate(${overlay.rotation}deg)`,
-                                                            opacity: overlay.opacity,
-                                                            zIndex: 20,
-                                                            maxWidth: '85%'
-                                                        }}
-                                                    >
-                                                        <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border-2 border-purple-500">
-                                                            <p className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wide">Question:</p>
-                                                            <p className="text-sm text-gray-900 mb-3 font-bold">{question}</p>
-                                                            <p className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wide">Answer:</p>
-                                                            <p className="text-base text-gray-800 font-semibold">{answer}</p>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            }
-                                            
                                             // Render link stickers (clickable)
                                             if (overlay.linkUrl) {
                                                 const scale = overlay.scale || 1;
@@ -2696,778 +2595,6 @@ export default function StoriesPage() {
                                     </div>
                                 )}
 
-                                {/* Poll Overlay */}
-                                {(() => {
-                                    try {
-                                        if (!currentStory?.poll) return null;
-                                        if (!currentStory.poll.question || !currentStory.poll.option1 || !currentStory.poll.option2 || (currentStory.poll.option3 && !currentStory.poll.option3.trim())) {
-                                            console.warn('Poll data incomplete:', currentStory.poll);
-                                            return null;
-                                        }
-                                        console.log('Rendering poll:', {
-                                            question: currentStory.poll.question,
-                                            option1: currentStory.poll.option1,
-                                            option2: currentStory.poll.option2,
-                                            hasMedia: !!currentStory.mediaUrl
-                                        });
-                                        return (
-                                    <div 
-                                        data-poll-container
-                                        className="absolute top-[60%] left-0 right-0 px-4 z-[80] pointer-events-auto transform -translate-y-1/2" 
-                                        style={{ maxWidth: '100%' }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                        }}
-                                        onTouchStart={(e) => {
-                                            e.stopPropagation();
-                                            swipeStartedOnPollRef.current = true;
-                                        }}
-                                        onTouchEnd={(e) => {
-                                            e.stopPropagation();
-                                        }}
-                                        onTouchMove={(e) => {
-                                            e.stopPropagation();
-                                        }}
-                                        onMouseDown={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            swipeStartedOnPollRef.current = true;
-                                        }}
-                                        onMouseUp={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                        }}
-                                        onMouseMove={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                        }}
-                                    >
-                                        <div 
-                                            className="rounded-xl p-[1.5px] max-w-[14rem] mx-auto"
-                                            style={{
-                                                background: 'linear-gradient(to right, rgba(255, 78, 203, 0.8), rgba(143, 91, 255, 0.8))'
-                                            }}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                e.preventDefault();
-                                            }}
-                                            onTouchStart={(e) => {
-                                                e.stopPropagation();
-                                                e.preventDefault();
-                                            }}
-                                        >
-                                            <div 
-                                                className="backdrop-blur-md bg-white/95 rounded-xl p-3 shadow-xl"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                }}
-                                                onTouchStart={(e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                }}
-                                            >
-                                            {/* Poll Question */}
-                                            <p className="text-gray-900 font-semibold text-sm mb-2.5 text-center">
-                                                {currentStory.poll.question || 'Poll Question'}
-                                            </p>
-
-                                            {/* Poll Options */}
-                                            <div className="space-y-2">
-                                                {/* Option 1 */}
-                                                <button
-                                                    onClick={async (e) => {
-                                                        e.stopPropagation();
-                                                        e.preventDefault();
-                                                        e.nativeEvent?.stopImmediatePropagation();
-                                                        if (!user?.id || currentStory.poll?.userVote === 'option1') return false;
-                                                        
-                                                        // IMMEDIATE visual feedback - turn blue right away
-                                                        setOptimisticVote('option1');
-                                                        
-                                                        // Track when voting started to calculate remaining time
-                                                        voteStartTimeRef.current = Date.now();
-                                                        
-                                                        // Immediately pause and prevent ALL navigation - set ref FIRST
-                                                        // IMPORTANT: Don't reset elapsedTimeRef - we need to preserve it to calculate remaining time
-                                                        isVotingRef.current = true;
-                                                        pausedRef.current = true;
-                                                        setPaused(true);
-                                                        // Don't reset elapsedTimeRef or progress - preserve current progress
-                                                        // Clear any pending nextStory calls
-                                                        if (nextStoryTimeoutRef.current !== null) {
-                                                            clearTimeout(nextStoryTimeoutRef.current);
-                                                            nextStoryTimeoutRef.current = null;
-                                                        }
-                                                        // Reset swipe tracking to prevent navigation
-                                                        swipeStartXRef.current = null;
-                                                        swipeStartYRef.current = null;
-                                                        swipeStartedOnPollRef.current = true;
-                                                        
-                                                        // Use requestAnimationFrame to ensure state is set before async call
-                                                        requestAnimationFrame(async () => {
-                                                            try {
-                                                                // Preserve current position before refreshing
-                                                                const currentUserId = currentGroup?.userId;
-                                                                const currentStoryIdx = currentStoryIndex;
-                                                                const currentStoryId = currentStory?.id; // Preserve story ID to find it after refresh
-                                                                
-                                                                await voteOnPoll(currentStory.id, user.id, 'option1');
-                                                                
-                                                                // Refresh story data but preserve current position
-                                                                // Use the same function that loaded initial stories
-                                                                const followedUserHandles = await getFollowedUsers(user.id);
-                                                                let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
-                                                                
-                                                                // If current user's group is not in the list, fetch it separately (like initial load does)
-                                                                const currentUserHandle = currentGroup?.userHandle;
-                                                                if (currentUserHandle) {
-                                                                    const currentUserGroupIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-                                                                    if (currentUserGroupIndex === -1) {
-                                                                        // Current user's group not found, fetch it separately
-                                                                        const storyGroup = await fetchStoryGroupByHandle(currentUserHandle);
-                                                                        if (storyGroup) {
-                                                                            groups.push(storyGroup);
-                                                                        }
-                                                                    }
-                                                                }
-                                                                
-                                                                // Load avatars for refreshed groups
-                                                                groups = await Promise.all(groups.map(async (group) => {
-                                                                    if (group.userId === user.id && user.avatarUrl) {
-                                                                        return { ...group, avatarUrl: user.avatarUrl };
-                                                                    }
-                                                                    let avatarUrl = getAvatarForHandle(group.userHandle);
-                                                                    if (!avatarUrl) {
-                                                                        try {
-                                                                            const { fetchUserProfile } = await import('../api/client');
-                                                                            const profile = await fetchUserProfile(group.userHandle, user.id);
-                                                                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
-                                                                                avatarUrl = profile.avatar_url || profile.avatarUrl;
-                                                                            }
-                                                                        } catch (error) {
-                                                                            console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
-                                                                        }
-                                                                    }
-                                                                    return { ...group, avatarUrl };
-                                                                }));
-                                                                
-                                                                // Find the same user's group to maintain position
-                                                                // Try by userId first, then by userHandle as fallback
-                                                                let sameUserGroupIndex = groups.findIndex(g => g.userId === currentUserId);
-                                                                if (sameUserGroupIndex === -1 && currentUserHandle) {
-                                                                    // Fallback: try finding by userHandle
-                                                                    sameUserGroupIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-                                                                }
-                                                                
-                                                                if (sameUserGroupIndex !== -1) {
-                                                                    const sameUserGroup = groups[sameUserGroupIndex];
-                                                                    
-                                                                    // Preserve the original story order from current state
-                                                                    setStoryGroups(prev => {
-                                                                        const prevGroupIndex = prev.findIndex(g => g.userId === currentUserId || g.userHandle === currentUserHandle);
-                                                                        if (prevGroupIndex !== -1) {
-                                                                            const prevGroup = prev[prevGroupIndex];
-                                                                            const prevStories = prevGroup.stories || [];
-                                                                            
-                                                                            // Create a map of refreshed stories by ID for quick lookup
-                                                                            const refreshedStoriesMap = new Map(
-                                                                                (sameUserGroup.stories || []).map(s => [s.id, s])
-                                                                            );
-                                                                            
-                                                                            // Preserve original order, but update stories with refreshed data
-                                                                            const preservedStories = prevStories.map(prevStory => {
-                                                                                const refreshedStory = refreshedStoriesMap.get(prevStory.id);
-                                                                                // Use refreshed story data if available, otherwise keep original
-                                                                                return refreshedStory || prevStory;
-                                                                            });
-                                                                            
-                                                                            // Add any new stories that weren't in the original (shouldn't happen, but just in case)
-                                                                            const existingStoryIds = new Set(preservedStories.map(s => s.id));
-                                                                            const newStories = (sameUserGroup.stories || []).filter(s => !existingStoryIds.has(s.id));
-                                                                            
-                                                                            const mergedStories = sortStoriesNewestFirst([...preservedStories, ...newStories]);
-                                                                            let storyIndexToRestore = Math.min(currentStoryIdx, Math.max(0, mergedStories.length - 1));
-                                                                            if (currentStoryId) {
-                                                                                const foundStoryIndex = mergedStories.findIndex(s => s.id === currentStoryId);
-                                                                                if (foundStoryIndex !== -1) {
-                                                                                    storyIndexToRestore = foundStoryIndex;
-                                                                                }
-                                                                            }
-                                                                            
-                                                                            // Update the group with refreshed data; slides ordered newest-first
-                                                                            // Use prev array to preserve group order, only update the specific group
-                                                                            const updatedGroups = [...prev];
-                                                                            if (prevGroupIndex !== -1) {
-                                                                                updatedGroups[prevGroupIndex] = {
-                                                                                    ...prevGroup,
-                                                                                    ...sameUserGroup, // Keep refreshed group metadata
-                                                                                    stories: mergedStories,
-                                                                                };
-                                                                            }
-                                                                            
-                                                                            // Restore position to same user and same story (by ID)
-                                                                            setCurrentGroupIndex(prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex);
-                                                                            currentGroupIndexRef.current = prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex;
-                                                                            setCurrentStoryIndex(storyIndexToRestore);
-                                                                            currentStoryIndexRef.current = storyIndexToRestore;
-                                                                            
-                                                                            return updatedGroups;
-                                                                        }
-                                                                        
-                                                                        // Fallback: if prev group not found, use refreshed groups as-is
-                                                                        return groups;
-                                                                    });
-                                                                } else {
-                                                                    // If user not found, try to keep current position if still valid
-                                                                    if (currentGroupIndex < groups.length && groups[currentGroupIndex]?.stories?.length > 0) {
-                                                                        // Current index is still valid, keep it
-                                                                        setStoryGroups(groups);
-                                                                        const safeStoryIndex = Math.min(currentStoryIdx, groups[currentGroupIndex].stories.length - 1);
-                                                                        setCurrentStoryIndex(safeStoryIndex);
-                                                                        currentStoryIndexRef.current = safeStoryIndex;
-                                                                    } else {
-                                                                        // User's group not found and current position invalid - close viewer
-                                                                        console.warn('User group not found after voting, closing viewer');
-                                                                        setViewingStories(false);
-                                                                        return;
-                                                                    }
-                                                                }
-                                                                
-                                                                // Clear optimistic vote after data is refreshed
-                                                                setOptimisticVote(null);
-                                                                
-                                                                // Calculate remaining time based on when voting started
-                                                                const STORY_DURATION = 15000; // 15 seconds
-                                                                const timeVotingStarted = voteStartTimeRef.current || Date.now();
-                                                                const timeSpentBeforeVoting = elapsedTimeRef.current;
-                                                                const remainingTime = STORY_DURATION - timeSpentBeforeVoting;
-                                                                
-                                                                // Resume timer with remaining time - Instagram style
-                                                                    isVotingRef.current = false;
-                                                                // Reset swipe tracking to allow navigation
-                                                                swipeStartXRef.current = null;
-                                                                swipeStartYRef.current = null;
-                                                                swipeStartedOnPollRef.current = false;
-                                                                
-                                                                // Resume the timer - it will continue from where it was
-                                                                    setPaused(false);
-                                                                    pausedRef.current = false;
-                                                                // The progress timer will continue from elapsedTimeRef.current
-                                                                voteStartTimeRef.current = null;
-                                                            } catch (error) {
-                                                                console.error('Error voting on poll:', error);
-                                                                setOptimisticVote(null);
-                                                                isVotingRef.current = false;
-                                                                setPaused(false);
-                                                                pausedRef.current = false;
-                                                            }
-                                                        });
-                                                        
-                                                        return false;
-                                                    }}
-                                                    onMouseDown={(e) => {
-                                                        e.stopPropagation();
-                                                        e.preventDefault();
-                                                    }}
-                                                    onTouchStart={(e) => {
-                                                        e.stopPropagation();
-                                                    }}
-                                                    disabled={currentStory?.poll?.userVote !== undefined || optimisticVote !== null}
-                                                    className={`w-full px-3 py-2 rounded-lg font-semibold text-xs transition-all border-2 ${
-                                                        optimisticVote === 'option1' || currentStory?.poll?.userVote === 'option1'
-                                                            ? 'bg-blue-500 text-white border-blue-600'
-                                                            : optimisticVote === 'option2' || currentStory?.poll?.userVote === 'option2'
-                                                            ? 'bg-gray-200 text-gray-600'
-                                                            : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-                                                    } ${(currentStory?.poll?.userVote !== undefined || optimisticVote !== null) ? 'cursor-default' : 'cursor-pointer'}`}
-                                                    style={{
-                                                        borderColor: optimisticVote === 'option1' || currentStory?.poll?.userVote === 'option1'
-                                                            ? undefined
-                                                            : 'black'
-                                                    }}
-                                                >
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-xs">{currentStory.poll.option1 || 'Option 1'}</span>
-                                                        {currentStory.poll?.userVote !== undefined && (
-                                                            <span className="text-[10px] font-medium">
-                                                                {(() => {
-                                                                    try {
-                                                                        const votes1 = currentStory.poll?.votes1 || 0;
-                                                                        const votes2 = currentStory.poll?.votes2 || 0;
-                                                                        const votes3 = currentStory.poll?.votes3 || 0;
-                                                                        const totalVotes = votes1 + votes2 + votes3;
-                                                                        if (totalVotes === 0) return '0%';
-                                                                        const percentage = Math.round((votes1 / totalVotes) * 100);
-                                                                        return `${percentage}%`;
-                                                                    } catch (e) {
-                                                                        return '0%';
-                                                                    }
-                                                                })()}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    {/* Progress bar */}
-                                                    {currentStory.poll.userVote !== undefined && (
-                                                        <div className="mt-1.5 h-1.5 bg-gray-300 rounded-full overflow-hidden">
-                                                            <div
-                                                                className="h-full bg-blue-500 transition-all"
-                                                                style={{
-                                                                    width: `${(() => {
-                                                                        const votes1 = currentStory.poll?.votes1 || 0;
-                                                                        const votes2 = currentStory.poll?.votes2 || 0;
-                                                                        const votes3 = currentStory.poll?.votes3 || 0;
-                                                                        const totalVotes = votes1 + votes2 + votes3;
-                                                                        if (totalVotes === 0) return 0;
-                                                                        return ((votes1) / totalVotes) * 100;
-                                                                    })()}%`
-                                                                }}
-                                                            />
-                                                        </div>
-                                                    )}
-                                                </button>
-
-                                                {/* Option 2 */}
-                                                <button
-                                                    onClick={async (e) => {
-                                                        e.stopPropagation();
-                                                        e.preventDefault();
-                                                        e.nativeEvent?.stopImmediatePropagation();
-                                                        if (!user?.id || currentStory.poll?.userVote === 'option2') return false;
-                                                        
-                                                        // IMMEDIATE visual feedback - turn blue right away
-                                                        setOptimisticVote('option2');
-                                                        
-                                                        // Immediately pause and prevent ALL navigation - set ref FIRST
-                                                        isVotingRef.current = true;
-                                                        pausedRef.current = true;
-                                                        setPaused(true);
-                                                        elapsedTimeRef.current = 0;
-                                                        setProgress(0);
-                                                        // Clear any pending nextStory calls
-                                                        if (nextStoryTimeoutRef.current !== null) {
-                                                            clearTimeout(nextStoryTimeoutRef.current);
-                                                            nextStoryTimeoutRef.current = null;
-                                                        }
-                                                        // Reset swipe tracking to prevent navigation
-                                                        swipeStartXRef.current = null;
-                                                        swipeStartYRef.current = null;
-                                                        swipeStartedOnPollRef.current = true;
-                                                        
-                                                        // Use requestAnimationFrame to ensure state is set before async call
-                                                        requestAnimationFrame(async () => {
-                                                            try {
-                                                                // Preserve current position before refreshing
-                                                                const currentUserId = currentGroup?.userId;
-                                                                const currentStoryIdx = currentStoryIndex;
-                                                                const currentStoryId = currentStory?.id; // Preserve story ID to find it after refresh
-                                                                
-                                                                await voteOnPoll(currentStory.id, user.id, 'option2');
-                                                                
-                                                                // Refresh story data but preserve current position
-                                                                // Use the same function that loaded initial stories
-                                                                const followedUserHandles = await getFollowedUsers(user.id);
-                                                                let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
-                                                                
-                                                                // If current user's group is not in the list, fetch it separately (like initial load does)
-                                                                const currentUserHandle = currentGroup?.userHandle;
-                                                                if (currentUserHandle) {
-                                                                    const currentUserGroupIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-                                                                    if (currentUserGroupIndex === -1) {
-                                                                        // Current user's group not found, fetch it separately
-                                                                        const storyGroup = await fetchStoryGroupByHandle(currentUserHandle);
-                                                                        if (storyGroup) {
-                                                                            groups.push(storyGroup);
-                                                                        }
-                                                                    }
-                                                                }
-                                                                
-                                                                // Load avatars for refreshed groups
-                                                                groups = await Promise.all(groups.map(async (group) => {
-                                                                    if (group.userId === user.id && user.avatarUrl) {
-                                                                        return { ...group, avatarUrl: user.avatarUrl };
-                                                                    }
-                                                                    let avatarUrl = getAvatarForHandle(group.userHandle);
-                                                                    if (!avatarUrl) {
-                                                                        try {
-                                                                            const { fetchUserProfile } = await import('../api/client');
-                                                                            const profile = await fetchUserProfile(group.userHandle, user.id);
-                                                                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
-                                                                                avatarUrl = profile.avatar_url || profile.avatarUrl;
-                                                                            }
-                                                                        } catch (error) {
-                                                                            console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
-                                                                        }
-                                                                    }
-                                                                    return { ...group, avatarUrl };
-                                                                }));
-                                                                
-                                                                // Find the same user's group to maintain position
-                                                                // Try by userId first, then by userHandle as fallback
-                                                                let sameUserGroupIndex = groups.findIndex(g => g.userId === currentUserId);
-                                                                if (sameUserGroupIndex === -1 && currentUserHandle) {
-                                                                    // Fallback: try finding by userHandle
-                                                                    sameUserGroupIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-                                                                }
-                                                                
-                                                                if (sameUserGroupIndex !== -1) {
-                                                                    const sameUserGroup = groups[sameUserGroupIndex];
-                                                                    
-                                                                    // Preserve the original story order from current state
-                                                                    setStoryGroups(prev => {
-                                                                        const prevGroupIndex = prev.findIndex(g => g.userId === currentUserId || g.userHandle === currentUserHandle);
-                                                                        if (prevGroupIndex !== -1) {
-                                                                            const prevGroup = prev[prevGroupIndex];
-                                                                            const prevStories = prevGroup.stories || [];
-                                                                            
-                                                                            // Create a map of refreshed stories by ID for quick lookup
-                                                                            const refreshedStoriesMap = new Map(
-                                                                                (sameUserGroup.stories || []).map(s => [s.id, s])
-                                                                            );
-                                                                            
-                                                                            // Preserve original order, but update stories with refreshed data
-                                                                            const preservedStories = prevStories.map(prevStory => {
-                                                                                const refreshedStory = refreshedStoriesMap.get(prevStory.id);
-                                                                                // Use refreshed story data if available, otherwise keep original
-                                                                                return refreshedStory || prevStory;
-                                                                            });
-                                                                            
-                                                                            // Add any new stories that weren't in the original (shouldn't happen, but just in case)
-                                                                            const existingStoryIds = new Set(preservedStories.map(s => s.id));
-                                                                            const newStories = (sameUserGroup.stories || []).filter(s => !existingStoryIds.has(s.id));
-                                                                            
-                                                                            const mergedStories = sortStoriesNewestFirst([...preservedStories, ...newStories]);
-                                                                            let storyIndexToRestore = Math.min(currentStoryIdx, Math.max(0, mergedStories.length - 1));
-                                                                            if (currentStoryId) {
-                                                                                const foundStoryIndex = mergedStories.findIndex(s => s.id === currentStoryId);
-                                                                                if (foundStoryIndex !== -1) {
-                                                                                    storyIndexToRestore = foundStoryIndex;
-                                                                                }
-                                                                            }
-                                                                            
-                                                                            // Update the group with refreshed data; slides ordered newest-first
-                                                                            // Use prev array to preserve group order, only update the specific group
-                                                                            const updatedGroups = [...prev];
-                                                                            if (prevGroupIndex !== -1) {
-                                                                                updatedGroups[prevGroupIndex] = {
-                                                                                    ...prevGroup,
-                                                                                    ...sameUserGroup, // Keep refreshed group metadata
-                                                                                    stories: mergedStories,
-                                                                                };
-                                                                            }
-                                                                            
-                                                                            // Restore position to same user and same story (by ID)
-                                                                            setCurrentGroupIndex(prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex);
-                                                                            currentGroupIndexRef.current = prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex;
-                                                                            setCurrentStoryIndex(storyIndexToRestore);
-                                                                            currentStoryIndexRef.current = storyIndexToRestore;
-                                                                            
-                                                                            return updatedGroups;
-                                                                        }
-                                                                        
-                                                                        // Fallback: if prev group not found, use refreshed groups as-is
-                                                                        return groups;
-                                                                    });
-                                                                } else {
-                                                                    // If user not found, try to keep current position if still valid
-                                                                    if (currentGroupIndex < groups.length && groups[currentGroupIndex]?.stories?.length > 0) {
-                                                                        // Current index is still valid, keep it
-                                                                        setStoryGroups(groups);
-                                                                        const safeStoryIndex = Math.min(currentStoryIdx, groups[currentGroupIndex].stories.length - 1);
-                                                                        setCurrentStoryIndex(safeStoryIndex);
-                                                                        currentStoryIndexRef.current = safeStoryIndex;
-                                                                    } else {
-                                                                        // User's group not found and current position invalid - close viewer
-                                                                        console.warn('User group not found after voting, closing viewer');
-                                                                        setViewingStories(false);
-                                                                        return;
-                                                                    }
-                                                                }
-                                                                
-                                                                // Clear optimistic vote after data is refreshed
-                                                                setOptimisticVote(null);
-                                                                
-                                                                // Calculate remaining time based on when voting started
-                                                                const STORY_DURATION = 15000; // 15 seconds
-                                                                const timeVotingStarted = voteStartTimeRef.current || Date.now();
-                                                                const timeSpentBeforeVoting = elapsedTimeRef.current;
-                                                                const remainingTime = STORY_DURATION - timeSpentBeforeVoting;
-                                                                
-                                                                // Resume timer with remaining time - Instagram style
-                                                                    isVotingRef.current = false;
-                                                                // Reset swipe tracking to allow navigation
-                                                                swipeStartXRef.current = null;
-                                                                swipeStartYRef.current = null;
-                                                                swipeStartedOnPollRef.current = false;
-                                                                
-                                                                // Resume the timer - it will continue from where it was
-                                                                    setPaused(false);
-                                                                    pausedRef.current = false;
-                                                                // The progress timer will continue from elapsedTimeRef.current
-                                                                voteStartTimeRef.current = null;
-                                                            } catch (error) {
-                                                                console.error('Error voting on poll:', error);
-                                                                setOptimisticVote(null);
-                                                                isVotingRef.current = false;
-                                                                setPaused(false);
-                                                                pausedRef.current = false;
-                                                            }
-                                                        });
-                                                        
-                                                        return false;
-                                                    }}
-                                                    onMouseDown={(e) => {
-                                                        e.stopPropagation();
-                                                        e.preventDefault();
-                                                    }}
-                                                    onTouchStart={(e) => {
-                                                        e.stopPropagation();
-                                                    }}
-                                                    disabled={currentStory?.poll?.userVote !== undefined || optimisticVote !== null}
-                                                    className={`w-full px-4 py-3 rounded-xl font-semibold text-sm transition-all border ${
-                                                        optimisticVote === 'option2' || currentStory?.poll?.userVote === 'option2'
-                                                            ? 'bg-blue-500 text-white border-blue-500'
-                                                            : optimisticVote === 'option1' || currentStory?.poll?.userVote === 'option1'
-                                                            ? 'bg-gray-200 text-gray-600 border-gray-300'
-                                                            : 'bg-gray-100 text-gray-900 hover:bg-gray-200 border-gray-300'
-                                                    } ${(currentStory?.poll?.userVote !== undefined || optimisticVote !== null) ? 'cursor-default' : 'cursor-pointer'}`}
-                                                >
-                                                    <div className="flex items-center justify-between">
-                                                            <span className={`text-xs ${currentStory?.poll?.userVote !== undefined ? 'text-white' : 'text-gray-900'}`}>{currentStory.poll.option2 || 'Option 2'}</span>
-                                                        {currentStory.poll?.userVote !== undefined && (
-                                                            <span className="text-[10px] text-white/80">
-                                                                {(() => {
-                                                                    try {
-                                                                        const votes1 = currentStory.poll?.votes1 || 0;
-                                                                        const votes2 = currentStory.poll?.votes2 || 0;
-                                                                        const totalVotes = votes1 + votes2;
-                                                                        if (totalVotes === 0) return '0%';
-                                                                        const percentage = Math.round((votes2 / totalVotes) * 100);
-                                                                        return `${percentage}%`;
-                                                                    } catch (e) {
-                                                                        return '0%';
-                                                                    }
-                                                                })()}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    {/* Progress bar */}
-                                                    {currentStory.poll.userVote !== undefined && (
-                                                        <div className="mt-1.5 h-1.5 bg-gray-300 rounded-full overflow-hidden">
-                                                            <div
-                                                                className="h-full bg-blue-500 transition-all"
-                                                                style={{
-                                                                    width: `${(() => {
-                                                                        const votes1 = currentStory.poll?.votes1 || 0;
-                                                                        const votes2 = currentStory.poll?.votes2 || 0;
-                                                                        const votes3 = currentStory.poll?.votes3 || 0;
-                                                                        const totalVotes = votes1 + votes2 + votes3;
-                                                                        if (totalVotes === 0) return 0;
-                                                                        return ((votes2) / totalVotes) * 100;
-                                                                    })()}%`
-                                                                }}
-                                                            />
-                                                        </div>
-                                                    )}
-                                                </button>
-
-                                                {/* Option 3 - Only show if it exists */}
-                                                {currentStory.poll?.option3 && (
-                                                    <button
-                                                        onClick={async (e) => {
-                                                            e.stopPropagation();
-                                                            e.preventDefault();
-                                                            e.nativeEvent?.stopImmediatePropagation();
-                                                            if (!user?.id || currentStory.poll?.userVote === 'option3') return false;
-                                                            
-                                                            setOptimisticVote('option3');
-                                                            voteStartTimeRef.current = Date.now();
-                                                            isVotingRef.current = true;
-                                                            pausedRef.current = true;
-                                                            setPaused(true);
-                                                            if (nextStoryTimeoutRef.current !== null) {
-                                                                clearTimeout(nextStoryTimeoutRef.current);
-                                                                nextStoryTimeoutRef.current = null;
-                                                            }
-                                                            swipeStartXRef.current = null;
-                                                            swipeStartYRef.current = null;
-                                                            swipeStartedOnPollRef.current = true;
-                                                            
-                                                            requestAnimationFrame(async () => {
-                                                                try {
-                                                                    const currentUserId = currentGroup?.userId;
-                                                                    const currentStoryIdx = currentStoryIndex;
-                                                                    
-                                                                    await voteOnPoll(currentStory.id, user.id, 'option3');
-                                                                    
-                                                                    const followedUserHandles = await getFollowedUsers(user.id);
-                                                                    let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
-                                                                    
-                                                                    const currentUserHandle = currentGroup?.userHandle;
-                                                                    if (currentUserHandle) {
-                                                                        const currentUserGroupIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-                                                                        if (currentUserGroupIndex === -1) {
-                                                                            const storyGroup = await fetchStoryGroupByHandle(currentUserHandle);
-                                                                            if (storyGroup) {
-                                                                                groups.push(storyGroup);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    
-                                                                    groups = await Promise.all(groups.map(async (group) => {
-                                                                        if (group.userId === user.id && user.avatarUrl) {
-                                                                            return { ...group, avatarUrl: user.avatarUrl };
-                                                                        }
-                                                                        let avatarUrl = getAvatarForHandle(group.userHandle);
-                                                                        if (!avatarUrl) {
-                                                                            try {
-                                                                                const { fetchUserProfile } = await import('../api/client');
-                                                                                const profile = await fetchUserProfile(group.userHandle, user.id);
-                                                                                if (profile && (profile.avatar_url || profile.avatarUrl)) {
-                                                                                    avatarUrl = profile.avatar_url || profile.avatarUrl;
-                                                                                }
-                                                                            } catch (error) {
-                                                                                console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
-                                                                            }
-                                                                        }
-                                                                        return { ...group, avatarUrl };
-                                                                    }));
-                                                                    
-                                                                    let sameUserGroupIndex = groups.findIndex(g => g.userId === currentUserId);
-                                                                    if (sameUserGroupIndex === -1 && currentUserHandle) {
-                                                                        sameUserGroupIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-                                                                    }
-                                                                    
-                                                                    if (sameUserGroupIndex !== -1) {
-                                                                        const sameUserGroup = groups[sameUserGroupIndex];
-                                                                        const safeStoryIndex = Math.min(currentStoryIdx, sameUserGroup.stories.length - 1);
-                                                                        setStoryGroups(groups);
-                                                                        setCurrentGroupIndex(sameUserGroupIndex);
-                                                                        currentGroupIndexRef.current = sameUserGroupIndex;
-                                                                        setCurrentStoryIndex(safeStoryIndex);
-                                                                        currentStoryIndexRef.current = safeStoryIndex;
-                                                                    } else {
-                                                                        if (currentGroupIndex < groups.length && groups[currentGroupIndex]?.stories?.length > 0) {
-                                                                            setStoryGroups(groups);
-                                                                            const safeStoryIndex = Math.min(currentStoryIdx, groups[currentGroupIndex].stories.length - 1);
-                                                                            setCurrentStoryIndex(safeStoryIndex);
-                                                                            currentStoryIndexRef.current = safeStoryIndex;
-                                                                        } else {
-                                                                            console.warn('User group not found after voting, closing viewer');
-                                                                            setViewingStories(false);
-                                                                            return;
-                                                                        }
-                                                                    }
-                                                                    
-                                                                    setOptimisticVote(null);
-                                                                    isVotingRef.current = false;
-                                                                    swipeStartXRef.current = null;
-                                                                    swipeStartYRef.current = null;
-                                                                    swipeStartedOnPollRef.current = false;
-                                                                    setPaused(false);
-                                                                    pausedRef.current = false;
-                                                                    voteStartTimeRef.current = null;
-                                                                } catch (error) {
-                                                                    console.error('Error voting on poll:', error);
-                                                                    setOptimisticVote(null);
-                                                                    isVotingRef.current = false;
-                                                                    setPaused(false);
-                                                                    pausedRef.current = false;
-                                                                }
-                                                            });
-                                                            
-                                                            return false;
-                                                        }}
-                                                        onMouseDown={(e) => {
-                                                            e.stopPropagation();
-                                                            e.preventDefault();
-                                                        }}
-                                                        onTouchStart={(e) => {
-                                                            e.stopPropagation();
-                                                        }}
-                                                        disabled={currentStory?.poll?.userVote !== undefined || optimisticVote !== null}
-                                                        className={`w-full px-3 py-2 rounded-lg font-semibold text-xs transition-all border-2 ${
-                                                            optimisticVote === 'option3' || currentStory?.poll?.userVote === 'option3'
-                                                                ? 'bg-blue-500 text-white border-blue-600'
-                                                                : optimisticVote === 'option1' || currentStory?.poll?.userVote === 'option1' || optimisticVote === 'option2' || currentStory?.poll?.userVote === 'option2'
-                                                                ? 'bg-gray-200 text-gray-600'
-                                                                : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-                                                        } ${(currentStory?.poll?.userVote !== undefined || optimisticVote !== null) ? 'cursor-default' : 'cursor-pointer'}`}
-                                                        style={{
-                                                            borderColor: optimisticVote === 'option3' || currentStory?.poll?.userVote === 'option3'
-                                                                ? undefined
-                                                                : 'black'
-                                                        }}
-                                                    >
-                                                        <div className="flex items-center justify-between">
-                                                            <span className={`text-xs ${currentStory?.poll?.userVote !== undefined ? 'text-white' : 'text-gray-900'}`}>{currentStory.poll.option3 || 'Option 3'}</span>
-                                                            {currentStory.poll?.userVote !== undefined && (
-                                                                <span className="text-[10px] text-white/80">
-                                                                    {(() => {
-                                                                        try {
-                                                                            const votes1 = currentStory.poll?.votes1 || 0;
-                                                                            const votes2 = currentStory.poll?.votes2 || 0;
-                                                                            const votes3 = currentStory.poll?.votes3 || 0;
-                                                                            const totalVotes = votes1 + votes2 + votes3;
-                                                                            if (totalVotes === 0) return '0%';
-                                                                            const percentage = Math.round((votes3 / totalVotes) * 100);
-                                                                            return `${percentage}%`;
-                                                                        } catch (e) {
-                                                                            return '0%';
-                                                                        }
-                                                                    })()}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        {/* Progress bar */}
-                                                        {currentStory.poll.userVote !== undefined && (
-                                                            <div className="mt-2 h-1.5 bg-gray-300 rounded-full overflow-hidden">
-                                                                <div
-                                                                    className="h-full bg-blue-500 transition-all"
-                                                                    style={{
-                                                                        width: `${(() => {
-                                                                            const votes1 = currentStory.poll?.votes1 || 0;
-                                                                            const votes2 = currentStory.poll?.votes2 || 0;
-                                                                            const votes3 = currentStory.poll?.votes3 || 0;
-                                                                            const totalVotes = votes1 + votes2 + votes3;
-                                                                            if (totalVotes === 0) return 0;
-                                                                            return ((currentStory.poll?.votes3 || 0) / totalVotes) * 100;
-                                                                        })()}%`
-                                                                    }}
-                                                                />
-                                                            </div>
-                                                        )}
-                                                    </button>
-                                                )}
-                                            </div>
-
-                                            {/* Vote count */}
-                                            {currentStory.poll?.userVote !== undefined && (
-                                                <p className="text-gray-600 text-[10px] text-center mt-2">
-                                                    {(() => {
-                                                        try {
-                                                            const votes1 = currentStory.poll?.votes1 || 0;
-                                                            const votes2 = currentStory.poll?.votes2 || 0;
-                                                            const votes3 = currentStory.poll?.votes3 || 0;
-                                                            return `${votes1 + votes2 + votes3} votes`;
-                                                        } catch (e) {
-                                                            return '0 votes';
-                                                        }
-                                                    })()}
-                                                </p>
-                                            )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                        );
-                                    } catch (error) {
-                                        console.error('Error rendering poll:', error);
-                                        return null;
-                                    }
-                                })()}
-
-                                {/* Question overlay removed */}
                             </div>
                         </div>
                     </div>
@@ -4064,7 +3191,7 @@ export default function StoriesPage() {
                         </div>
                     </div>
 
-                    {/* Swipe navigation is handled on the main media container - no tap zones to avoid conflicts with polls */}
+                    {/* Swipe navigation is handled on the main media container */}
                 </div>
 
                 {deliveryFx && (
@@ -4126,67 +3253,6 @@ export default function StoriesPage() {
 
                 
 
-                {/* Response Detail Modal (for creator viewing responses) */}
-                {selectedResponse && (
-                    <div 
-                        className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-                        onClick={() => {
-                            setSelectedResponse(null);
-                            setPaused(false);
-                            pausedRef.current = false;
-                        }}
-                    >
-                        <div 
-                            className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-md w-full"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                    <Avatar
-                                        name={selectedResponse.userHandle}
-                                        src={getAvatarForHandle(selectedResponse.userHandle)}
-                                        size="md"
-                                    />
-                                    <div>
-                                        <p className="font-semibold text-gray-900 dark:text-gray-100">
-                                            {selectedResponse.userHandle}
-                                        </p>
-                                        <p className="text-xs text-gray-500">
-                                            {timeAgo(selectedResponse.createdAt)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        setSelectedResponse(null);
-                                        setPaused(false);
-                                        pausedRef.current = false;
-                                    }}
-                                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                                >
-                                    <FiX className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                                </button>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4">
-                                <p className="text-gray-900 dark:text-gray-100">
-                                    {selectedResponse.text}
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setSelectedResponse(null);
-                                    setPaused(false);
-                                    pausedRef.current = false;
-                                    navigate('/clip');
-                                }}
-                                className="w-full py-3 rounded-xl bg-gradient-to-tr from-purple-500 via-pink-500 to-pink-600 text-white font-semibold hover:opacity-90 transition-opacity"
-                            >
-                                Create story
-                            </button>
-                        </div>
-                    </div>
-                )}
 
                 {/* Question Answer Modal removed */}
 

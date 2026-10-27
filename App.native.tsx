@@ -56,7 +56,6 @@ import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
 import PublicStoryScreen from './src/screens/PublicStoryScreen';
 import ClipScreen from './src/screens/ClipScreen';
-import ClipPollScreen from './src/screens/ClipPollScreen';
 import Story24ComposerScreen from './src/screens/Story24ComposerScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
 import ImageFullscreenScreen from './src/screens/ImageFullscreenScreen.native';
@@ -454,11 +453,6 @@ function App(): React.JSX.Element {
             name="Story24Composer"
             component={Story24ComposerScreen}
             options={{ presentation: 'fullScreenModal' }}
-          />
-          <Stack.Screen
-            name="ClipPoll"
-            component={ClipPollScreen}
-            options={{ presentation: 'modal' }}
           />
           </Stack.Navigator>
         </NavigationContainer>

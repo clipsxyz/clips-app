@@ -240,8 +240,7 @@ export default function InboxScreen({ navigation, route }: any) {
                     (item.views || 0) > 0 ||
                     (item.likes > 0 && Array.isArray(item.likers) && item.likers.length > 0) ||
                     (Array.isArray(item.reactions) && item.reactions.length > 0) ||
-                    (Array.isArray(item.replies) && item.replies.length > 0) ||
-                    ((item.question?.responseCount || 0) > 0)
+                    (Array.isArray(item.replies) && item.replies.length > 0)
             ),
         [insights]
     );
@@ -1521,15 +1520,11 @@ export default function InboxScreen({ navigation, route }: any) {
                               : item.mediaUrl
                                 ? 'Photo story'
                                 : 'Your story';
-                        const answerCount = item.question?.responseCount || 0;
                         const reactionCount = item.reactions?.length || 0;
                         const replyCount = item.replies?.length || 0;
 
                         let activityLine: React.ReactNode = 'New story activity';
-                        if (answerCount > 0) {
-                            activityLine =
-                                answerCount === 1 ? '1 answer on your question' : `${answerCount} answers on your question`;
-                        } else if (replyCount > 0 && primaryReply) {
+                        if (replyCount > 0 && primaryReply) {
                             activityLine = (
                                 <>
                                     <Text style={styles.itemMessageStrong}>{primaryReply.userHandle}</Text>

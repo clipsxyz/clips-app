@@ -145,8 +145,6 @@ export default function ShareToStoriesModal({
                 undefined,
                 undefined,
                 undefined,
-                undefined,
-                undefined,
                 payload.venue,
                 payload.videoPosterUrl,
             );

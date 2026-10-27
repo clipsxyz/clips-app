@@ -535,7 +535,6 @@ function PillTabs(props: {
   const isMountedRef = React.useRef(false);
   const [notificationCount, setNotificationCount] = React.useState(0);
   const [insightsCount, setInsightsCount] = React.useState(0);
-  const [questionsCount, setQuestionsCount] = React.useState(0);
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [showFeedSwitchCue, setShowFeedSwitchCue] = React.useState(false);
@@ -581,7 +580,7 @@ function PillTabs(props: {
   const regional = props.userRegional || user?.regional || 'Dublin';
   const national = props.userNational || user?.national || 'Ireland';
 
-  // Track notification, insights, and questions counts
+  // Track notification and insights counts
   React.useEffect(() => {
     if (!user?.handle) return;
 
@@ -595,16 +594,6 @@ function PillTabs(props: {
         const insights = await getStoryInsightsForUser(user.handle!);
         setInsightsCount(insights.length);
 
-        // Update questions count
-        try {
-          const { getQuestionsForUser } = await import('./api/questions');
-          const questions = await getQuestionsForUser(user.handle!);
-          // Count only unanswered questions
-          const unansweredQuestions = questions.filter(q => !q.repliedTo);
-          setQuestionsCount(unansweredQuestions.length);
-        } catch (error) {
-          console.error('Error fetching questions count:', error);
-        }
       } catch (error) {
         console.error('Error fetching counts:', error);
       }
@@ -638,7 +627,7 @@ function PillTabs(props: {
     };
   }, [user?.handle]);
 
-  const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
+  const hasAnyNotifications = notificationCount > 0 || insightsCount > 0;
   const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
   const activeLabel = props.customLocationLabel || props.customLocation || (props.active === local ? 'Nearby' : props.active);
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
@@ -8312,7 +8301,6 @@ function FeedPageWrapper() {
           let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined);
           const text =
             (latest.text || (latest as any).text_content || '').trim()
-            || (latest.poll?.question || '').trim()
             || (latest.sharedFromPost ? 'Shared a post' : 'New story');
           const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
           const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);

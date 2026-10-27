@@ -276,26 +276,6 @@ export type Story = {
   sharedFromUser?: string; // Original post author if this story is shared from a post
   /** Still frame for Stories 24 rail / hold screens (shared video posts). */
   videoPosterUrl?: string;
-  poll?: {
-    question: string;
-    option1: string;
-    option2: string;
-    option3?: string; // Optional third option
-    votes1?: number; // Number of votes for option 1
-    votes2?: number; // Number of votes for option 2
-    votes3?: number; // Number of votes for option 3
-    userVote?: 'option1' | 'option2' | 'option3'; // Current user's vote
-  };
-  question?: {
-    prompt: string; // The question prompt (e.g., "Ask me anything")
-    responses?: Array<{
-      id: string;
-      userId: string;
-      userHandle: string;
-      text: string;
-      createdAt: number;
-    }>; // Responses from viewers
-  };
   audience?: 'public' | 'close_friends' | 'only_me';
 };
 
@@ -434,7 +414,6 @@ export type StickerOverlay = {
   textContent?: string; // Text content for text stickers
   textColor?: string; // Text color
   fontSize?: 'small' | 'medium' | 'large'; // Font size
-  isQuestionCard?: boolean; // Special flag for question card styling
   linkUrl?: string; // URL for link stickers
   linkName?: string; // Display name/description for link stickers
   linkStyle?: 'light' | 'dark' | 'gradient'; // Visual style for link stickers

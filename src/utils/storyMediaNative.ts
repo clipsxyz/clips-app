@@ -96,7 +96,6 @@ export function storyHasRenderableMedia(
     if (raw.sharedFromPost || raw.shared_from_post_id) return true;
     const text = typeof raw.text === 'string' ? raw.text : typeof raw.text_content === 'string' ? raw.text_content : '';
     if (text.trim()) return true;
-    if (raw.poll || raw.question) return true;
     const stickers = raw.stickers;
     return Array.isArray(stickers) && stickers.length > 0;
 }
