@@ -1,4 +1,4 @@
-import type { Story, StoryGroup, StickerOverlay } from '../types';
+import type { Story, StoryGroup, StickerOverlay, StoryViewerIdentity } from '../types';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAvatarForHandle } from './users';
 import {
@@ -783,6 +783,8 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
     const userHandle = String(
         story.user_handle || story.userHandle || story.user?.handle || '',
     ).trim();
+    const viewers = mapLaravelStoryViewers(story);
+    const uniqueViewersRaw = Number(story.unique_viewers ?? story.uniqueViewers);
     return {
         id: story.id,
         userId: story.user_id || story.userId || story.user?.id,
@@ -797,6 +799,9 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         createdAt: story.created_at ? new Date(story.created_at).getTime() : Date.now(),
         expiresAt: story.expires_at ? new Date(story.expires_at).getTime() : Date.now(),
         views: Number(story.views_count ?? story.views ?? 0) || 0,
+        uniqueViewers: Number.isFinite(uniqueViewersRaw) && uniqueViewersRaw > 0 ? uniqueViewersRaw : viewers.length || undefined,
+        viewers,
+        viewerHandles: viewers.map((viewer) => viewer.handle),
         hasViewed: storyHasViewed({ id: story.id, hasViewed: !!story.has_viewed, has_viewed: !!story.has_viewed }),
         reactions: [],
         replies: [],
@@ -818,6 +823,55 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
             (!isLaravelApiEnabled() ? getAvatarForHandle(story.user_handle || story.userHandle) : undefined) ||
             undefined,
     };
+}
+
+function parseViewedAt(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+        const ms = Date.parse(value);
+        return Number.isFinite(ms) ? ms : undefined;
+    }
+    return undefined;
+}
+
+export function mapLaravelStoryViewers(story: any): StoryViewerIdentity[] {
+    const rawViewers = Array.isArray(story?.viewers) ? story.viewers : [];
+    const fromViewers = rawViewers
+        .map((row: any): StoryViewerIdentity | null => {
+            const handle = String(row?.handle || row?.username || '').trim();
+            if (!handle) return null;
+            return {
+                userId: row?.user_id || row?.userId || row?.user?.id || undefined,
+                handle,
+                username: row?.username || row?.user?.username || undefined,
+                name: row?.name || row?.display_name || row?.user?.display_name || undefined,
+                avatarUrl: row?.avatar_url || row?.avatarUrl || row?.user?.avatar_url || undefined,
+                viewedAt: parseViewedAt(row?.viewed_at || row?.viewedAt || row?.created_at),
+            };
+        })
+        .filter((row: StoryViewerIdentity | null): row is StoryViewerIdentity => !!row);
+    if (fromViewers.length > 0) return fromViewers;
+
+    const handles = Array.isArray(story?.viewer_handles)
+        ? story.viewer_handles
+        : Array.isArray(story?.viewerHandles)
+          ? story.viewerHandles
+          : [];
+    return handles
+        .map((handle: unknown) => String(handle || '').trim())
+        .filter(Boolean)
+        .map((handle: string) => ({ handle }));
+}
+
+export function storyViewerIdentities(story?: Partial<Story> | null): StoryViewerIdentity[] {
+    if (!story) return [];
+    if (Array.isArray(story.viewers) && story.viewers.length > 0) {
+        return story.viewers.filter((row) => !!row?.handle);
+    }
+    return (story.viewerHandles || [])
+        .map((handle) => String(handle || '').trim())
+        .filter(Boolean)
+        .map((handle) => ({ handle }));
 }
 
 function sortGroupStoriesNewestFirst(groups: StoryGroup[]): StoryGroup[] {
@@ -1289,11 +1343,99 @@ export interface StoryInsight {
     replies: Array<{ userHandle: string; text: string; createdAt: number }>;
 }
 
-export async function getStoryInsightsForUser(userHandle: string): Promise<StoryInsight[]> {
-    await delay();
+export async function fetchStoryInsights(storyId: string): Promise<{
+    storyId: string;
+    views: number;
+    uniqueViewers: number;
+    viewers: StoryViewerIdentity[];
+}> {
+    const empty = {
+        storyId,
+        views: 0,
+        uniqueViewers: 0,
+        viewers: [] as StoryViewerIdentity[],
+    };
+    if (!storyId || !isLaravelApiEnabled()) return empty;
+    try {
+        const { apiRequest } = await import('./client');
+        const response = await apiRequest(`/stories/${encodeURIComponent(storyId)}/insights`);
+        const viewers = mapLaravelStoryViewers(response);
+        return {
+            storyId: String(response?.story_id || storyId),
+            views: Number(response?.views_count ?? response?.views ?? 0) || 0,
+            uniqueViewers: Number(response?.unique_viewers ?? viewers.length) || viewers.length,
+            viewers,
+        };
+    } catch (error) {
+        console.warn('fetchStoryInsights failed:', error);
+        return empty;
+    }
+}
 
+export async function getStoryInsightsForUser(userHandle: string): Promise<StoryInsight[]> {
     const now = Date.now();
     const normalizedHandle = (userHandle || '').trim().toLowerCase();
+
+    if (isLaravelApiEnabled()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const response = await apiRequest('/stories/insights');
+            const rows = Array.isArray(response?.insights)
+                ? response.insights
+                : Array.isArray(response)
+                  ? response
+                  : [];
+            return rows.map((row: any) => {
+                const viewers = mapLaravelStoryViewers(row)
+                    .map((viewer) => viewer.handle)
+                    .filter((handle) => handle.trim().toLowerCase() !== normalizedHandle);
+                const reactionRows: Array<{ userHandle: string; emoji: string; createdAt: number }> = Array.isArray(
+                    row?.reactions,
+                )
+                    ? row.reactions
+                          .filter((r: any) => (r?.userHandle || '').trim().toLowerCase() !== normalizedHandle)
+                          .map((r: any) => ({
+                              userHandle: String(r.userHandle || ''),
+                              emoji: String(r.emoji || ''),
+                              createdAt: Number(r.createdAt || now),
+                          }))
+                    : [];
+                const likeReactions = reactionRows.filter(
+                    (r) => r.emoji === '❤️' || r.emoji === '♥️' || r.emoji === '❤' || r.emoji === '👍',
+                );
+                const likers = Array.from(new Set(likeReactions.map((r) => r.userHandle)));
+                const replyRows: Array<{ userHandle: string; text: string; createdAt: number }> = Array.isArray(
+                    row?.replies,
+                )
+                    ? row.replies
+                          .filter((r: any) => (r?.userHandle || '').trim().toLowerCase() !== normalizedHandle)
+                          .map((r: any) => ({
+                              userHandle: String(r.userHandle || ''),
+                              text: String(r.text || ''),
+                              createdAt: Number(r.createdAt || now),
+                          }))
+                    : [];
+                return {
+                    storyId: String(row.story_id || row.storyId || ''),
+                    mediaUrl: row.media_url || row.mediaUrl || undefined,
+                    mediaType: row.media_type || row.mediaType || undefined,
+                    text: row.text || undefined,
+                    createdAt: row.created_at ? new Date(row.created_at).getTime() : now,
+                    views: Math.max(Number(row.views || row.views_count || 0), viewers.length),
+                    viewers,
+                    likes: likers.length,
+                    likers,
+                    reactions: reactionRows,
+                    replies: replyRows,
+                } satisfies StoryInsight;
+            });
+        } catch (error) {
+            console.warn('getStoryInsightsForUser API failed:', error);
+        }
+    }
+
+    await delay();
+
     const ownStories = stories.filter((s) => {
         if ((s.userHandle || '').trim().toLowerCase() !== normalizedHandle) return false;
         if (s.expiresAt <= now) return false;

@@ -245,6 +245,15 @@ export type StoryReply = {
   createdAt: number;
 };
 
+export type StoryViewerIdentity = {
+  userId?: string;
+  handle: string;
+  username?: string;
+  name?: string;
+  avatarUrl?: string;
+  viewedAt?: number;
+};
+
 export type Story = {
   id: string;
   userId: string;
@@ -268,6 +277,8 @@ export type Story = {
   venue?: string; // Venue / place name (metadata carousel on story view)
   views: number;
   viewerHandles?: string[]; // Distinct viewer handles for owner insights
+  viewers?: StoryViewerIdentity[];
+  uniqueViewers?: number;
   hasViewed: boolean;
   reactions: StoryReaction[];
   replies: StoryReply[];

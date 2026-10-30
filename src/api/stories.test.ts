@@ -184,4 +184,31 @@ describe('mapLaravelStoryToStory shared-post fields', () => {
         });
         expect(story.userHandle).toBe('Debs@Manchester');
     });
+
+    it('maps identified viewers instead of dropping them', () => {
+        const story = mapLaravelStoryToStory({
+            ...base,
+            unique_viewers: 2,
+            viewer_handles: ['Ava@galway'],
+            viewers: [
+                {
+                    user_id: 'u-ava',
+                    handle: 'Ava@galway',
+                    username: 'ava',
+                    name: 'Ava',
+                    avatar_url: 'https://example.com/ava.jpg',
+                    viewed_at: '2026-10-30T12:00:00.000Z',
+                },
+            ],
+        });
+        expect(story.viewerHandles).toEqual(['Ava@galway']);
+        expect(story.viewers?.[0]).toMatchObject({
+            handle: 'Ava@galway',
+            username: 'ava',
+            name: 'Ava',
+            avatarUrl: 'https://example.com/ava.jpg',
+        });
+        expect(story.uniqueViewers).toBe(2);
+        expect(story.viewers?.[0]?.viewedAt).toBe(Date.parse('2026-10-30T12:00:00.000Z'));
+    });
 });

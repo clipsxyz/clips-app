@@ -19,6 +19,8 @@ describe('isMigratedApiRequestPath stories', () => {
         expect(isMigratedApiRequestPath('/stories/paged')).toBe(true);
         expect(isMigratedApiRequestPath('/stories/paged?limit=20')).toBe(true);
         expect(isMigratedApiRequestPath('/stories/abc-123/view')).toBe(true);
+        expect(isMigratedApiRequestPath('/stories/insights')).toBe(true);
+        expect(isMigratedApiRequestPath('/stories/abc-123/insights')).toBe(true);
         expect(isMigratedApiRequestPath('/stories/user/Gazetteer@Dublin')).toBe(true);
     });
 

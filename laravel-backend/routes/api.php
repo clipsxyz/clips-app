@@ -349,8 +349,10 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     Route::prefix('stories')->group(function () {
         Route::get('/', [StoryController::class, 'index']);
         Route::get('/paged', [StoryController::class, 'paged']);
+        Route::get('/insights', [StoryController::class, 'ownerInsights']);
         Route::get('/user/{handle}', [StoryController::class, 'getUserStories']);
         Route::post('/', [StoryController::class, 'store']);
+        Route::get('/{id}/insights', [StoryController::class, 'insights']);
         Route::post('/{id}/view', [StoryController::class, 'view']);
         Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);
         Route::post('/{id}/reply', [StoryController::class, 'addReply']);

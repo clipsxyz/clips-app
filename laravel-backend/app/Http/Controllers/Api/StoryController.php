@@ -174,13 +174,24 @@ class StoryController extends Controller
         }
 
         $user = User::where('handle', $handle)->firstOrFail();
-        $userId = $request->get('userId');
+        $userId = $request->get('userId') ?: Auth::id();
         $hasViewer = !empty($userId);
+        $isOwner = Auth::id() && Auth::id() === $user->id;
 
         $query = Story::where('user_id', $user->id)
             ->active()
             ->withCount(['reactions', 'replies', 'views'])
             ->orderBy('created_at', 'desc');
+
+        if ($isOwner) {
+            $query->with([
+                'views' => function ($q) {
+                    $q->whereNotNull('user_id')
+                        ->with('user:id,username,handle,display_name,avatar_url')
+                        ->orderByDesc('created_at');
+                },
+            ]);
+        }
 
         if ($hasViewer) {
             $query->withExists([
@@ -196,8 +207,8 @@ class StoryController extends Controller
 
         $stories = $query->get();
 
-        $transformedStories = $stories->map(function ($story) use ($hasViewer) {
-            return $this->presentStory($story, $hasViewer);
+        $transformedStories = $stories->map(function ($story) use ($hasViewer, $isOwner) {
+            return $this->presentStory($story, $hasViewer, $isOwner);
         });
 
         return response()->json($transformedStories);
@@ -372,24 +383,139 @@ class StoryController extends Controller
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $user = Auth::user();
+        $userId = Auth::id() ?: $request->user()?->id;
+        if (empty($userId)) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
         $story = Story::findOrFail($id);
 
         if ($story->isExpired()) {
             return response()->json(['error' => 'Story has expired'], 400);
         }
 
-        DB::transaction(function () use ($user, $story) {
-            // Create view if not exists (unique constraint prevents duplicates)
-            StoryView::firstOrCreate([
-                'story_id' => $story->id,
-                'user_id' => $user->id,
-            ]);
+        DB::transaction(function () use ($userId, $story) {
+            StoryView::firstOrCreate(
+                [
+                    'story_id' => $story->id,
+                    'user_id' => $userId,
+                ],
+                [
+                    'user_id' => $userId,
+                ]
+            );
 
             $story->increment('views_count');
         });
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Owner insights for every active story (inbox Insights tab).
+     */
+    public function ownerInsights(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $stories = Story::query()
+            ->where('user_id', $user->id)
+            ->active()
+            ->with([
+                'views' => function ($q) {
+                    $q->whereNotNull('user_id')
+                        ->with('user:id,username,handle,display_name,avatar_url')
+                        ->orderByDesc('created_at');
+                },
+                'reactions.user:id,handle,username,display_name,avatar_url',
+                'replies.user:id,handle,username,display_name,avatar_url',
+            ])
+            ->orderByDesc('created_at')
+            ->get();
+
+        $ownerHandle = mb_strtolower((string) $user->handle);
+
+        $insights = $stories->map(function (Story $story) use ($ownerHandle) {
+            $viewers = $this->presentViewers($story);
+            $reactions = $story->reactions
+                ->filter(function ($reaction) use ($ownerHandle) {
+                    $handle = mb_strtolower((string) ($reaction->user?->handle ?? $reaction->user_handle ?? ''));
+                    return $handle !== '' && $handle !== $ownerHandle;
+                })
+                ->map(function ($reaction) {
+                    return [
+                        'userHandle' => $reaction->user?->handle ?: $reaction->user_handle,
+                        'emoji' => $reaction->emoji,
+                        'createdAt' => $reaction->created_at ? ((int) $reaction->created_at->getTimestamp() * 1000) : null,
+                    ];
+                })
+                ->values();
+            $replies = $story->replies
+                ->filter(function ($reply) use ($ownerHandle) {
+                    $handle = mb_strtolower((string) ($reply->user?->handle ?? $reply->user_handle ?? ''));
+                    return $handle !== '' && $handle !== $ownerHandle;
+                })
+                ->map(function ($reply) {
+                    return [
+                        'userHandle' => $reply->user?->handle ?: $reply->user_handle,
+                        'text' => $reply->text,
+                        'createdAt' => $reply->created_at ? ((int) $reply->created_at->getTimestamp() * 1000) : null,
+                    ];
+                })
+                ->values();
+
+            return [
+                'story_id' => $story->id,
+                'media_url' => $this->publicMediaUrl($story->media_url),
+                'media_type' => $story->media_type,
+                'text' => $story->text,
+                'created_at' => optional($story->created_at)?->toIso8601String(),
+                'views' => (int) $story->views_count,
+                'unique_viewers' => $this->uniqueViewerCount($story),
+                'viewers' => $viewers,
+                'viewer_handles' => collect($viewers)->pluck('handle')->filter()->values()->all(),
+                'reactions' => $reactions,
+                'replies' => $replies,
+            ];
+        })->values();
+
+        return response()->json(['insights' => $insights]);
+    }
+
+    /**
+     * Identified viewers for a single story the authenticated owner opened.
+     */
+    public function insights(Request $request, string $id): JsonResponse
+    {
+        $userId = Auth::id() ?: $request->user()?->id;
+        if (empty($userId)) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $story = Story::findOrFail($id);
+        if ($story->user_id !== $userId) {
+            return response()->json(['error' => 'Forbidden'], 403);
+        }
+
+        $views = $story->views()
+            ->whereNotNull('user_id')
+            ->with('user:id,username,handle,display_name,avatar_url')
+            ->orderByDesc('created_at')
+            ->get();
+        $story->setRelation('views', $views);
+
+        $viewers = $this->presentViewers($story);
+
+        return response()->json([
+            'story_id' => $story->id,
+            'views_count' => (int) $story->views_count,
+            'unique_viewers' => $this->uniqueViewerCount($story),
+            'viewers' => $viewers,
+            'viewer_handles' => collect($viewers)->pluck('handle')->filter()->values()->all(),
+        ]);
     }
 
     /**
@@ -506,11 +632,12 @@ class StoryController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function presentStory(Story $story, bool $hasViewer): array
+    private function presentStory(Story $story, bool $hasViewer, bool $includeViewers = false): array
     {
         $this->ensureStoryPublicMedia($story);
 
         $storyData = $story->toArray();
+        unset($storyData['views']);
         $storyData['media_url'] = $this->publicMediaUrl($story->media_url);
         $storyData['video_poster_url'] = $this->publicMediaUrl($story->video_poster_url);
         if (empty($storyData['user_handle']) && $story->relationLoaded('user')) {
@@ -530,7 +657,61 @@ class StoryController extends Controller
             $storyData['user_reaction'] = null;
         }
 
+        if ($includeViewers) {
+            $viewers = $this->presentViewers($story);
+            $storyData['viewers'] = $viewers;
+            $storyData['viewer_handles'] = collect($viewers)->pluck('handle')->filter()->values()->all();
+            $storyData['unique_viewers'] = $this->uniqueViewerCount($story);
+        }
+
         return $storyData;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function presentViewers(Story $story): array
+    {
+        if (! $story->relationLoaded('views')) {
+            $story->load([
+                'views' => function ($q) {
+                    $q->whereNotNull('user_id')
+                        ->with('user:id,username,handle,display_name,avatar_url')
+                        ->orderByDesc('created_at');
+                },
+            ]);
+        } else {
+            $story->loadMissing('views.user:id,username,handle,display_name,avatar_url');
+        }
+
+        return $story->views
+            ->filter(function (StoryView $view) {
+                return filled($view->user_id) && $view->user;
+            })
+            ->unique('user_id')
+            ->values()
+            ->map(function (StoryView $view) {
+                $user = $view->user;
+                $handle = $user->handle ?: $user->username;
+                return [
+                    'user_id' => $user->id,
+                    'username' => $user->username ?: $handle,
+                    'name' => $user->display_name ?: $user->username ?: $handle,
+                    'handle' => $handle,
+                    'avatar_url' => $user->avatar_url,
+                    'viewed_at' => optional($view->created_at)?->toIso8601String(),
+                ];
+            })
+            ->all();
+    }
+
+    private function uniqueViewerCount(Story $story): int
+    {
+        return (int) DB::table('story_views')
+            ->where('story_id', $story->id)
+            ->whereNotNull('user_id')
+            ->selectRaw('COUNT(DISTINCT user_id) as aggregate')
+            ->value('aggregate');
     }
 
     private function ensureStoryPublicMedia(Story $story): void

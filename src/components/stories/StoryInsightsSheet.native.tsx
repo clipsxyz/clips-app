@@ -12,8 +12,9 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
 import { getFollowedUsers } from '../../api/posts';
 import { toggleFollow } from '../../api/client';
+import { fetchStoryInsights, storyViewerIdentities } from '../../api/stories';
 import { getAvatarForHandle } from '../../api/users';
-import type { Story } from '../../types';
+import type { Story, StoryViewerIdentity } from '../../types';
 import { timeAgo } from '../../utils/timeAgo';
 import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from '../GazetteerBottomSheetModal.native';
 import { UCL_CANVAS_NAVY, UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../../theme/gazetteerAmbientNative';
@@ -48,6 +49,8 @@ export default function StoryInsightsSheet({
     const [tab, setTab] = useState<'viewers' | 'reactions' | 'replies'>('viewers');
     const [viewerFollowMap, setViewerFollowMap] = useState<Record<string, boolean>>({});
     const [followLoadingHandle, setFollowLoadingHandle] = useState<string | null>(null);
+    const [remoteViewers, setRemoteViewers] = useState<StoryViewerIdentity[] | null>(null);
+    const [remoteUniqueViewers, setRemoteUniqueViewers] = useState<number | null>(null);
 
     const ownerNorm = currentUserHandle.trim().toLowerCase();
     const activeStoryId = storyId || story.id;
@@ -58,18 +61,29 @@ export default function StoryInsightsSheet({
     const reactions = (story.reactions || []).filter(
         (r) => (r.userHandle || '').trim().toLowerCase() !== ownerNorm,
     );
-    const viewerHandles = Array.from(
-        new Set(
-            (story.viewerHandles || []).filter(
-                (h) => !!h && h.trim().toLowerCase() !== ownerNorm,
-            ),
-        ),
+    const viewers = (remoteViewers ?? storyViewerIdentities(story)).filter(
+        (row) => row.handle.trim().toLowerCase() !== ownerNorm,
     );
+    const viewerHandles = Array.from(new Set(viewers.map((row) => row.handle)));
+    const uniqueViewersCount = remoteUniqueViewers ?? story.uniqueViewers ?? viewerHandles.length;
     const storyThumb = (story.mediaUrl || '').trim();
     const storyText = (story.text || '').trim();
 
     useEffect(() => {
         if (!visible) setTab('viewers');
+    }, [visible, activeStoryId]);
+
+    useEffect(() => {
+        if (!visible || !activeStoryId) return;
+        let cancelled = false;
+        void fetchStoryInsights(activeStoryId).then((payload) => {
+            if (cancelled || payload.viewers.length === 0) return;
+            setRemoteViewers(payload.viewers);
+            setRemoteUniqueViewers(payload.uniqueViewers || payload.viewers.length);
+        });
+        return () => {
+            cancelled = true;
+        };
     }, [visible, activeStoryId]);
 
     useEffect(() => {
@@ -154,7 +168,7 @@ export default function StoryInsightsSheet({
                     </TouchableOpacity>
                 </View>
                 <Text style={styles.subtitle}>
-                    {viewsCount} total views / Unique viewers: {viewerHandles.length}
+                    {viewsCount} total views / Unique viewers: {uniqueViewersCount}
                 </Text>
 
                 <View style={styles.storyPreviewRow}>
@@ -214,23 +228,36 @@ export default function StoryInsightsSheet({
 
                 {tab === 'viewers' ? (
                     <>
-                        {viewerHandles.length === 0 ? (
+                        {viewers.length === 0 ? (
                             <Text style={styles.empty}>No viewer identities yet.</Text>
                         ) : (
-                            viewerHandles.map((handle) => (
-                                <View key={handle} style={styles.viewerRow}>
+                            viewers.map((viewer) => {
+                                const handle = viewer.handle;
+                                const label = viewer.name || viewer.username || handle;
+                                return (
+                                <View key={`${handle}-${viewer.viewedAt || ''}`} style={styles.viewerRow}>
                                     <TouchableOpacity
                                         style={styles.viewerMain}
                                         onPress={() => openProfile(handle)}
                                     >
                                         <Avatar
-                                            src={avatarMap[handle] || getAvatarForHandle(handle)}
-                                            name={handle}
+                                            src={
+                                                viewer.avatarUrl ||
+                                                avatarMap[handle] ||
+                                                getAvatarForHandle(handle)
+                                            }
+                                            name={label}
                                             size="sm"
                                         />
-                                        <Text style={styles.viewerHandle} numberOfLines={1}>
-                                            {handle}
-                                        </Text>
+                                        <View style={styles.viewerMeta}>
+                                            <Text style={styles.viewerHandle} numberOfLines={1}>
+                                                {label}
+                                            </Text>
+                                            <Text style={styles.viewerTime} numberOfLines={1}>
+                                                {handle !== label ? `${handle} · ` : ''}
+                                                {viewer.viewedAt ? timeAgo(viewer.viewedAt) : 'Viewed'}
+                                            </Text>
+                                        </View>
                                     </TouchableOpacity>
                                     <TouchableOpacity
                                         style={[
@@ -261,7 +288,8 @@ export default function StoryInsightsSheet({
                                         )}
                                     </TouchableOpacity>
                                 </View>
-                            ))
+                                );
+                            })
                         )}
                     </>
                 ) : tab === 'reactions' ? (
@@ -419,7 +447,9 @@ const styles = StyleSheet.create({
         gap: 10,
     },
     viewerMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+    viewerMeta: { flex: 1, minWidth: 0 },
     viewerHandle: { color: UCL_TEXT_PRIMARY, fontSize: 14, fontWeight: '600', flexShrink: 1 },
+    viewerTime: { color: UCL_TEXT_PLACEHOLDER, fontSize: 11, marginTop: 2 },
     followBtn: {
         paddingHorizontal: 12,
         paddingVertical: 7,

@@ -4,7 +4,7 @@ import { parsePublicShareLink } from '../utils/publicShareLink';
 import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock, FiUsers } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, sortStoriesNewestFirst, getLastStoriesLoadSource } from '../api/stories';
+import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, sortStoriesNewestFirst, getLastStoriesLoadSource, fetchStoryInsights, storyViewerIdentities } from '../api/stories';
 import {
     deliverStoryReactionToInbox,
     deliverStoryReplyToInbox,
@@ -23,7 +23,7 @@ import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
-import type { Story, StoryGroup, Post } from '../types';
+import type { Story, StoryGroup, Post, StoryViewerIdentity } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
@@ -311,6 +311,8 @@ export default function StoriesPage() {
     const [insightsTab, setInsightsTab] = React.useState<'viewers' | 'replies'>('viewers');
     const [viewerFollowMap, setViewerFollowMap] = React.useState<Record<string, boolean>>({});
     const [viewerFollowLoadingHandle, setViewerFollowLoadingHandle] = React.useState<string | null>(null);
+    const [insightsViewers, setInsightsViewers] = React.useState<StoryViewerIdentity[]>([]);
+    const [insightsUniqueViewers, setInsightsUniqueViewers] = React.useState<number | null>(null);
     const [showControls, setShowControls] = React.useState(true);
     const [showScenesModal, setShowScenesModal] = React.useState(false);
     const [fullPost, setFullPost] = React.useState<Post | null>(null);
@@ -1660,7 +1662,16 @@ export default function StoriesPage() {
                 const followed = await getFollowedUsers(user.id);
                 const followedSet = new Set((followed || []).map((h) => (h || '').toLowerCase()));
                 const nextMap: Record<string, boolean> = {};
-                const handles = Array.from(new Set((currentStoryForMeta?.viewerHandles || []).filter(Boolean)));
+                const handles = Array.from(
+                    new Set(
+                        (insightsViewers.length > 0
+                            ? insightsViewers
+                            : storyViewerIdentities(currentStoryForMeta)
+                        )
+                            .map((row) => row.handle)
+                            .filter(Boolean),
+                    ),
+                );
                 handles.forEach((handle) => {
                     const normalized = (handle || '').toLowerCase();
                     nextMap[handle] = normalized === (user.handle || '').toLowerCase() || followedSet.has(normalized);
@@ -1671,7 +1682,26 @@ export default function StoriesPage() {
             }
         };
         loadViewerFollowState();
-    }, [showInsightsSheet, insightsTab, user?.id, user?.handle, currentStoryForMeta?.id, (currentStoryForMeta?.viewerHandles || []).join('|')]);
+    }, [showInsightsSheet, insightsTab, user?.id, user?.handle, currentStoryForMeta?.id, insightsViewers, (currentStoryForMeta?.viewerHandles || []).join('|')]);
+
+    React.useEffect(() => {
+        if (!showInsightsSheet) {
+            setInsightsViewers([]);
+            setInsightsUniqueViewers(null);
+            return;
+        }
+        const id = insightsStoryId || currentStoryForMeta?.id;
+        if (!id) return;
+        let cancelled = false;
+        void fetchStoryInsights(id).then((payload) => {
+            if (cancelled || payload.viewers.length === 0) return;
+            setInsightsViewers(payload.viewers);
+            setInsightsUniqueViewers(payload.uniqueViewers || payload.viewers.length);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [showInsightsSheet, insightsStoryId, currentStoryForMeta?.id]);
 
     // Guard: don't render if no user (share links are handled by AppGate → PublicStoryPage)
     if (!user) {
@@ -1760,7 +1790,10 @@ export default function StoriesPage() {
     const storyViewsCount = Number(currentStory?.views || 0);
     const storyRepliesCount = Number(currentStory?.replies?.length || 0);
     const storyReactionsCount = Number(currentStory?.reactions?.length || 0);
-    const storyViewerHandles = Array.from(new Set((currentStory?.viewerHandles || []).filter(Boolean)));
+    const storyViewers =
+        insightsViewers.length > 0 ? insightsViewers : storyViewerIdentities(currentStory);
+    const storyViewerHandles = Array.from(new Set(storyViewers.map((row) => row.handle).filter(Boolean)));
+    const storyUniqueViewers = insightsUniqueViewers ?? currentStory?.uniqueViewers ?? storyViewerHandles.length;
     const storyInsightsKind =
         currentStory?.mediaType === 'video'
             ? 'Video story'
@@ -3421,7 +3454,7 @@ export default function StoriesPage() {
                             <div className="flex flex-col gap-1 px-4 pr-12 mt-5">
                                 <h3 className="text-base font-semibold">Story Insights</h3>
                                 <p className="text-[13px] leading-[18px] text-white/80">
-                                    {storyViewsCount} total views / Unique viewers: {storyViewerHandles.length}
+                                    {storyViewsCount} total views / Unique viewers: {storyUniqueViewers}
                                 </p>
                             </div>
                             <button
@@ -3480,14 +3513,17 @@ export default function StoriesPage() {
 
                             {insightsTab === 'viewers' ? (
                                 <div className="space-y-2 px-4">
-                                    {storyViewerHandles.length === 0 ? (
+                                    {storyViewers.length === 0 ? (
                                         <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
                                             No viewer identities yet.
                                         </div>
                                     ) : (
-                                        storyViewerHandles.map((handle) => (
+                                        storyViewers.map((viewer) => {
+                                            const handle = viewer.handle;
+                                            const label = viewer.name || viewer.username || handle;
+                                            return (
                                             <button
-                                                key={handle}
+                                                key={`${handle}-${viewer.viewedAt || ''}`}
                                                 type="button"
                                                 onClick={() => {
                                                     setShowInsightsSheet(false);
@@ -3499,11 +3535,17 @@ export default function StoriesPage() {
                                                 className="w-full text-left rounded-2xl border border-white/10 bg-black/30 px-3 py-2.5 flex items-center gap-2.5 hover:bg-black/45 transition-colors"
                                             >
                                                 <Avatar
-                                                    name={handle}
-                                                    src={getAvatarForHandle(handle)}
+                                                    name={label}
+                                                    src={viewer.avatarUrl || getAvatarForHandle(handle)}
                                                     size="sm"
                                                 />
-                                                <span className="text-sm font-semibold text-white truncate flex-1">{handle}</span>
+                                                <span className="flex-1 min-w-0">
+                                                    <span className="block text-sm font-semibold text-white truncate">{label}</span>
+                                                    <span className="block text-[11px] text-white/60 truncate">
+                                                        {handle !== label ? `${handle} · ` : ''}
+                                                        {viewer.viewedAt ? timeAgo(viewer.viewedAt) : 'Viewed'}
+                                                    </span>
+                                                </span>
                                                 {user?.handle && handle.toLowerCase() !== user.handle.toLowerCase() && (
                                                     <button
                                                         onClick={async (e) => {
@@ -3545,7 +3587,8 @@ export default function StoriesPage() {
                                                     </button>
                                                 )}
                                             </button>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </div>
                             ) : (

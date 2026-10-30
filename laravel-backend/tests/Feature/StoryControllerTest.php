@@ -153,6 +153,68 @@ class StoryControllerTest extends TestCase
             'story_id' => $story->id,
             'user_id' => $viewer->id,
         ]);
+        $this->assertSame(0, \App\Models\StoryView::where('story_id', $story->id)->whereNull('user_id')->count());
+    }
+
+    public function test_view_requires_authenticated_user_id(): void
+    {
+        $user = User::factory()->create();
+        $story = Story::factory()->forUser($user)->create([
+            'expires_at' => now()->addHour(),
+        ]);
+
+        $this->postJson("/api/stories/{$story->id}/view")
+            ->assertStatus(401);
+
+        $this->assertDatabaseMissing('story_views', [
+            'story_id' => $story->id,
+        ]);
+    }
+
+    public function test_insights_returns_identified_viewers_and_distinct_count(): void
+    {
+        $owner = User::factory()->create();
+        $viewer = User::factory()->create([
+            'handle' => 'Ava@galway',
+            'username' => 'ava',
+            'display_name' => 'Ava',
+            'avatar_url' => 'https://example.com/ava.jpg',
+        ]);
+        $other = User::factory()->create(['handle' => 'Bob@Ireland', 'username' => 'bob']);
+
+        $story = Story::factory()->forUser($owner)->create([
+            'expires_at' => now()->addHour(),
+        ]);
+
+        $this->actingAs($viewer, 'sanctum')->postJson("/api/stories/{$story->id}/view")->assertOk();
+        $this->actingAs($viewer, 'sanctum')->postJson("/api/stories/{$story->id}/view")->assertOk();
+        $this->actingAs($other, 'sanctum')->postJson("/api/stories/{$story->id}/view")->assertOk();
+
+        $this->actingAs($other, 'sanctum')
+            ->getJson("/api/stories/{$story->id}/insights")
+            ->assertStatus(403);
+
+        $response = $this->actingAs($owner, 'sanctum')
+            ->getJson("/api/stories/{$story->id}/insights");
+
+        $response->assertOk()
+            ->assertJsonPath('unique_viewers', 2)
+            ->assertJsonPath('viewers.0.handle', $other->handle)
+            ->assertJsonPath('viewers.1.handle', $viewer->handle)
+            ->assertJsonPath('viewers.1.username', 'ava')
+            ->assertJsonPath('viewers.1.name', 'Ava');
+
+        $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/stories/insights')
+            ->assertOk()
+            ->assertJsonPath('insights.0.unique_viewers', 2)
+            ->assertJsonPath('insights.0.viewer_handles.1', $viewer->handle);
+
+        $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/stories/user/'.rawurlencode($owner->handle))
+            ->assertOk()
+            ->assertJsonPath('0.viewer_handles.1', $viewer->handle)
+            ->assertJsonPath('0.viewers.1.username', 'ava');
     }
 
     public function test_cannot_view_expired_story(): void
