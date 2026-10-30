@@ -14,14 +14,21 @@ export function resetToHomeFeed(
     params?: { forceRefreshAt?: number },
 ): void {
     const homeParams = params ?? { forceRefreshAt: Date.now() };
+    // Use nested `params.screen` (not a hand-built `state`) so React Navigation
+    // hydrates tab + Home stack with `routes` and `preloadedRoutes: []`.
+    // A partial `state: { routes: [{ name: 'Home' }] }` leaves `preloadedRoutes`
+    // undefined and NativeStackView crashes on `.reduce`.
     const resetState = {
         index: 0,
         routes: [
             {
                 name: 'MainTabs',
-                state: {
-                    index: 0,
-                    routes: [{ name: 'Home', params: homeParams }],
+                params: {
+                    screen: 'Home',
+                    params: {
+                        screen: 'Feed',
+                        params: homeParams,
+                    },
                 },
             },
         ],

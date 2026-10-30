@@ -37,7 +37,8 @@ export default function MainTabBar({
   onCreatePress,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const activeRouteName = state.routes[state.index]?.name;
+  const tabRoutes = state?.routes || [];
+  const activeRouteName = tabRoutes[state?.index ?? 0]?.name;
   const [showContributeCue, setShowContributeCue] = React.useState(false);
 
   React.useEffect(() => {
@@ -70,8 +71,8 @@ export default function MainTabBar({
         locations={[0, 0.45, 1]}
         style={styles.frostOverlay}
       />
-      {state.routes.map((route, index) => {
-        const { options } = descriptors[route.key];
+      {tabRoutes.map((route, index) => {
+        const options = descriptors[route.key]?.options || {};
         const focused = state.index === index;
         const label =
           typeof options.tabBarLabel === 'string'
@@ -115,7 +116,14 @@ export default function MainTabBar({
           }
 
           if (!focused) {
-            navigation.navigate(route.name);
+            if (
+              route.name === 'Home' ||
+              route.name === 'Boost' ||
+              route.name === 'Search' ||
+              route.name === 'Inbox'
+            ) {
+              navigation.navigate(route.name);
+            }
           }
         };
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../Avatar';
 import VerifiedBadge from '../VerifiedBadge.native';
@@ -74,6 +75,12 @@ export default function StoryViewerHeader({
             style={[styles.header, { paddingTop: insets.top + 8 }]}
             pointerEvents="box-none"
         >
+            <LinearGradient
+                pointerEvents="none"
+                colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0.28)', 'transparent']}
+                locations={[0, 0.55, 1]}
+                style={styles.headerFade}
+            />
             <View style={styles.left} pointerEvents="box-none">
                 <View ref={avatarRef} collapsable={false}>
                     <View style={styles.avatarWrap}>
@@ -120,12 +127,14 @@ export default function StoryViewerHeader({
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.right}>
+            <View style={styles.right} pointerEvents="auto">
                 {showVideoMute ? (
                     <TouchableOpacity
                         onPress={onToggleMute}
                         style={styles.muteBtn}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={isMuted ? 'Unmute story' : 'Mute story'}
                     >
                         <Icon
                             name={isMuted ? 'volume-mute' : 'volume-high'}
@@ -134,7 +143,13 @@ export default function StoryViewerHeader({
                         />
                     </TouchableOpacity>
                 ) : null}
-                <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <TouchableOpacity
+                    onPress={onClose}
+                    style={styles.closeBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close story"
+                >
                     <Icon name="close" size={26} color="#fff" />
                 </TouchableOpacity>
             </View>
@@ -146,13 +161,18 @@ const styles = StyleSheet.create({
     header: {
         position: 'absolute',
         top: 0,
-        left: 16,
-        right: 16,
+        left: 0,
+        right: 0,
         zIndex: 130,
         elevation: Platform.OS === 'android' ? 130 : 0,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 28,
+    },
+    headerFade: {
+        ...StyleSheet.absoluteFill,
     },
     left: {
         flex: 1,
@@ -198,12 +218,25 @@ const styles = StyleSheet.create({
         paddingVertical: 2,
     },
     metaText: { color: '#111827', fontSize: 10, fontWeight: '600', flexShrink: 1 },
-    right: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    right: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        zIndex: 140,
+        elevation: Platform.OS === 'android' ? 140 : 0,
+    },
     muteBtn: {
         padding: 8,
         borderRadius: 999,
         backgroundColor: 'rgba(0,0,0,0.45)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
+        zIndex: 141,
+        elevation: Platform.OS === 'android' ? 141 : 0,
+    },
+    closeBtn: {
+        padding: 6,
+        zIndex: 141,
+        elevation: Platform.OS === 'android' ? 141 : 0,
     },
 });

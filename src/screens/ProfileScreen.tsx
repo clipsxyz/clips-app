@@ -77,7 +77,8 @@ import {
     resetNotificationPreferences,
     type NotificationPreferences,
 } from '../services/notifications';
-import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
+import { getRuntimeEnv, isLaravelApiEnabled } from '../config/runtimeEnv';
+import { getApiBaseUrl } from '../api/apiBaseUrl';
 import { ox } from '../constants/nativeOpticalScale';
 
 type ProfileAlertConfig = {
@@ -651,7 +652,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     };
 
     const handleInviteByQrOrLink = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        const apiBase = getApiBaseUrl();
         const apiOrigin = apiBase.replace(/\/api\/?$/, '');
         const profileUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
         try {
@@ -672,7 +673,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     };
 
     const handleShareInviteToWhatsApp = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        const apiBase = getApiBaseUrl();
         const apiOrigin = apiBase.replace(/\/api\/?$/, '');
         const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
         const text = `${user?.handle || 'A friend'} invited you to join Gazetteer\n\n${inviteUrl}`;
@@ -686,7 +687,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     };
 
     const handleShareInviteToMessenger = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        const apiBase = getApiBaseUrl();
         const apiOrigin = apiBase.replace(/\/api\/?$/, '');
         const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
         const appId = getRuntimeEnv('VITE_FACEBOOK_APP_ID') || '';

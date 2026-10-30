@@ -131,7 +131,7 @@ export default function LoginPage() {
           : 'Add a photo';
 
   const signupInputClass =
-    'w-full rounded-lg border border-white/15 bg-white/5 px-3 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-[#7A8AF0]/60 focus:ring-1 focus:ring-[#7A8AF0]/30';
+    'w-full rounded-lg border border-white/25 bg-black/40 px-3 py-3 text-sm text-white placeholder:text-gray-400 focus:outline-none focus:border-[#7A8AF0]/80 focus:ring-1 focus:ring-[#7A8AF0]/40';
 
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
@@ -731,8 +731,7 @@ export default function LoginPage() {
       <div className="w-full flex-1 flex flex-col min-h-0">
         {mode === 'login' ? (
           <div
-            className="max-w-md mx-auto rounded-2xl p-0.5 shadow-lg"
-            style={{ background: '#FFFFFF' }}
+            className="max-w-md mx-auto w-full rounded-2xl border border-white/10 bg-black/25 shadow-lg backdrop-blur-sm"
           >
             {showForgotPassword ? (
               <form
@@ -760,7 +759,7 @@ export default function LoginPage() {
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
                       placeholder="Email or handle"
-                      className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                      className={signupInputClass}
                       autoFocus
                       autoCapitalize="none"
                       autoCorrect="off"
@@ -774,7 +773,7 @@ export default function LoginPage() {
                         value={forgotCode}
                         onChange={e => setForgotCode(e.target.value)}
                         placeholder="6-digit code"
-                        className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                        className={signupInputClass}
                         autoFocus
                       />
                       <input
@@ -782,14 +781,14 @@ export default function LoginPage() {
                         value={forgotPassword}
                         onChange={e => setForgotPassword(e.target.value)}
                         placeholder="New password (8+ characters)"
-                        className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                        className={signupInputClass}
                       />
                       <input
                         type="password"
                         value={forgotConfirm}
                         onChange={e => setForgotConfirm(e.target.value)}
                         placeholder="Confirm new password"
-                        className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                        className={signupInputClass}
                       />
                     </>
                   )}

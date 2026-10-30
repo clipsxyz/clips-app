@@ -73,6 +73,11 @@ import { toggleFollowForPost } from '../api/posts';
 import { flushScenesPostUpdates, setScenesPostUpdate } from '../utils/scenesPostSyncNative';
 import { ox } from '../constants/nativeOpticalScale';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import {
+    getGlobalVideoMutedNative,
+    setGlobalVideoMutedNative,
+    subscribeGlobalVideoMuted,
+} from '../utils/globalVideoMuteNative';
 
 export default function PostDetailScreen({ route, navigation }: any) {
     const { postId, openComments, fromCollection, initialPost } = route.params || {};
@@ -97,7 +102,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
         Math.round(screenWidth / RATIO_PORTRAIT_9_16),
     );
     const [mediaStageHeight, setMediaStageHeight] = useState(0);
-    const [isMuted, setIsMuted] = useState(false);
+    const [isMuted, setIsMuted] = useState(true);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(!!openComments);
     const [overflowVisible, setOverflowVisible] = useState(false);
@@ -112,8 +117,25 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     useEffect(() => {
         loadPost();
-        setIsMuted(false);
     }, [postId]);
+
+    useEffect(() => {
+        let mounted = true;
+        void getGlobalVideoMutedNative().then((muted) => {
+            if (mounted) setIsMuted(muted);
+        });
+        const unsub = subscribeGlobalVideoMuted(setIsMuted);
+        return () => {
+            mounted = false;
+            unsub();
+        };
+    }, []);
+
+    const toggleVideoMute = useCallback(() => {
+        const next = !isMuted;
+        setIsMuted(next);
+        void setGlobalVideoMutedNative(next);
+    }, [isMuted]);
 
     useEffect(() => {
         if (openComments) setCommentsOpen(true);
@@ -492,7 +514,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                             {isVideoPost(post) ? (
                                 <VideoMuteToggle
                                     muted={isMuted}
-                                    onToggle={() => setIsMuted((prev) => !prev)}
+                                    onToggle={toggleVideoMute}
                                 />
                             ) : null}
                         </View>
@@ -890,6 +912,7 @@ const styles = StyleSheet.create({
         borderTopColor: 'rgba(255,255,255,0.06)',
         minWidth: 0,
         backgroundColor: FEED_CARD_BG,
+        paddingBottom: ox(24),
     },
     statsContainer: {
         flexDirection: 'row',
@@ -905,7 +928,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     tabBarSpacer: {
-        height: ox(12),
+        height: ox(100),
     },
     errorText: {
         fontSize: ox(16),

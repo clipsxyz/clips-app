@@ -72,18 +72,28 @@ describe('effectiveThreadUnread', () => {
 });
 
 describe('inbox badge aggregation', () => {
-    it('sums messages + groups + notifications without double-counting', () => {
+    it('badges unread threads, not Notifs or raw message rows', () => {
         expect(inboxBadgeTotal({ messages: 3, groups: 0, notifications: 0 })).toBe(3);
-        expect(inboxBadgeTotal({ messages: 0, groups: 1, notifications: 2 })).toBe(3);
+        expect(inboxBadgeTotal({ messages: 0, groups: 1, notifications: 2 })).toBe(1);
+        expect(inboxBadgeTotal({ messages: 2, groups: 0, notifications: 6 })).toBe(2);
     });
 
-    it('reads a full inboxUnreadChanged payload immediately', () => {
+    it('reads a full inboxUnreadChanged payload immediately without Notifs', () => {
         expect(
             inboxBadgeFromEventPayload({
                 handle: 'Barry@Dublin',
                 messages: 0,
                 groups: 0,
                 notifications: 2,
+                unread: 99,
+            }),
+        ).toBe(0);
+        expect(
+            inboxBadgeFromEventPayload({
+                handle: 'Barry@Dublin',
+                messages: 2,
+                groups: 0,
+                notifications: 6,
                 unread: 99,
             }),
         ).toBe(2);
@@ -101,13 +111,14 @@ describe('inbox badge aggregation', () => {
         expect(countsTowardInboxNotificationBadge('inactive_digest')).toBe(false);
     });
 
-    it('matches Messages / Groups / Notifs pills and ignores hidden rows', () => {
+    it('matches Messages / Groups pills as unread thread counts and ignores hidden rows', () => {
         expect(
             inboxUnreadPartsFromLists(
                 [
-                    { kind: 'dm', unread: 2, isRequest: false },
+                    { kind: 'dm', unread: 5, isRequest: false },
+                    { kind: 'dm', unread: 3, isRequest: false },
                     { kind: 'dm', unread: 4, isRequest: true },
-                    { kind: 'group', unread: 1 },
+                    { kind: 'group', unread: 9 },
                     { kind: 'dm', unread: 0 },
                 ],
                 [
@@ -119,5 +130,16 @@ describe('inbox badge aggregation', () => {
                 { pendingInviteCount: 2 },
             ),
         ).toEqual({ messages: 2, groups: 3, notifications: 1 });
+        expect(
+            inboxBadgeTotal(
+                inboxUnreadPartsFromLists(
+                    [
+                        { kind: 'dm', unread: 5, isRequest: false },
+                        { kind: 'dm', unread: 3, isRequest: false },
+                    ],
+                    [{ read: false, type: 'like' }],
+                ),
+            ),
+        ).toBe(2);
     });
 });

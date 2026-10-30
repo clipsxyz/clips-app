@@ -5,7 +5,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-refresh/only-export-components */
 // @refresh reset — FeedScreen is large; full remount on edit avoids hook-order HMR glitches.
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
     View,
@@ -55,6 +55,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import type { HeaderFeedScope } from '../utils/headerGlassPalette';
 import { useAuth } from '../context/Auth';
+import { describeFetchError } from '../api/httpClient';
 import { searchLocations } from '../api/locations';
 import {
     fetchPostsPage,
@@ -81,6 +82,8 @@ import {
 import { isMockMode } from '../api/apiMode';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { getUnreadTotal } from '../api/messages';
+import { markStoryAsViewedLocal, markStoryViewed } from '../api/stories';
+import { getStoryViewedVersion, subscribeStoryViewed } from '../utils/storyViewedStore';
 import {
     connectSocket,
     joinLocationFeed,
@@ -130,7 +133,6 @@ import {
 } from '../utils/scenesViewerActiveNative';
 import {
     getGlobalVideoMutedNative,
-    setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
 import { FlatList, RefreshControl } from 'react-native-gesture-handler';
@@ -2006,6 +2008,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [end, setEnd] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
+    const storyViewedVersion = useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
     const [customLocation, setCustomLocation] = useState<string | null>(null);
     const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null);
@@ -2058,7 +2061,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
     useEffect(() => subscribeActiveFeedVideo(setActiveVideoPostId), []);
     const [feedAutoplayAllowed, setFeedAutoplayAllowed] = useState(true);
-    const [feedVideoMuted, setFeedVideoMuted] = useState(false);
+    const [feedVideoMuted, setFeedVideoMuted] = useState(true);
     const [pendingUploadTick, setPendingUploadTick] = useState(0);
     const [ads, setAds] = useState<Ad[]>([]);
     const [online, setOnline] = useState(true);
@@ -2184,16 +2187,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             void syncFeedAutoplayAllowed(pref);
         });
         void (async () => {
-            try {
-                const migrated = await AsyncStorage.getItem('clips:feedAudioDefaultUnmuted_v1');
-                if (migrated !== '1') {
-                    await setGlobalVideoMutedNative(false);
-                    await AsyncStorage.setItem('clips:feedAudioDefaultUnmuted_v1', '1');
-                }
-            } catch {
-                /* ignore */
-            }
-            if (cancelled) return;
             const muted = await getGlobalVideoMutedNative();
             if (!cancelled) setFeedVideoMuted(muted);
         })();
@@ -2266,16 +2259,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }, []),
     );
 
-    const storiesRailFilter =
-        customLocation != null && String(customLocation).trim() !== ''
-            ? customFilterType === 'venue'
-                ? `venue:${customLocation}`
-                : customFilterType === 'landmark'
-                    ? `landmark:${customLocation}`
-                    : customLocation
-            : showFollowingFeed
-                ? 'discover'
-                : active;
+    const storiesRailFilter = 'following';
+    const railFilter = storiesRailFilter ?? 'following';
 
     React.useEffect(() => {
         if (!user?.id) {
@@ -2284,7 +2269,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         let cancelled = false;
         const load = () => {
-            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, storiesRailFilter).then((items) => {
+            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter).then((items) => {
                 if (!cancelled) setStories24Items(items);
             });
         };
@@ -2297,13 +2282,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (interval) clearInterval(interval);
             unsubRefresh();
         };
-    }, [user?.id, user?.handle, user?.avatarUrl, storiesRailFilter]);
+    }, [user?.id, user?.handle, user?.avatarUrl, railFilter]);
 
     useFocusEffect(
         React.useCallback(() => {
             if (!user?.id) return;
-            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, storiesRailFilter).then(setStories24Items);
-        }, [user?.id, user?.handle, user?.avatarUrl, storiesRailFilter]),
+            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter).then(setStories24Items);
+        }, [user?.id, user?.handle, user?.avatarUrl, railFilter]),
     );
 
     React.useEffect(() => {
@@ -3599,6 +3584,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }
                 merged = filterPostsForLocationFeed(merged, feedTab);
             }
+            console.log('[FeedScreen] applyFeedPageResult', {
+                feedTab,
+                incoming: items.length,
+                kept: merged.length,
+                sample: merged.slice(0, 5).map((p) => p.userHandle),
+            });
             if (merged.length > 0) {
                 setPages([merged]);
                 setCursor(nextCursor);
@@ -3684,10 +3675,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             const msg = err instanceof Error ? err.message : '';
             setError(
                 msg.includes('timed out')
-                    ? 'Feed load timed out — tap Retry'
-                    : msg
-                      ? `Failed to load feed (${msg.slice(0, 100)})`
-                      : 'Failed to load feed',
+                    ? 'Feed load timed out — pull to refresh'
+                    : describeFetchError(err),
             );
             // Keep just-created posts visible even when the feed fetch fails/times out.
             applyFeedPageResult([], null);
@@ -4085,6 +4074,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (isStories24AddYoursHandle(item.handle)) {
                 return;
             }
+            setStories24Items((prev) =>
+                prev.map((row) =>
+                    normalizeStories24Handle(row.handle) === normalizeStories24Handle(item.handle)
+                        ? { ...row, hasViewed: true }
+                        : row,
+                ),
+            );
             void snapshotStories24FeedScroll(feedScrollYRef.current);
             void persistStories24RailOpenHandle(item.handle);
             navigation.navigate('Stories', buildStories24StoryNavParams(item, railHandles));
@@ -4098,7 +4094,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
         if (!target && user?.id) {
             try {
-                items = await buildStories24RailItems(user.id, user.handle, user.avatarUrl, storiesRailFilter);
+                items = await buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter);
                 setStories24Items(items);
                 target = resolveStories24OpenTarget(items);
             } catch (err) {
@@ -4113,9 +4109,33 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             return;
         }
 
+        const ids =
+            target.item.storyIds && target.item.storyIds.length > 0
+                ? target.item.storyIds
+                : target.item.storyId
+                  ? [target.item.storyId]
+                  : [];
+        if (ids.length === 0) {
+            markStoryAsViewedLocal('', target.item.handle);
+        } else {
+            ids.forEach((id) => markStoryAsViewedLocal(id, target.item.handle));
+            if (user?.id) {
+                ids.forEach((id) => {
+                    void markStoryViewed(id, user.id, user.handle).catch(() => {});
+                });
+            }
+        }
+
+        setStories24Items((prev) =>
+            prev.map((row) =>
+                normalizeStories24Handle(row.handle) === normalizeStories24Handle(target.item.handle)
+                    ? { ...row, hasViewed: true }
+                    : row,
+            ),
+        );
         void persistStories24RailOpenHandle(target.item.handle);
         navigation.navigate('Stories', buildStories24StoryNavParams(target.item, target.railHandles));
-    }, [stories24Items, user?.id, user?.handle, navigation, storiesRailFilter]);
+    }, [stories24Items, user?.id, user?.handle, navigation, railFilter]);
 
     const previewLocalBusinessPosts = React.useMemo(() => {
         const posts = flatStream
@@ -4242,7 +4262,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
      * dimension noise as a full extraData change. Keep this to cheap flags that
      * are not in `data`: pending local uploads, pull-to-refresh, and focus.
      */
-    const feedExtraData = `${pendingUploadTick}-${Number(refreshing)}-${Number(isFeedFocused)}`;
+    const feedExtraData = `${pendingUploadTick}-${Number(refreshing)}-${Number(isFeedFocused)}-${storyViewedVersion}`;
 
     flatForRenderRef.current = flatForRender;
 
@@ -5226,7 +5246,11 @@ onVisitProfile={() =>
                               isFollowing: mergedPost.isFollowing === true,
                           })
                       }
-                    onViewStories={() =>
+                    onViewStories={() => {
+                        markStoryAsViewedLocal('', mergedPost.userHandle);
+                        if (mergedPost.originalUserHandle) {
+                            markStoryAsViewedLocal('', mergedPost.originalUserHandle);
+                        }
                         navigation.navigate('Stories', {
                             openUserHandle: mergedPost.userHandle,
                             targetHandle: mergedPost.userHandle,
@@ -5234,8 +5258,8 @@ onVisitProfile={() =>
                             forceRefreshAt: Date.now(),
                             skipStories24RailReturn: true,
                             fromStories24Rail: false,
-                        })
-                    }
+                        });
+                    }}
                     onBlockUser={async () => {
                         if (!user?.handle) return;
                         Alert.alert('Block user?', `Hide ${mergedPost.userHandle} from your feed?`, [
@@ -5366,7 +5390,7 @@ onVisitProfile={() =>
                 key={feedScopeListKey}
                 ref={flatListRef}
                 style={styles.feedList}
-                data={flatForRender}
+                data={flatForRender || []}
                 renderItem={renderItem}
                 keyExtractor={(item) => {
                     if (item.kind === 'post') return `post:${item.post.id}`;
@@ -5521,11 +5545,54 @@ onVisitProfile={() =>
                 }}
                 onEndReachedThreshold={0.5}
                 ListFooterComponent={
-                    loadingMore ? (
-                        <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="small" color="#8B5CF6" />
-                        </View>
-                    ) : null
+                    <>
+                        {loadingMore ? (
+                            <View style={styles.loadingContainer}>
+                                <ActivityIndicator size="small" color="#8B5CF6" />
+                            </View>
+                        ) : null}
+                        {!initialLoading && feedPostCount === 0 && (flatForRender || []).length > 0 ? (
+                            <View style={styles.emptyContainer}>
+                                {error ? (
+                                    <>
+                                        <Text style={styles.emptyFeedTitle}>Could not load feed</Text>
+                                        <Text style={styles.emptyFeedSubtitle}>{error}</Text>
+                                        <Text style={styles.emptyFeedSubtitle}>Pull down to refresh.</Text>
+                                        <TouchableOpacity style={styles.emptyFeedSecondaryBtn} onPress={retryFeedLoad}>
+                                            <Text style={styles.emptyFeedSecondaryBtnText}>Try again</Text>
+                                        </TouchableOpacity>
+                                    </>
+                                ) : (
+                                    <View style={FEED_EMPTY_CARD}>
+                                        <Text style={FEED_EMPTY_BADGE}>Your home feed</Text>
+                                        <Text style={FEED_EMPTY_TITLE}>
+                                            {currentFilter
+                                                ? `No posts in your ${currentFilter} feed yet`
+                                                : 'No posts yet'}
+                                        </Text>
+                                        <Text style={FEED_EMPTY_SUBTITLE}>
+                                            Pull down to refresh, or be the first to post here.
+                                        </Text>
+                                        <TouchableOpacity
+                                            activeOpacity={0.85}
+                                            onPress={() => navigation.navigate('InstantCreate')}
+                                        >
+                                            <LinearGradient
+                                                colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                start={{ x: 0, y: 0.5 }}
+                                                end={{ x: 1, y: 0.5 }}
+                                                style={FEED_EMPTY_GRADIENT_BTN}
+                                            >
+                                                <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                    Create a clip in this feed
+                                                </Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                            </View>
+                        ) : null}
+                    </>
                 }
                 ListEmptyComponent={
                     error && flatForRender.length === 0 ? (

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 const { userHasStoriesByHandleMock, userHasUnviewedStoriesByHandleMock } = vi.hoisted(() => ({
     userHasStoriesByHandleMock: vi.fn(),
@@ -11,7 +11,8 @@ vi.mock('../api/stories', () => ({
     userHasUnviewedStoriesByHandle: userHasUnviewedStoriesByHandleMock,
 }));
 
-import { useHasActiveStories, useStoryRingState } from './useHasActiveStories';
+import { markStoryAsViewed, resetStoryViewedStore } from '../utils/storyViewedStore';
+import { useHasActiveStories, useHasUnseenStory, useStoryRingState } from './useHasActiveStories';
 
 /**
  * The active-story ring feeds the feed header avatar and the quick-menu "View stories"
@@ -21,6 +22,7 @@ import { useHasActiveStories, useStoryRingState } from './useHasActiveStories';
  */
 describe('useHasActiveStories', () => {
     beforeEach(() => {
+        resetStoryViewedStore();
         userHasStoriesByHandleMock.mockReset();
         userHasUnviewedStoriesByHandleMock.mockReset();
         userHasStoriesByHandleMock.mockResolvedValue(false);
@@ -102,8 +104,65 @@ describe('useHasActiveStories', () => {
     });
 });
 
+describe('useHasUnseenStory', () => {
+    beforeEach(() => {
+        resetStoryViewedStore();
+        userHasStoriesByHandleMock.mockReset();
+        userHasUnviewedStoriesByHandleMock.mockReset();
+        userHasStoriesByHandleMock.mockResolvedValue(false);
+        userHasUnviewedStoriesByHandleMock.mockResolvedValue(false);
+    });
+
+    it('drops the gradient as soon as markStoryAsViewed fires for that user', async () => {
+        userHasStoriesByHandleMock.mockResolvedValue(true);
+        userHasUnviewedStoriesByHandleMock.mockResolvedValue(true);
+
+        const { result } = renderHook(() =>
+            useHasUnseenStory('Dana@Kerry', { viewerId: 'v1', isCurrentUser: false }),
+        );
+
+        await waitFor(() => expect(result.current).toBe(true));
+        act(() => {
+            markStoryAsViewed('story-dana', 'Dana@Kerry');
+        });
+        await waitFor(() => expect(result.current).toBe(false));
+    });
+
+    it('uses initialUnseen without probing when enabled is false', async () => {
+        const { result } = renderHook(() =>
+            useHasUnseenStory('Eve@Limerick', {
+                initialUnseen: true,
+                enabled: false,
+            }),
+        );
+
+        await waitFor(() => expect(result.current).toBe(true));
+        expect(userHasStoriesByHandleMock).not.toHaveBeenCalled();
+        act(() => {
+            markStoryAsViewed('', 'Eve@Limerick');
+        });
+        await waitFor(() => expect(result.current).toBe(false));
+    });
+
+    it('clears an inbox-style short handle when the full handle is marked viewed', async () => {
+        const { result } = renderHook(() =>
+            useHasUnseenStory('Barry@Galway', {
+                initialUnseen: true,
+                enabled: false,
+            }),
+        );
+
+        await waitFor(() => expect(result.current).toBe(true));
+        act(() => {
+            markStoryAsViewed('story-barry', 'Barry');
+        });
+        await waitFor(() => expect(result.current).toBe(false));
+    });
+});
+
 describe('useStoryRingState', () => {
     beforeEach(() => {
+        resetStoryViewedStore();
         userHasStoriesByHandleMock.mockReset();
         userHasUnviewedStoriesByHandleMock.mockReset();
         userHasStoriesByHandleMock.mockResolvedValue(false);

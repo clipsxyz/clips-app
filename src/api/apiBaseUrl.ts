@@ -1,4 +1,5 @@
 import {
+    DEV_LAN_API_HOST,
     DEV_LAN_API_BASE_URL,
     DEV_LOOPBACK_API_BASE_URL,
     DEV_ANDROID_EMULATOR_API_BASE_URL,
@@ -114,39 +115,35 @@ export function getApiBaseUrl(): string {
     if (isRn) {
         const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
         const envIsReachableLan = !!trimmedEnv && !isLoopbackApiHost(trimmedEnv);
+        const androidEmulator = isAndroidEmulator();
+        const fromMetro = getReactNativeDefaultApiBaseUrl();
 
-        // Configured LAN origin (e.g. http://192.168.x.x:8000/api) is the wireless
-        // path. Use it directly so login and media do not depend on `adb reverse`.
-        // Emulators keep 10.0.2.2 / loopback below.
-        if (envIsReachableLan && !isAndroidEmulator()) {
-            return trimmedEnv;
+        // Physical phones: always the .env LAN origin. Metro's scriptURL is often
+        // localhost via adb reverse (the phone itself) or a stale Wi‑Fi lease.
+        if (!androidEmulator) {
+            return envIsReachableLan ? trimmedEnv : DEV_LAN_API_BASE_URL;
         }
 
         // Trust the exact base that already answered this session before any guesswork —
         // otherwise a stale LAN IP baked into the bundle keeps media pointing at a dead host.
         const lastWorking = getLastWorkingApiBaseUrl();
-        if (lastWorking) {
+        if (lastWorking && (androidEmulator || !isLoopbackApiHost(lastWorking))) {
             return lastWorking;
         }
         const preferred = getPreferredRnApiHost();
-        if (preferred === 'loopback') {
-            return DEV_LOOPBACK_API_BASE_URL;
-        }
         if (preferred === 'emulator') {
             return DEV_ANDROID_EMULATOR_API_BASE_URL;
         }
         if (preferred === 'lan') {
             return DEV_LAN_API_BASE_URL;
         }
-        const fromMetro = getReactNativeDefaultApiBaseUrl();
+        if (preferred === 'loopback' && androidEmulator) {
+            return DEV_LOOPBACK_API_BASE_URL;
+        }
         let resolved: string;
-        if (fromMetro && isLoopbackApiHost(fromMetro)) {
-            // Metro is reached over loopback (adb reverse). Emulators/simulators keep
-            // loopback; physical devices already returned the LAN env URL above.
+        if (fromMetro && isLoopbackApiHost(fromMetro) && androidEmulator) {
             resolved = DEV_LOOPBACK_API_BASE_URL;
-        } else if (fromMetro) {
-            // Metro serves the bundle from the dev machine, so its host is the live one —
-            // prefer it over EXPO_PUBLIC_API_BASE_URL, which may pin a stale LAN address.
+        } else if (fromMetro && !isLoopbackApiHost(fromMetro)) {
             resolved = fromMetro.replace(/\/$/, '');
         } else if (envIsReachableLan) {
             resolved = trimmedEnv;
@@ -182,14 +179,21 @@ export function getApiBaseUrlCandidates(): string[] {
     const loopback = DEV_LOOPBACK_API_BASE_URL;
     const lan = DEV_LAN_API_BASE_URL;
     const emulator = DEV_ANDROID_EMULATOR_API_BASE_URL;
+    const fromMetro = getReactNativeDefaultApiBaseUrl()?.replace(/\/$/, '') || '';
     const preferred = getPreferredRnApiHost();
+    const skipLoopback = !isAndroidEmulator();
     const ordered: string[] = [];
-    const pushUnique = (url: string) => {
+    const pushUnique = (url: string, allowLoopback = false) => {
         const trimmed = url.replace(/\/$/, '');
-        if (trimmed && !ordered.includes(trimmed)) ordered.push(trimmed);
+        if (!trimmed || ordered.includes(trimmed)) return;
+        if (skipLoopback && isLoopbackApiHost(trimmed) && !allowLoopback) return;
+        ordered.push(trimmed);
     };
 
-    pushUnique(primary);
+    pushUnique(primary, isAndroidEmulator());
+    if (fromMetro && !isLoopbackApiHost(fromMetro) && fromMetro.includes(DEV_LAN_API_HOST)) {
+        pushUnique(fromMetro);
+    }
 
     if (preferred === 'loopback') {
         pushUnique(loopback);

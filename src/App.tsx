@@ -8285,7 +8285,6 @@ function FeedPageWrapper() {
         const groups = await fetchFollowedUsersStoryGroups(
           user.id,
           followedUserHandles || [],
-          currentFilter,
         );
         if (cancelled) return;
 
@@ -8360,7 +8359,7 @@ function FeedPageWrapper() {
       window.removeEventListener('storiesViewed', refreshStoriesRail as EventListener);
       window.removeEventListener('followToggled', refreshStoriesRail as EventListener);
     };
-  }, [user?.id, routerLocation.pathname, generateTextStoryPreview, currentFilter]);
+  }, [user?.id, routerLocation.pathname, generateTextStoryPreview]);
 
   const stories24Items = React.useMemo(() => {
     // Only real 24h stories belong here. Do NOT derive cards from feed posts â€” a newsfeed

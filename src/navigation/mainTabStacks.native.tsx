@@ -6,6 +6,8 @@ import BoostScreen from '../screens/BoostScreen';
 import SearchScreen from '../screens/SearchScreen';
 import InboxScreen from '../screens/InboxScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import PostDetailScreen from '../screens/PostDetailScreen';
+import ViewProfileScreen from '../screens/ViewProfileScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -83,7 +85,17 @@ function createMainTabStack(
 export const HomeTabStack = createMainTabStack('Feed', HomeFeedScreen);
 export const BoostTabStack = createMainTabStack('BoostMain', BoostScreen);
 export const SearchTabStack = createMainTabStack('SearchMain', SearchScreen);
-export const InboxTabStack = createMainTabStack('InboxMain', InboxScreen);
+
+export function InboxTabStack() {
+    return (
+        <Stack.Navigator screenOptions={stackScreenOptions}>
+            <Stack.Screen name="InboxMain" component={InboxScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="PostDetail" component={PostDetailScreen} />
+            <Stack.Screen name="ViewProfile" component={ViewProfileScreen} />
+        </Stack.Navigator>
+    );
+}
 
 const styles = StyleSheet.create({
     homeTabRoot: {

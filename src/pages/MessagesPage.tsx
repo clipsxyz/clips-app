@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiTrash2, FiPlay, FiPause, FiSquare } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiCamera, FiTrash2, FiPlay, FiPause, FiSquare } from 'react-icons/fi';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
 import { MdStickyNote2, MdTranslate } from 'react-icons/md';
@@ -2141,6 +2141,11 @@ export default function MessagesPage() {
             fileInputRef.current.value = '';
         }
 
+        if (!String(file.type || '').toLowerCase().startsWith('image/')) {
+            showToast?.('Choose a photo. Videos cannot be sent from chat.');
+            return;
+        }
+
         const reader = new FileReader();
         reader.onloadend = () => {
             const imageUrl = reader.result as string;
@@ -3828,7 +3833,7 @@ export default function MessagesPage() {
                                     size="sm"
                                     className="h-8 w-8 shrink-0"
                                 />
-                                <div className="flex min-h-10 flex-1 min-w-0 items-center rounded-full bg-[#16181C] px-3.5">
+                                <div className="flex min-h-10 flex-1 min-w-0 items-center rounded-full bg-[#16181C] pl-3.5 pr-1.5">
                                     <input
                                         type="text"
                                         value={messageText}
@@ -3843,6 +3848,14 @@ export default function MessagesPage() {
                                         placeholder={editingMessage ? 'Edit message…' : 'Message…'}
                                         className="min-w-0 flex-1 bg-transparent py-2.5 text-[15px] text-white placeholder:text-[#8B98A5] focus:outline-none"
                                     />
+                                    <button
+                                        type="button"
+                                        onClick={handleImageClick}
+                                        className="flex-shrink-0 p-2 text-neutral-300 hover:text-white"
+                                        aria-label="Attach photo"
+                                    >
+                                        <FiCamera className="w-5 h-5" />
+                                    </button>
                                 </div>
                             </>
                         )}

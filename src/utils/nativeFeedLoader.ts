@@ -80,7 +80,7 @@ export async function fetchVisibleFeedPage(
         return { items, nextCursor: page.nextCursor ?? null };
     } catch (err) {
         console.error('fetchVisibleFeedPage failed:', err);
-        return { items: [], nextCursor: null };
+        throw err;
     }
 }
 

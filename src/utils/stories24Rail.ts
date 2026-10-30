@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
+import { isHandleStoryRingSeen, storyHasViewed } from './storyViewedStore';
 import { getFollowedUsers, posts as localPosts } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
@@ -17,6 +18,11 @@ export type Stories24RailItem = {
     subtitle?: string;
     thumb?: string;
     previewVideoUrl?: string;
+    /** Latest story id — used to mark seen on rail tap. */
+    storyId?: string;
+    storyIds?: string[];
+    /** True when every active story on this card has been viewed. */
+    hasViewed?: boolean;
     /**
      * Poster's real profile avatar. Preferred source for the rail ring and the
      * StoriesPromoCard avatar stack. Deliberately separate from the mock-map
@@ -155,13 +161,12 @@ export async function buildStories24RailItems(
     userId: string,
     userHandle?: string | null,
     viewerAvatarUrl?: string | null,
-    filter?: string | null,
+    _filter: string | null = 'following',
 ): Promise<Stories24RailItem[]> {
     const followedUserHandles = await getFollowedUsers(userId);
     const groups = await fetchFollowedUsersStoryGroups(
         userId,
         followedUserHandles || [],
-        filter?.trim() || undefined,
     );
     const normalizedViewerHandle = (userHandle || '').trim().toLowerCase();
     const viewerAvatar = (viewerAvatarUrl || '').trim() || undefined;
@@ -241,12 +246,19 @@ export async function buildStories24RailItems(
         const isViewerGroup =
             !!normalizedViewerHandle &&
             group.userHandle.trim().toLowerCase() === normalizedViewerHandle;
+        const storyIds = sortedStories.map((s) => s.id).filter(Boolean);
+        const hasViewed =
+            isHandleStoryRingSeen(group.userHandle) ||
+            (sortedStories.length > 0 && sortedStories.every((s) => storyHasViewed(s)));
         nextItems.push({
             handle: group.userHandle,
             title,
             subtitle,
             thumb,
             previewVideoUrl,
+            storyId: latest.id,
+            storyIds,
+            hasViewed,
             // Stamp Auth avatar onto the viewer's own rail card so Passport / feed / stories match.
             avatarUrl: isViewerGroup && viewerAvatar ? viewerAvatar : posterAvatarUrl,
         });

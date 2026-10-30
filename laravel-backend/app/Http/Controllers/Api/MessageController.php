@@ -138,15 +138,18 @@ class MessageController extends Controller
                     : $latestMessage->sender_handle;
 
                 $otherUser = User::where('handle', $otherHandle)->first();
+                if (!$otherUser) {
+                    continue;
+                }
 
                 $conversations[] = [
                     'type' => 'dm',
                     'conversation_id' => $conversationId,
-                    'other_user' => $otherUser ? [
+                    'other_user' => [
                         'handle' => $otherUser->handle,
                         'display_name' => $otherUser->display_name,
                         'avatar_url' => $otherUser->avatar_url,
-                    ] : null,
+                    ],
                     'latest_message' => $latestMessage,
                     'unread_count' => strcasecmp((string) $latestMessage->sender_handle, (string) $user->handle) === 0
                         ? 0

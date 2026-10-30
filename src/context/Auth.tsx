@@ -7,10 +7,11 @@ import { connectSocket, disconnectSocket } from '../services/socketio';
 import { db } from '../utils/db';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import {
-  clearAuthToken,
-  getAuthTokenAsync,
-  hydrateAuthTokenFromStorage,
+    clearAuthToken,
+    getAuthTokenAsync,
+    hydrateAuthTokenFromStorage,
 } from '../utils/authTokenBridge';
+import { onUnauthorized } from '../utils/authSessionEvents';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 const USER_STORAGE_KEY = 'user';
@@ -68,15 +69,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const authRefreshGenRef = React.useRef(0);
 
   React.useEffect(() => {
-    void hydrateAuthTokenFromStorage();
-  }, []);
-
-  React.useEffect(() => {
     let cancelled = false;
     const refreshGen = authRefreshGenRef.current;
 
     void (async () => {
       try {
+      await hydrateAuthTokenFromStorage();
       await Promise.all([hydratePrivacyStorage(), hydrateUserFromNativeStorage()]);
       if (cancelled) return;
 
@@ -442,6 +440,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })();
   };
+
+  const userRef = React.useRef(user);
+  userRef.current = user;
+  const logoutRef = React.useRef(logout);
+  logoutRef.current = logout;
+
+  React.useEffect(() => {
+    return onUnauthorized(() => {
+      if (!userRef.current) return;
+      logoutRef.current();
+    });
+  }, []);
 
   return <Ctx.Provider value={{ user, ready, login, logout }}>{children}</Ctx.Provider>;
 }

@@ -50,6 +50,7 @@ import {
     fetchFollowedUsersStoryGroups,
     fetchStoryGroupByHandle,
     fetchUserStories, 
+    markStoryAsViewedLocal,
     markStoryViewed, 
     incrementStoryViews,
     addStoryReaction,
@@ -183,6 +184,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [isSendingReply, setIsSendingReply] = useState(false);
     const [showStoryShareModal, setShowStoryShareModal] = useState(false);
     const [showInsightsSheet, setShowInsightsSheet] = useState(false);
+    const [insightsStoryId, setInsightsStoryId] = useState<string | null>(null);
     const [replyText, setReplyText] = useState('');
     const [insightsAvatarMap, setInsightsAvatarMap] = useState<Record<string, string | undefined>>({});
     const [isHoldingToPause, setIsHoldingToPause] = useState(false);
@@ -605,6 +607,13 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const startViewingStories = async (group: StoryGroup, preferredStoryId?: string) => {
         if (!group || !user?.id || !group.stories || group.stories.length === 0) return;
+        const authorHandle = group.userHandle;
+        const ids = (group.stories || []).map((s) => s.id).filter(Boolean);
+        if (ids.length === 0) {
+            markStoryAsViewedLocal('', authorHandle);
+        } else {
+            ids.forEach((id) => markStoryAsViewedLocal(id, authorHandle));
+        }
 
         if (isGazetteerWorldGroup(group)) {
             const groupIndex = storyGroups.findIndex((g) => isGazetteerWorldGroup(g));
@@ -869,12 +878,10 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (now - lastLikeTapAtRef.current < 420) return;
         if (now - lastMuteToggleAtRef.current < 260) return;
         lastMuteToggleAtRef.current = now;
-        setIsMuted((prev) => {
-            const next = !prev;
-            void setGlobalVideoMutedNative(next);
-            return next;
-        });
-    }, []);
+        const next = !isMuted;
+        setIsMuted(next);
+        void setGlobalVideoMutedNative(next);
+    }, [isMuted]);
 
     const handleStoryFollowQuickToggle = async () => {
         if (!currentGroup?.userHandle || !user?.id || !user?.handle || isFollowLoading) return;
@@ -1243,13 +1250,20 @@ export default function StoriesScreen({ route, navigation }: any) {
     };
 
     useEffect(() => {
-        const currentGroup = storyGroups[currentGroupIndex];
-        const currentStory = currentGroup?.stories[currentStoryIndex];
-        if (!currentStory || !user?.id || !viewingStories) return;
+        const fromRoute = String(normalizedOpenUserHandle || targetHandle || '').trim();
+        if (fromRoute) markStoryAsViewedLocal('', fromRoute);
+    }, [normalizedOpenUserHandle, targetHandle]);
 
-        markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
-        incrementStoryViews(currentStory.id).catch(console.error);
-    }, [currentGroupIndex, currentStoryIndex, viewingStories]);
+    const viewingAuthorHandle = storyGroups[currentGroupIndex]?.userHandle
+        || storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex]?.userHandle;
+    const viewingStoryId = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex]?.id;
+    useEffect(() => {
+        if (!viewingAuthorHandle) return;
+        markStoryAsViewedLocal(viewingStoryId || '', viewingAuthorHandle);
+        if (!viewingStoryId || !user?.id) return;
+        markStoryViewed(viewingStoryId, user.id, user.handle, viewingAuthorHandle).catch(console.error);
+        incrementStoryViews(viewingStoryId).catch(console.error);
+    }, [viewingAuthorHandle, viewingStoryId, user?.id, user?.handle]);
 
     useEffect(() => {
         const effectivelyPaused = paused || isHoldingToPause;
@@ -1481,26 +1495,6 @@ export default function StoriesScreen({ route, navigation }: any) {
                         </View>
                     ) : null}
 
-                    {isViewingOwnStory ? (
-                        <TouchableOpacity
-                            style={styles.ownerInsightsBar}
-                            onPress={() => {
-                                setShowInsightsSheet(true);
-                                setPaused(true);
-                            }}
-                        >
-                            <Text style={styles.ownerInsightsText}>
-                                {(currentStory.views ?? 0)} views •{' '}
-                                {(currentStory.reactions?.filter(
-                                    (r) =>
-                                        (r.userHandle || '').trim().toLowerCase() !==
-                                        (user?.handle || '').trim().toLowerCase(),
-                                ).length ?? 0)}{' '}
-                                reactions • {(currentStory.replies?.length ?? 0)} replies
-                            </Text>
-                        </TouchableOpacity>
-                    ) : null}
-
                     {showMediaTextOverlay ? (
                         <View style={styles.mediaTextCard}>
                             <StoryTextOverlay
@@ -1572,8 +1566,11 @@ export default function StoriesScreen({ route, navigation }: any) {
                     <StoryBottomBar
                         hidden={isHoldingToPause}
                         ownerMode={isViewingOwnStory}
-                        ownerSummary={`${currentStory.views ?? 0} views · tap for insights`}
+                        ownerSummary={`${currentStory.views ?? 0} views • Tap for insights`}
                         onOpenInsights={() => {
+                            const id = currentStory.id;
+                            if (!id) return;
+                            setInsightsStoryId(id);
                             setShowInsightsSheet(true);
                             setPaused(true);
                         }}
@@ -1776,12 +1773,18 @@ export default function StoriesScreen({ route, navigation }: any) {
 
             {isViewingOwnStory && currentStory && user?.id && user?.handle ? (
                 <StoryInsightsSheet
-                    visible={showInsightsSheet}
+                    visible={showInsightsSheet && Boolean(insightsStoryId || currentStory.id)}
                     onClose={() => {
                         setShowInsightsSheet(false);
+                        setInsightsStoryId(null);
                         if (!showInlineReplyComposer) setPaused(false);
                     }}
-                    story={currentStory}
+                    storyId={insightsStoryId || currentStory.id}
+                    story={
+                        (insightsStoryId
+                            ? currentGroup?.stories.find((s) => s.id === insightsStoryId)
+                            : null) || currentStory
+                    }
                     currentUserId={user.id}
                     currentUserHandle={user.handle}
                     avatarMap={insightsAvatarMap}
@@ -1865,24 +1868,6 @@ const styles = StyleSheet.create({
         zIndex: 140,
         elevation: 140,
     },
-    ownerInsightsBar: {
-        position: 'absolute',
-        top: 72,
-        left: 16,
-        right: 16,
-        zIndex: 65,
-        borderRadius: ox(999),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
-        backgroundColor: 'rgba(0,0,0,0.45)',
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(8),
-    },
-    ownerInsightsText: {
-        color: 'rgba(255,255,255,0.9)',
-        fontSize: ox(11),
-        textAlign: 'center',
-    },
     progressContainer: {
         position: 'absolute',
         top: 0,
@@ -1899,7 +1884,6 @@ const styles = StyleSheet.create({
         top: 0,
         left: 0,
         right: 0,
-        bottom: 0,
         zIndex: 130,
         elevation: 130,
     },

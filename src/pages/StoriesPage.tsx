@@ -307,6 +307,7 @@ export default function StoriesPage() {
     const [replyText, setReplyText] = React.useState('');
     const [showStoryShareModal, setShowStoryShareModal] = React.useState(false);
     const [showInsightsSheet, setShowInsightsSheet] = React.useState(false);
+    const [insightsStoryId, setInsightsStoryId] = React.useState<string | null>(null);
     const [insightsTab, setInsightsTab] = React.useState<'viewers' | 'replies'>('viewers');
     const [viewerFollowMap, setViewerFollowMap] = React.useState<Record<string, boolean>>({});
     const [viewerFollowLoadingHandle, setViewerFollowLoadingHandle] = React.useState<string | null>(null);
@@ -1758,7 +1759,14 @@ export default function StoriesPage() {
     const isViewingOwnStory = !!(currentGroup && user && (currentGroup.userId === user.id || currentGroup.userHandle === user.handle));
     const storyViewsCount = Number(currentStory?.views || 0);
     const storyRepliesCount = Number(currentStory?.replies?.length || 0);
+    const storyReactionsCount = Number(currentStory?.reactions?.length || 0);
     const storyViewerHandles = Array.from(new Set((currentStory?.viewerHandles || []).filter(Boolean)));
+    const storyInsightsKind =
+        currentStory?.mediaType === 'video'
+            ? 'Video story'
+            : (currentStory?.mediaUrl || '').trim()
+              ? 'Photo story'
+              : 'Text story';
     const hasStories = storyGroups.length > 0;
 
     // Story viewing UI
@@ -2917,25 +2925,6 @@ export default function StoriesPage() {
                         </div>
                     )}
 
-                    {isViewingOwnStory && (
-                        <div className="absolute top-16 left-0 right-0 px-4 z-50" data-story-interactive>
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowInsightsSheet(true);
-                                }}
-                                className="w-full max-w-md mx-auto rounded-full border border-white/20 bg-black/45 backdrop-blur-sm px-3 py-1.5 text-[11px] text-white/90 flex items-center justify-between"
-                            >
-                                <span>{storyViewsCount} views</span>
-                                <span className="opacity-60">•</span>
-                                <span>{storyRepliesCount} replies</span>
-                                <span className="opacity-60">•</span>
-                                <span className="text-white/70">tap for insights</span>
-                            </button>
-                        </div>
-                    )}
-
                     {/* Story Text - Only show for original stories (not feed re-shares),
                         and only if media is not a generated text image (data URL) */}
                     {currentStoryText && !currentStory?.sharedFromPost && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
@@ -3067,14 +3056,27 @@ export default function StoriesPage() {
                     )}
 
                     {/* Bottom Action Bar - Instagram Style */}
-                    <div className="absolute bottom-0 left-0 right-0 z-[60] px-2 pb-4" data-story-interactive>
+                    <div className="absolute bottom-0 left-0 right-0 z-[60] pointer-events-none px-4 pt-8 pb-5" data-story-interactive>
                         <div
-                            className="flex items-center gap-1.5 max-w-md mx-auto"
+                            className="flex items-center gap-2 max-w-md mx-auto pointer-events-auto"
                             style={{ flexWrap: 'nowrap' }}
                             onClickCapture={stopStoryControlPropagation}
                         >
-                            {/* Send Message Input */}
-                            {showReplyComposer ? (
+                            {isViewingOwnStory ? (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const id = currentStory?.id;
+                                        if (!id) return;
+                                        setInsightsStoryId(id);
+                                        setShowInsightsSheet(true);
+                                    }}
+                                    className="flex-1 rounded-full border border-white/30 bg-black/60 backdrop-blur-md px-4 py-3 text-center text-[13px] font-semibold text-white/95"
+                                >
+                                    {storyViewsCount} views • Tap for insights
+                                </button>
+                            ) : showReplyComposer ? (
                                 <div className="flex-1 flex items-center gap-1.5">
                                     <input
                                         type="text"
@@ -3127,6 +3129,7 @@ export default function StoriesPage() {
                                     onPointerUp={(e) => {
                                         e.stopPropagation();
                                         e.preventDefault();
+                                        if (isViewingOwnStory) return;
                                         setShowReplyComposer(true);
                                     }}
                                     onTouchEnd={(e) => {
@@ -3144,7 +3147,7 @@ export default function StoriesPage() {
                                 </button>
                             )}
                             
-                            {/* Like Button */}
+                            {!isViewingOwnStory ? (
                             <button
                                 type="button"
                                 onPointerUp={(e) => {
@@ -3165,6 +3168,7 @@ export default function StoriesPage() {
                             >
                                 <FiThumbsUp className={`w-5 h-5 ${(localReactionByStoryId[currentStory?.id || ''] || currentStory?.userReaction) ? 'text-cyan-400' : 'text-white'}`} />
                             </button>
+                            ) : null}
 
                             {/* Share Button */}
                             <button
@@ -3401,27 +3405,57 @@ export default function StoriesPage() {
                 )}
 
                 {/* Owner Insights Sheet */}
-                {showInsightsSheet && isViewingOwnStory && currentStory && (
+                {showInsightsSheet && isViewingOwnStory && currentStory && (insightsStoryId || currentStory.id) && (
                     <div
                         className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-end"
-                        onClick={() => setShowInsightsSheet(false)}
+                        onClick={() => {
+                            setShowInsightsSheet(false);
+                            setInsightsStoryId(null);
+                        }}
                     >
                         <div
-                            className="w-full bg-gray-900 text-white rounded-t-3xl p-4 pb-6 animate-in slide-in-from-bottom duration-300 max-h-[75vh] overflow-y-auto"
+                            className="relative w-full bg-gray-900 text-white rounded-t-3xl pt-5 pb-6 animate-in slide-in-from-bottom duration-300 max-h-[75vh] overflow-y-auto"
                             onClick={(e) => e.stopPropagation()}
                         >
-                            <div className="w-12 h-1.5 bg-white/25 rounded-full mx-auto mb-3" />
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-base font-semibold">Story insights</h3>
-                                <button
-                                    onClick={() => setShowInsightsSheet(false)}
-                                    className="p-2 rounded-full hover:bg-gray-800 transition-colors"
-                                >
-                                    <FiX className="w-5 h-5 text-gray-300" />
-                                </button>
+                            <div className="w-12 h-1.5 bg-white/25 rounded-full mx-auto" />
+                            <div className="flex flex-col gap-1 px-4 pr-12 mt-5">
+                                <h3 className="text-base font-semibold">Story Insights</h3>
+                                <p className="text-[13px] leading-[18px] text-white/80">
+                                    {storyViewsCount} total views / Unique viewers: {storyViewerHandles.length}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowInsightsSheet(false);
+                                    setInsightsStoryId(null);
+                                }}
+                                className="absolute top-4 right-4 z-10 p-2 rounded-full hover:bg-gray-800 transition-colors"
+                            >
+                                <FiX className="w-5 h-5 text-gray-300" />
+                            </button>
+
+                            <div className="flex items-center gap-3 mb-4 mt-4 px-4">
+                                {(currentStory.mediaUrl || '').trim() && currentStory.mediaType !== 'video' ? (
+                                    <img
+                                        src={currentStory.mediaUrl}
+                                        alt=""
+                                        className="w-14 h-14 rounded-lg object-cover bg-white/10 shrink-0"
+                                    />
+                                ) : (
+                                    <div className="w-14 h-14 rounded-lg bg-white/10 shrink-0 flex items-center justify-center text-[10px] font-semibold text-white/80 px-1 text-center leading-tight">
+                                        {storyInsightsKind}
+                                    </div>
+                                )}
+                                <div className="flex flex-col min-w-0">
+                                    <div className="text-sm font-semibold text-white">{storyInsightsKind}</div>
+                                    <div className="text-xs text-white/75">
+                                        {storyViewsCount} views • {storyReactionsCount} reactions • {storyRepliesCount} replies
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-2 mb-4">
+                            <div className="grid grid-cols-2 gap-2 mb-4 px-4">
                                 <button
                                     onClick={() => setInsightsTab('viewers')}
                                     className={`px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
@@ -3445,13 +3479,7 @@ export default function StoriesPage() {
                             </div>
 
                             {insightsTab === 'viewers' ? (
-                                <div className="space-y-2">
-                                    <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm">
-                                        <div className="font-semibold text-white mb-1">{storyViewsCount} total views</div>
-                                        <div className="text-white/70">
-                                            Unique viewers: {storyViewerHandles.length}
-                                        </div>
-                                    </div>
+                                <div className="space-y-2 px-4">
                                     {storyViewerHandles.length === 0 ? (
                                         <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
                                             No viewer identities yet.
@@ -3521,7 +3549,7 @@ export default function StoriesPage() {
                                     )}
                                 </div>
                             ) : (
-                                <div className="space-y-2">
+                                <div className="space-y-2 px-4">
                                     {(currentStory.replies || []).length === 0 ? (
                                         <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
                                             No replies yet.

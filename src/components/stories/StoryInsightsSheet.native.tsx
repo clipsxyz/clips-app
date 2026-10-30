@@ -7,7 +7,7 @@ import {
     ActivityIndicator,
     Image,
 } from 'react-native';
-import { BottomSheetScrollView, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
 import { getFollowedUsers } from '../../api/posts';
@@ -21,6 +21,7 @@ import { UCL_CANVAS_NAVY, UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../../t
 type Props = {
     visible: boolean;
     onClose: () => void;
+    storyId: string;
     story: Story;
     currentUserId: string;
     currentUserHandle: string;
@@ -36,6 +37,7 @@ type Props = {
 export default function StoryInsightsSheet({
     visible,
     onClose,
+    storyId,
     story,
     currentUserId,
     currentUserHandle,
@@ -48,6 +50,7 @@ export default function StoryInsightsSheet({
     const [followLoadingHandle, setFollowLoadingHandle] = useState<string | null>(null);
 
     const ownerNorm = currentUserHandle.trim().toLowerCase();
+    const activeStoryId = storyId || story.id;
     const viewsCount = Number(story.views || 0);
     const replies = (story.replies || []).filter(
         (r) => (r.userHandle || '').trim().toLowerCase() !== ownerNorm,
@@ -67,7 +70,7 @@ export default function StoryInsightsSheet({
 
     useEffect(() => {
         if (!visible) setTab('viewers');
-    }, [visible, story.id]);
+    }, [visible, activeStoryId]);
 
     useEffect(() => {
         if (!visible || tab !== 'viewers' || !currentUserId) return;
@@ -134,13 +137,25 @@ export default function StoryInsightsSheet({
             backgroundStyle={GAZETTEER_SHEET_INBOX.background}
             handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
         >
-            <BottomSheetView style={styles.headerBlock}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Story insights</Text>
-                    <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <BottomSheetScrollView
+                contentContainerStyle={styles.content}
+                style={styles.scroll}
+            >
+                <View style={styles.titleRow}>
+                    <Text style={styles.title}>Story Insights</Text>
+                    <TouchableOpacity
+                        onPress={onClose}
+                        style={styles.closeBtn}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Close story insights"
+                    >
                         <Icon name="close" size={22} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
+                <Text style={styles.subtitle}>
+                    {viewsCount} total views / Unique viewers: {viewerHandles.length}
+                </Text>
 
                 <View style={styles.storyPreviewRow}>
                     {storyThumb && story.mediaType !== 'video' ? (
@@ -157,11 +172,15 @@ export default function StoryInsightsSheet({
                         </View>
                     )}
                     <View style={styles.storyPreviewMeta}>
-                        <Text style={styles.storyPreviewTitle} numberOfLines={2}>
-                            {storyText || (story.mediaType === 'video' ? 'Video story' : 'Photo story')}
+                        <Text style={styles.storyPreviewTitle} numberOfLines={1}>
+                            {story.mediaType === 'video'
+                                ? 'Video story'
+                                : storyThumb
+                                  ? 'Photo story'
+                                  : 'Text story'}
                         </Text>
                         <Text style={styles.storyPreviewSub}>
-                            {viewsCount} views · {reactions.length} reactions · {replies.length} replies
+                            {viewsCount} views • {reactions.length} reactions • {replies.length} replies
                         </Text>
                     </View>
                 </View>
@@ -192,20 +211,9 @@ export default function StoryInsightsSheet({
                         </Text>
                     </TouchableOpacity>
                 </View>
-            </BottomSheetView>
 
-            <BottomSheetScrollView
-                contentContainerStyle={styles.scrollContent}
-                style={styles.scroll}
-            >
                 {tab === 'viewers' ? (
                     <>
-                        <View style={styles.summaryCard}>
-                            <Text style={styles.summaryTitle}>{viewsCount} total views</Text>
-                            <Text style={styles.summarySub}>
-                                Unique viewers: {viewerHandles.length}
-                            </Text>
-                        </View>
                         {viewerHandles.length === 0 ? (
                             <Text style={styles.empty}>No viewer identities yet.</Text>
                         ) : (
@@ -312,28 +320,43 @@ export default function StoryInsightsSheet({
 }
 
 const styles = StyleSheet.create({
-    headerBlock: {
+    scroll: { flex: 1 },
+    content: {
+        paddingTop: 24,
         paddingHorizontal: 16,
-        paddingTop: 4,
+        paddingBottom: 40,
     },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
+    titleRow: {
+        position: 'relative',
+        minHeight: 38,
+        justifyContent: 'center',
+        paddingRight: 40,
+        marginBottom: 8,
     },
     title: { color: UCL_TEXT_PRIMARY, fontSize: 16, fontWeight: '600' },
-    closeBtn: { padding: 8 },
+    subtitle: {
+        color: '#E2E8F0',
+        fontSize: 13,
+        lineHeight: 18,
+        marginBottom: 16,
+    },
+    closeBtn: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        zIndex: 2,
+        padding: 8,
+    },
     storyPreviewRow: {
         flexDirection: 'row',
-        gap: 12,
-        marginBottom: 14,
         alignItems: 'center',
+        gap: 12,
+        marginBottom: 16,
     },
     storyPreviewThumb: {
         width: 56,
-        height: 72,
-        borderRadius: 10,
+        height: 56,
+        borderRadius: 8,
         backgroundColor: 'rgba(255,255,255,0.08)',
     },
     storyPreviewFallback: {
@@ -342,8 +365,8 @@ const styles = StyleSheet.create({
     },
     storyPreviewTextBox: {
         width: 56,
-        height: 72,
-        borderRadius: 10,
+        height: 56,
+        borderRadius: 8,
         backgroundColor: 'rgba(255,255,255,0.08)',
         padding: 6,
         justifyContent: 'center',
@@ -354,15 +377,24 @@ const styles = StyleSheet.create({
         lineHeight: 11,
         fontWeight: '600',
     },
-    storyPreviewMeta: { flex: 1, minWidth: 0 },
+    storyPreviewMeta: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'column',
+        justifyContent: 'center',
+    },
     storyPreviewTitle: {
         color: UCL_TEXT_PRIMARY,
         fontSize: 14,
         fontWeight: '600',
         marginBottom: 4,
     },
-    storyPreviewSub: { color: '#E2E8F0', fontSize: 12 },
-    tabRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
+    storyPreviewSub: { color: '#E2E8F0', fontSize: 12, lineHeight: 16 },
+    tabRow: {
+        flexDirection: 'row',
+        gap: 6,
+        marginBottom: 12,
+    },
     tab: {
         flex: 1,
         paddingVertical: 9,
@@ -379,18 +411,6 @@ const styles = StyleSheet.create({
     },
     tabText: { color: '#E2E8F0', fontSize: 11, fontWeight: '600', textAlign: 'center' },
     tabTextActive: { color: UCL_CANVAS_NAVY },
-    scroll: { flex: 1 },
-    scrollContent: { paddingHorizontal: 16, paddingBottom: 40 },
-    summaryCard: {
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-    },
-    summaryTitle: { color: UCL_TEXT_PRIMARY, fontSize: 14, fontWeight: '700' },
-    summarySub: { color: '#E2E8F0', fontSize: 12, marginTop: 4 },
     empty: { color: UCL_TEXT_PLACEHOLDER, fontSize: 13, lineHeight: 18, paddingVertical: 16 },
     viewerRow: {
         flexDirection: 'row',

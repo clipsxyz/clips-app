@@ -94,8 +94,8 @@ function deriveConfiguredApiHost(): string | null {
   return null;
 }
 
-/** LAN host when the phone cannot reach localhost (adb reverse drops); loopback last resort. */
-export const DEV_LAN_API_HOST = deriveConfiguredApiHost() ?? '127.0.0.1';
+/** LAN host when the phone cannot reach localhost (adb reverse drops). Never default to loopback. */
+export const DEV_LAN_API_HOST = deriveConfiguredApiHost() ?? '192.168.1.15';
 export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
 export const DEV_LOOPBACK_API_BASE_URL = 'http://127.0.0.1:8000/api';
 export const DEV_ANDROID_EMULATOR_API_HOST = '10.0.2.2';
@@ -123,6 +123,11 @@ export function rememberSuccessfulApiBaseUrl(apiBaseUrl: string): void {
   try {
     const trimmed = String(apiBaseUrl || '').trim().replace(/\/$/, '');
     if (!trimmed) return;
+    // Physical Android cannot use loopback; pinning it poisons the rest of the session.
+    if (isLoopbackApiHost(trimmed)) {
+      preferredRnApiHost = 'loopback';
+      return;
+    }
     lastWorkingApiBaseUrl = trimmed;
     const host = new URL(trimmed).hostname;
     if (host === '127.0.0.1' || host === 'localhost') {
@@ -201,39 +206,38 @@ export function isViteDevMode(): boolean {
 /**
  * Default Laravel API URL when running under Metro (no window.location).
  *
- * Physical Android: prefer `http://localhost:8000/api` with
- * `adb reverse tcp:8000 tcp:8000` (never 10.0.2.2 — that only works on emulators).
- * Wi‑Fi Metro (e.g. 192.168.x.x:8081) may use the same LAN host for Laravel.
+ * Physical Android never uses localhost/127.0.0.1 — those are the phone itself.
+ * Metro over `adb reverse` still reports localhost:8081; map API to the LAN env
+ * origin (`EXPO_PUBLIC_API_BASE_URL`, e.g. http://192.168.1.15:8000/api).
+ * Emulators use 10.0.2.2 via getApiBaseUrl, not this helper.
  */
 export function getReactNativeDefaultApiBaseUrl(): string | null {
   if (typeof require === 'undefined') return null;
+  const envLan = getConfiguredApiEnvUrl()?.replace(/\/$/, '') || '';
+  const lanFallback =
+    envLan && !isLoopbackApiHost(envLan) ? envLan : DEV_LAN_API_BASE_URL;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { NativeModules } = require('react-native') as typeof import('react-native');
     const port = '8000';
-    const localhostApi = `http://localhost:${port}/api`;
 
     const scriptUrl = (NativeModules as any)?.SourceCode?.scriptURL as string | undefined;
     if (scriptUrl) {
       try {
         const parsed = new URL(scriptUrl);
         const host = parsed.hostname;
-        // LAN / Wi‑Fi Metro → same host for Laravel when not using ADB reverse for API.
-        if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        // Metro's scriptURL host is often a *previous* Wi‑Fi lease (e.g. .13 after
+        // the Mac moved to .15). Only trust it when it matches the configured LAN.
+        if (host && host === DEV_LAN_API_HOST) {
           return `http://${host}:${port}/api`;
-        }
-        // USB / wireless ADB with Metro on localhost — API via `adb reverse tcp:8000`.
-        if (host === 'localhost' || host === '127.0.0.1') {
-          return localhostApi;
         }
       } catch {
         /* ignore malformed script URL */
       }
     }
 
-    // Physical device + emulator fallback: localhost (requires adb reverse on hardware).
-    return localhostApi;
+    return lanFallback;
   } catch {
-    return null;
+    return lanFallback;
   }
 }

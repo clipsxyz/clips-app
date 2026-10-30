@@ -1,5 +1,11 @@
 export type MainTabName = 'Home' | 'Boost' | 'Create' | 'Search' | 'Inbox';
 
+export const MAIN_TAB_NAMES: readonly MainTabName[] = ['Home', 'Boost', 'Create', 'Search', 'Inbox'];
+
+export function isMainTabName(name: string | undefined): name is MainTabName {
+    return !!name && (MAIN_TAB_NAMES as readonly string[]).includes(name);
+}
+
 /** Navigate to a primary tab from stack or nested tab screens. */
 export function navigateMainTab(
     navigation: { navigate: (name: string, params?: object) => void },

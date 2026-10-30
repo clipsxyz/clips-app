@@ -53,17 +53,88 @@ export default function StoryShareSheet({ visible, onClose, userHandle, storyId 
     const bareHandle = userHandle.replace(/^@/, '');
     const shareText = `Check out this story by @${bareHandle}\n${shareUrl}`;
 
-    const openExternal = async (url: string) => {
+    const shareSystem = async () => {
         try {
-            const can = await Linking.canOpenURL(url);
-            if (!can) {
-                Alert.alert('Unavailable', 'Could not open this app on your device.');
+            await Share.share({
+                message: shareText,
+                url: shareUrl,
+                title: 'Share story',
+            });
+        } catch {
+            try {
+                await Share.share({ message: shareText });
+            } catch (err) {
+                console.warn('Story share failed:', err);
+            }
+        } finally {
+            onClose();
+        }
+    };
+
+    const openWebFallback = async (webUrl: string) => {
+        await Linking.openURL(webUrl);
+        onClose();
+    };
+
+    /** Native app scheme first; https share-intent if the app is missing; system sheet last. */
+    const openSocial = async (nativeScheme: string, webUrl: string) => {
+        try {
+            let canOpenNative = false;
+            try {
+                canOpenNative = await Linking.canOpenURL(nativeScheme);
+            } catch {
+                canOpenNative = false;
+            }
+            if (canOpenNative) {
+                await Linking.openURL(nativeScheme);
+                onClose();
                 return;
             }
-            await Linking.openURL(url);
-            onClose();
+            await openWebFallback(webUrl);
         } catch {
-            Alert.alert('Unavailable', 'Could not open link.');
+            await shareSystem();
+        }
+    };
+
+    const shareWhatsApp = () => {
+        const native = `whatsapp://send?text=${encodeURIComponent(shareText)}`;
+        const web = `https://wa.me/?text=${encodeURIComponent(shareUrl)}`;
+        void openSocial(native, web);
+    };
+
+    const shareFacebook = () => {
+        const native = `fb://share?link=${encodeURIComponent(shareUrl)}`;
+        const web = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`;
+        void openSocial(native, web);
+    };
+
+    const shareTwitter = () => {
+        const native = `twitter://post?message=${encodeURIComponent(shareText)}`;
+        const web = `https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}`;
+        void openSocial(native, web);
+    };
+
+    const shareEmail = async () => {
+        const subject = encodeURIComponent('Check out this story');
+        const body = encodeURIComponent(
+            `Have a look at this story by @${bareHandle}:\n\n${shareUrl}`,
+        );
+        const mailto = `mailto:?subject=${subject}&body=${body}`;
+        try {
+            let canMail = false;
+            try {
+                canMail = await Linking.canOpenURL(mailto);
+            } catch {
+                canMail = false;
+            }
+            if (canMail) {
+                await Linking.openURL(mailto);
+                onClose();
+                return;
+            }
+            await shareSystem();
+        } catch {
+            await shareSystem();
         }
     };
 
@@ -78,19 +149,6 @@ export default function StoryShareSheet({ visible, onClose, userHandle, storyId 
             Alert.alert('Could not copy', 'Please try again.');
         }
     };
-
-    const shareSystem = async () => {
-        try {
-            await Share.share({ message: shareText, url: shareUrl });
-        } catch (err) {
-            console.warn('Story share failed:', err);
-        } finally {
-            onClose();
-        }
-    };
-
-    const encodedUrl = encodeURIComponent(shareUrl);
-    const encodedText = encodeURIComponent(`Check out this story by @${bareHandle}`);
 
     if (!visible) return null;
 
@@ -131,44 +189,28 @@ export default function StoryShareSheet({ visible, onClose, userHandle, storyId 
                             iconBg="#22C55E"
                             title="WhatsApp"
                             subtitle="Share via WhatsApp"
-                            onPress={() =>
-                                void openExternal(`https://wa.me/?text=${encodedText}%20${encodedUrl}`)
-                            }
+                            onPress={shareWhatsApp}
                         />
                         <ShareRow
                             icon={<Text style={styles.brandLetter}>f</Text>}
                             iconBg="#2563EB"
                             title="Facebook"
                             subtitle="Share to Facebook"
-                            onPress={() =>
-                                void openExternal(
-                                    `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
-                                )
-                            }
+                            onPress={shareFacebook}
                         />
                         <ShareRow
                             icon={<Text style={styles.brandLetter}>X</Text>}
                             iconBg="#000000"
                             title="X (Twitter)"
                             subtitle="Share to X"
-                            onPress={() =>
-                                void openExternal(
-                                    `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`,
-                                )
-                            }
+                            onPress={shareTwitter}
                         />
                         <ShareRow
                             icon={<Text style={styles.brandLetter}>@</Text>}
                             iconBg="#EF4444"
                             title="Email"
                             subtitle="Share via email"
-                            onPress={() => {
-                                const subject = encodeURIComponent('Check out this story');
-                                const body = encodeURIComponent(
-                                    `Have a look at this story by @${bareHandle}:\n\n${shareUrl}`,
-                                );
-                                void openExternal(`mailto:?subject=${subject}&body=${body}`);
-                            }}
+                            onPress={() => void shareEmail()}
                         />
                     </ScrollView>
                 </View>

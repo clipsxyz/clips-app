@@ -10,7 +10,7 @@ import {
 } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { isMockMode } from './apiMode';
-import { getApiBaseUrl } from './apiBaseUrl';
+import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
@@ -1286,49 +1286,10 @@ function normalizeCaptionFields<T extends Post>(post: T): T {
   return normalized as T;
 }
 
-/** Rewrite localhost media URLs so they work when opening app from phone on network */
+/** Rewrite localhost / 127.0.0.1 media so a physical phone can load files from the Mac. */
 function rewriteMediaUrlForNetwork(url: string): string {
   if (!url || typeof url !== 'string') return url;
-
-  // RN polyfills `window` without a real `location` — never read `.hostname` blindly.
-  let browserHost = '';
-  try {
-    if (
-      typeof window !== 'undefined' &&
-      window.location &&
-      typeof window.location.hostname === 'string'
-    ) {
-      browserHost = window.location.hostname;
-    }
-  } catch {
-    browserHost = '';
-  }
-
-  let targetHost = browserHost;
-  if (!targetHost || targetHost === 'localhost' || targetHost === '127.0.0.1') {
-    // Prefer configured API host when it's a LAN IP (Wi‑Fi without adb reverse).
-    try {
-      const apiBase = getApiBaseUrl();
-      if (apiBase && /^https?:\/\//i.test(apiBase)) {
-        const apiHost = new URL(apiBase).hostname;
-        if (apiHost && apiHost !== 'localhost' && apiHost !== '127.0.0.1') {
-          targetHost = apiHost;
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // Physical device + adb reverse: keep localhost media URLs as-is.
-  if (!targetHost || targetHost === 'localhost' || targetHost === '127.0.0.1') {
-    return url;
-  }
-
-  return url
-    .replace(/http:\/\/localhost:8000\//g, `http://${targetHost}:8000/`)
-    .replace(/https:\/\/localhost:8000\//g, `https://${targetHost}:8000/`)
-    .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${targetHost}:8000/`);
+  return resolvePublicMediaUrl(url) || url;
 }
 
 // Transform Laravel API post response to frontend Post format
@@ -2041,16 +2002,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         fromMock: false
       };
     } catch (error: any) {
-      console.log('[fetchPostsPage/posts] live feed failed — returning empty (no mock fallback)', {
+      console.log('[fetchPostsPage/posts] live feed failed — no mock fallback', {
         name: error?.name,
         message: error?.message,
         status: error?.status,
       });
-      // Live mode: never fall back to mock seed posts on empty/error responses.
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed (live mode, no mock fallback):', error);
-      }
-      return { items: [], nextCursor: null, fromMock: false };
+      throw error;
     }
   } else {
     console.log('[fetchPostsPage/posts] using mock feed path (IS_MOCK=true)', {

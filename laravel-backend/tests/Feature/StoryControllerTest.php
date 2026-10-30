@@ -330,11 +330,20 @@ class StoryControllerTest extends TestCase
                 "Followed Manchester author must appear on the {$filter} Stories 24 rail"
             );
             $this->assertNotContains($spainStory->id, $ids);
+            $this->assertNotContains(
+                $localStory->id,
+                $ids,
+                "Unfollowed local author must not appear on the {$filter} Stories 24 rail"
+            );
         }
 
         $ireland = $this->actingAs($viewer, 'sanctum')->getJson('/api/stories/paged?filter=Ireland');
         $irelandIds = array_column($ireland->json('items'), 'id');
-        $this->assertContains($localStory->id, $irelandIds, 'Unfollowed Dublin author should appear on Ireland via location OR');
+        $this->assertNotContains($localStory->id, $irelandIds, 'Ireland location must not inject unfollowed authors into the rail');
+
+        $byHandle = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/stories/user/'.rawurlencode($localStranger->handle));
+        $byHandle->assertStatus(200)->assertJsonFragment(['id' => $localStory->id]);
     }
 
     public function test_pending_follow_does_not_add_story_to_rail(): void

@@ -2,6 +2,12 @@
 import { clearLaravelUnreachable, getRuntimeEnv, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from './apiBaseUrl';
+import {
+    authorizedJsonHeaders,
+    fetchWithApiFallback,
+    isTransportNetworkError,
+    throwIfHttpError,
+} from './httpClient';
 import { isMockMode } from './apiMode';
 
 function throwMockConnectionRefused(): never {
@@ -70,68 +76,44 @@ export function isMigratedApiRequestPath(endpoint: string): boolean {
 }
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
-export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
+export async function apiRequest(
+    endpoint: string,
+    options: RequestInit & { timeoutMs?: number } = {},
+): Promise<any> {
     // Mock mode, or unmigrated endpoint: keep local mock data; do not hit Laravel.
     if (isMockMode() || !isMigratedApiRequestPath(endpoint)) {
         throwMockConnectionRefused();
     }
 
-    const authHeader = await getAuthorizationHeader();
     const { timeoutMs = 8000, ...fetchOptions } = options;
-    const API_BASE_URL = getApiBaseUrl();
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    const config: RequestInit = {
-        ...fetchOptions,
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            ...authHeader,
-            ...fetchOptions.headers,
-        },
-        signal: controller.signal,
-    };
+    const { headers, hadToken } = await authorizedJsonHeaders(fetchOptions.headers);
 
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Network error' }));
-            const errorMessage = errorData.error || errorData.message || (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
-            const error = new Error(errorMessage);
-            (error as any).status = response.status;
-            (error as any).response = errorData;
-            throw error;
-        }
+        const response = await fetchWithApiFallback(endpoint, {
+            ...fetchOptions,
+            headers,
+            timeoutMs,
+        });
 
         const text = await response.text();
+        let payload: unknown = text;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        throwIfHttpError(response, endpoint, payload, hadToken);
         clearLaravelUnreachable();
         if (!text) return null;
-        try {
-            return JSON.parse(text);
-        } catch {
-            const preview = text.slice(0, 80).replace(/\s+/g, ' ');
-            throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
-        }
+        if (payload !== text) return payload;
+        const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+        throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
     } catch (error: any) {
-        clearTimeout(timeoutId);
-        // Suppress connection refused errors when backend isn't running
-        // Check for various connection error patterns
         const isAbort = error?.name === 'AbortError';
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-
         if (isAbort) {
             throw error;
         }
-        if (isConnectionError) {
-            // Re-throw with a specific error type that can be caught and handled gracefully
+        if (isTransportNetworkError(error)) {
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
@@ -164,12 +146,11 @@ export async function checkSignupAvailability(opts: {
         return { available: true, email_taken: false, username_taken: false };
     }
 
-    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
-    const url = `${API_BASE_URL}/auth/check-availability?${params.toString()}`;
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithApiFallback(`/auth/check-availability?${params.toString()}`, {
             method: 'GET',
             headers: { Accept: 'application/json' },
+            timeoutMs: 8000,
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -218,9 +199,6 @@ export async function registerUser(userData: {
         throwMockConnectionRefused();
     }
 
-    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
-    const url = `${API_BASE_URL}/auth/register`;
-
     // Laravel username must be [a-zA-Z0-9_]; never send a raw email.
     const emailLocal = String(userData.email || '')
         .split('@')[0]
@@ -252,11 +230,8 @@ export async function registerUser(userData: {
         invite: String(userData.inviteHandle || '').replace(/^@/, '').trim() || undefined,
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
     try {
-        console.log('[registerUser/client] POST', url, {
+        console.log('[registerUser/client] POST /auth/register', {
             username,
             email: userData.email,
             handle: userData.handle,
@@ -264,16 +239,15 @@ export async function registerUser(userData: {
             locationRegional: payload.locationRegional,
             locationNational: payload.locationNational,
         });
-        const response = await fetch(url, {
+        const response = await fetchWithApiFallback('/auth/register', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
             },
             body: JSON.stringify(payload),
-            signal: controller.signal,
+            timeoutMs: 15000,
         });
-        clearTimeout(timeoutId);
 
         const errorData = await response.json().catch(() => ({ error: 'Registration failed' }));
         if (!response.ok) {
@@ -306,20 +280,12 @@ export async function registerUser(userData: {
             token,
         };
     } catch (error: any) {
-        clearTimeout(timeoutId);
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
         }
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('Network request failed') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            error?.name === 'AbortError' ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-        if (isConnectionError) {
+        if (isTransportNetworkError(error) || error?.name === 'AbortError') {
             markLaravelUnreachable();
-            const connectionError = new Error(`CONNECTION_REFUSED registering at ${url}`);
+            const connectionError = new Error('CONNECTION_REFUSED registering');
             connectionError.name = 'ConnectionRefused';
             throw connectionError;
         }
@@ -336,24 +302,16 @@ export async function loginUser(email: string, password: string): Promise<{
         throwMockConnectionRefused();
     }
 
-    // Laravel mounts auth under `/api/auth/*`. `getApiBaseUrl()` already includes `/api`.
-    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
-    const url = `${API_BASE_URL}/auth/login`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithApiFallback('/auth/login', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
             },
             body: JSON.stringify({ email, password }),
-            signal: controller.signal,
+            timeoutMs: 8000,
         });
-        clearTimeout(timeoutId);
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: 'Login failed' }));
@@ -380,17 +338,10 @@ export async function loginUser(email: string, password: string): Promise<{
             token,
         };
     } catch (error: any) {
-        clearTimeout(timeoutId);
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
         }
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            error?.name === 'AbortError' ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-        if (isConnectionError) {
+        if (isTransportNetworkError(error) || error?.name === 'AbortError') {
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
@@ -717,27 +668,17 @@ export async function fetchPostsPage(
         ...(userId && { userId }),
     });
 
-    // Laravel: GET /api/posts (API_BASE_URL already includes `/api`)
-    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
-    const url = `${API_BASE_URL}/posts?${params}`;
-    console.log('[fetchPostsPage/client] request URL=', url);
-    const authHeader = await getAuthorizationHeader();
-    console.log('[fetchPostsPage/client] Authorization header present=', Boolean(authHeader.Authorization));
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const path = `/posts?${params}`;
+    const { headers, hadToken } = await authorizedJsonHeaders();
+    console.log('[fetchPostsPage/client] Authorization header present=', hadToken);
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithApiFallback(path, {
             method: 'GET',
-            headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-                ...authHeader,
-            },
-            signal: controller.signal,
+            headers,
+            timeoutMs: 6000,
         });
-        clearTimeout(timeoutId);
+        console.log('[fetchPostsPage/client] request URL=', response.url);
 
         const text = await response.text();
         let payload: unknown = text;
@@ -747,21 +688,7 @@ export async function fetchPostsPage(
             payload = text;
         }
         console.log('[fetchPostsPage/client] response status=', response.status, 'payload=', payload);
-
-        if (!response.ok) {
-            const errorData =
-                payload && typeof payload === 'object'
-                    ? (payload as Record<string, any>)
-                    : { error: 'Network error' };
-            const errorMessage =
-                errorData.error ||
-                errorData.message ||
-                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
-            const error = new Error(errorMessage);
-            (error as any).status = response.status;
-            (error as any).response = errorData;
-            throw error;
-        }
+        throwIfHttpError(response, path, payload, hadToken);
 
         if (!text) {
             clearLaravelUnreachable();
@@ -774,11 +701,11 @@ export async function fetchPostsPage(
         const preview = text.slice(0, 80).replace(/\s+/g, ' ');
         throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
     } catch (error: any) {
-        clearTimeout(timeoutId);
         console.log('[fetchPostsPage/client] fetch error=', {
             name: error?.name,
             message: error?.message,
             status: error?.status,
+            body: error?.response,
         });
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
@@ -786,12 +713,7 @@ export async function fetchPostsPage(
         if (error?.name === 'AbortError') {
             throw error;
         }
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-        if (isConnectionError) {
+        if (isTransportNetworkError(error)) {
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
@@ -906,8 +828,6 @@ export async function createPost(postData: {
         throwMockConnectionRefused();
     }
 
-    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
-    const url = `${API_BASE_URL}/posts`;
     const authHeader = await getAuthorizationHeader();
     if (!authHeader.Authorization) {
         console.log('[createPost/client] missing Sanctum token → 401');
@@ -917,7 +837,7 @@ export async function createPost(postData: {
         (error as any).status = 401;
         throw error;
     }
-    console.log('[createPost/client] POST', url, {
+    console.log('[createPost/client] POST /posts', {
         hasAuth: Boolean(authHeader.Authorization),
         mediaType: postData.mediaType,
         hasMediaUrl: Boolean(postData.mediaUrl),
@@ -927,11 +847,8 @@ export async function createPost(postData: {
         location: postData.location,
     });
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithApiFallback('/posts', {
             method: 'POST',
             headers: {
                 Accept: 'application/json',
@@ -939,9 +856,8 @@ export async function createPost(postData: {
                 ...authHeader,
             },
             body: JSON.stringify(postData),
-            signal: controller.signal,
+            timeoutMs: 20000,
         });
-        clearTimeout(timeoutId);
 
         const text = await response.text();
         let payload: any = null;
@@ -971,9 +887,7 @@ export async function createPost(postData: {
 
         return payload;
     } catch (error: any) {
-        clearTimeout(timeoutId);
         console.log('[createPost/client] fetch error=', {
-            url,
             name: error?.name,
             message: error?.message,
             status: error?.status,
@@ -982,17 +896,10 @@ export async function createPost(postData: {
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
         }
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('Network request failed') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            error?.name === 'AbortError' ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-        if (isConnectionError) {
+        if (isTransportNetworkError(error) || error?.name === 'AbortError') {
             markLaravelUnreachable();
             const connectionError = new Error(
-                `CONNECTION_REFUSED creating post at ${url}: ${error?.message || 'network error'}`,
+                `CONNECTION_REFUSED creating post: ${error?.message || 'network error'}`,
             );
             connectionError.name = 'ConnectionRefused';
             throw connectionError;
@@ -1159,25 +1066,20 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
         throwMockConnectionRefused();
     }
 
-    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
-    const url = `${API_BASE_URL}${pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`}`;
+    const path = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`;
     const authHeader = await getAuthorizationHeader();
-    console.log('[laravelUsersGet] GET', url, { hasAuth: Boolean(authHeader.Authorization) });
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    console.log('[laravelUsersGet] GET', path, { hasAuth: Boolean(authHeader.Authorization) });
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithApiFallback(path, {
             method: 'GET',
             headers: {
                 Accept: 'application/json',
                 'Content-Type': 'application/json',
                 ...authHeader,
             },
-            signal: controller.signal,
+            timeoutMs: 12000,
         });
-        clearTimeout(timeoutId);
         const text = await response.text();
         let payload: any = null;
         try {
@@ -1191,7 +1093,7 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
                 payload?.message ||
                 (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
             console.error('[laravelUsersGet] API error', {
-                url,
+                path,
                 status: response.status,
                 error: errorMessage,
                 payload,
@@ -1203,9 +1105,8 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
         }
         return payload;
     } catch (error: any) {
-        clearTimeout(timeoutId);
         console.error('[laravelUsersGet] fetch error', {
-            url,
+            path,
             name: error?.name,
             message: error?.message,
             status: error?.status,
@@ -1216,12 +1117,7 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
         if (error?.name === 'AbortError') {
             throw error;
         }
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-        if (isConnectionError) {
+        if (isTransportNetworkError(error)) {
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';

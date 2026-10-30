@@ -405,12 +405,10 @@ export default function ScenesViewer({
     }, [activePost?.id, overflowVisible, viewerUserId]);
 
     const toggleMute = useCallback(() => {
-        setMuted((prev) => {
-            const next = !prev;
-            void setGlobalVideoMutedNative(next);
-            return next;
-        });
-    }, []);
+        const next = !muted;
+        setMuted(next);
+        void setGlobalVideoMutedNative(next);
+    }, [muted]);
 
     const handleBack = useCallback(() => {
         const post = posts[activeIndex];

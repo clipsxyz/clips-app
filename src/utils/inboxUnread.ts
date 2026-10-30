@@ -76,7 +76,11 @@ export function unreadAfterOpeningThread(input: {
     return Math.max(0, Math.floor(Number(input.unread) || 0));
 }
 
-/** Same formula as the Inbox Messages / Groups / Notifs pills. */
+/**
+ * Same formula as the visible inbox thread list: one badge unit per unread
+ * conversation (unique partner / group), not per raw message row.
+ * Message requests stay off the primary Messages list and the tab badge.
+ */
 export function inboxUnreadPartsFromLists(
     conversations: InboxUnreadConversation[] | null | undefined,
     notifications: InboxUnreadNotification[] | null | undefined,
@@ -88,11 +92,11 @@ export function inboxUnreadPartsFromLists(
         const unread = Math.max(0, Math.floor(Number(row.unread) || 0));
         if (unread === 0) continue;
         if (row.kind === 'group') {
-            groups += unread;
+            groups += 1;
             continue;
         }
         if (row.isRequest) continue;
-        messages += unread;
+        messages += 1;
     }
     const pendingInvites = Math.max(0, Math.floor(Number(extra?.pendingInviteCount) || 0));
     const notificationUnread = (notifications || []).filter(
@@ -105,11 +109,9 @@ export function inboxUnreadPartsFromLists(
     };
 }
 
+/** Footer / tab badge: visible unread threads only (Messages + Groups). Notifs stay on the Inbox pill. */
 export function inboxBadgeTotal(parts: InboxUnreadParts): number {
-    return Math.max(
-        0,
-        (Number(parts.messages) || 0) + (Number(parts.groups) || 0) + (Number(parts.notifications) || 0),
-    );
+    return Math.max(0, (Number(parts.messages) || 0) + (Number(parts.groups) || 0));
 }
 
 export function publishInboxUnreadParts(

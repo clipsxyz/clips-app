@@ -8,8 +8,10 @@ import {
     TouchableOpacity,
     Image,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     ActivityIndicator,
+    useWindowDimensions,
     Animated,
     PanResponder,
     Linking,
@@ -23,6 +25,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { launchImageLibrary } from 'react-native-image-picker';
+import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import { useAuth } from '../context/Auth';
@@ -81,6 +84,8 @@ import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
 import {
     UCL_CANVAS_NAVY,
     UCL_PURPLE,
+    UCL_SHEET_BORDER,
+    UCL_SHEET_SURFACE,
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
     UEFA_PASSPORT_GRADIENT,
@@ -108,6 +113,34 @@ import { toFileUri } from '../utils/ffmpegNative';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
+
+/** Laravel `image_url` is `nullable|url|max:500` — never send file://, content://, or data: URLs. */
+function isPublicMessageImageUrl(url: string): boolean {
+    const trimmed = String(url || '').trim();
+    return /^https?:\/\//i.test(trimmed) && trimmed.length <= 500;
+}
+
+async function hostDmImageUrl(localUrl: string): Promise<string> {
+    const trimmed = String(localUrl || '').trim();
+    if (!trimmed) {
+        throw new Error('No photo to send.');
+    }
+    if (isPublicMessageImageUrl(trimmed) && !/^(file|content|ph|blob):/i.test(trimmed) && !trimmed.startsWith('data:')) {
+        return trimmed;
+    }
+    if (!isLaravelApiEnabled()) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('data:')) {
+        throw new Error('Could not upload this photo. Pick it again from your library.');
+    }
+    const upload = await uploadFileFromUri(trimmed, 'image/jpeg', `dm-${Date.now()}.jpg`);
+    const hosted = String(upload.fileUrl || upload.url || '').trim();
+    if (!isPublicMessageImageUrl(hosted)) {
+        throw new Error('Upload did not return a public image URL.');
+    }
+    return hosted;
+}
 
 function sameDmHandle(a?: string | null, b?: string | null): boolean {
     return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
@@ -951,6 +984,9 @@ export default function MessagesScreen({ route, navigation }: any) {
         ) ||
         '';
     const insets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
+    const imageComposeSheetWidth = Math.min(windowWidth - 32, 400);
+    const imageComposeSheetMargin = Math.max(16, Math.floor((windowWidth - imageComposeSheetWidth) / 2));
     const initialGroupName =
         (typeof routeGroupName === 'string' && routeGroupName.trim()) ||
         (typeof communityCreatedName === 'string' && communityCreatedName.trim()) ||
@@ -2520,34 +2556,45 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const handleImageClick = () => {
         if (!user?.handle) return;
-        launchImageLibrary(
-            {
-                mediaType: 'photo',
-                selectionLimit: 1,
-                includeBase64: true,
-                quality: 0.8,
-            },
-            async (response) => {
-                if (response.didCancel) return;
-                if (response.errorCode) {
+        void (async () => {
+            try {
+                const picked = await pickFromFullGallery(1, { mediaType: 'photo' });
+                if (picked === 'denied') {
                     showAlert({
-                        title: 'Image error',
-                        message: response.errorMessage || 'Could not open your photo library.',
+                        title: 'Gallery access needed',
+                        message:
+                            'Allow access to your photos in Settings so you can attach an image to this chat.',
                         icon: 'alert',
                         confirmButtonText: 'OK',
                     });
                     return;
                 }
-                const asset = response.assets?.[0];
+                if (picked === 'cancel') return;
+                const asset = picked[0];
                 if (!asset) return;
-                const mime = asset.type || 'image/jpeg';
-                const imageUrl = asset.base64
-                    ? `data:${mime};base64,${asset.base64}`
-                    : asset.uri;
-                if (!imageUrl) return;
-                setImageCompose({ imageUrl, caption: '' });
-            },
-        );
+                const mime = String(asset.type || '').toLowerCase();
+                const uri = String(asset.uri || '');
+                if (mime.startsWith('video/') || /\.(mp4|mov|m4v|webm|3gp)(\?|#|$)/i.test(uri)) {
+                    showAlert({
+                        title: 'Images only',
+                        message: 'Choose a photo from your camera roll. Videos cannot be sent from chat.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                    return;
+                }
+                if (!uri) return;
+                setImageCompose({ imageUrl: uri, caption: '' });
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : 'Could not open your photo library.';
+                showAlert({
+                    title: 'Image error',
+                    message,
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+            }
+        })();
     };
 
     const handleCancelImageCompose = () => {
@@ -2556,12 +2603,26 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const handleSendImageWithCaption = async () => {
         if (!imageCompose || !user?.handle) return;
+        const localImageUrl = imageCompose.imageUrl;
         const trimmedCaption = imageCompose.caption.trim();
         const replyToPayload = buildReplyToPayload();
+        let hostedImageUrl: string;
+        try {
+            hostedImageUrl = await hostDmImageUrl(localImageUrl);
+        } catch (error) {
+            console.error('Error uploading DM image:', error);
+            showAlert({
+                title: 'Upload failed',
+                message: error instanceof Error ? error.message : 'Could not upload this photo. Try again.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
         const optimistic: ChatMessage = {
             id: `${Date.now()}-img`,
             senderHandle: user.handle,
-            imageUrl: imageCompose.imageUrl,
+            imageUrl: hostedImageUrl,
             text: trimmedCaption || undefined,
             timestamp: Date.now(),
             replyTo: replyToPayload,
@@ -2572,8 +2633,8 @@ export default function MessagesScreen({ route, navigation }: any) {
         try {
             const serverMsg =
                 isGroupThread && chatGroupId
-                    ? await appendGroupChatMessage(user.handle, chatGroupId, { imageUrl: optimistic.imageUrl, text: optimistic.text, replyTo: replyToPayload })
-                    : await appendMessage(user.handle, handle, { imageUrl: optimistic.imageUrl, text: optimistic.text, replyTo: replyToPayload });
+                    ? await appendGroupChatMessage(user.handle, chatGroupId, { imageUrl: hostedImageUrl, text: optimistic.text, replyTo: replyToPayload })
+                    : await appendMessage(user.handle, handle, { imageUrl: hostedImageUrl, text: optimistic.text, replyTo: replyToPayload });
             reconcileSentMessage(optimistic, serverMsg);
         } catch (error) {
             console.error('Error sending image message:', error);
@@ -3281,30 +3342,6 @@ export default function MessagesScreen({ route, navigation }: any) {
                         </TouchableOpacity>
                     </Animated.View>
                 )}
-                {imageCompose && (
-                    <View style={styles.imageComposeWrap}>
-                        <Image source={{ uri: imageCompose.imageUrl }} style={styles.imageComposePreview} />
-                        <View style={styles.imageComposeBody}>
-                            <Text style={styles.imageComposeTitle}>Image preview</Text>
-                            <TextInput
-                                value={imageCompose.caption}
-                                onChangeText={(caption) => setImageCompose((prev) => (prev ? { ...prev, caption } : prev))}
-                                placeholder="Add a caption (optional)"
-                                placeholderTextColor="#6B7280"
-                                style={styles.imageComposeInput}
-                                maxLength={280}
-                            />
-                            <View style={styles.imageComposeActions}>
-                                <TouchableOpacity style={styles.imageComposeCancelBtn} onPress={handleCancelImageCompose}>
-                                    <Text style={styles.imageComposeCancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.imageComposeSendBtn} onPress={handleSendImageWithCaption}>
-                                    <Text style={styles.imageComposeSendText}>Send</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                )}
                 {ENABLE_VOICE_NOTES && voiceDraft ? (
                     <View style={styles.voiceReviewSection}>
                         <Text style={styles.voiceReviewLabel}>Review before sending</Text>
@@ -3429,6 +3466,14 @@ export default function MessagesScreen({ route, navigation }: any) {
                                         multiline
                                         maxLength={1000}
                                     />
+                                    <TouchableOpacity
+                                        onPress={handleImageClick}
+                                        hitSlop={8}
+                                        accessibilityLabel="Attach photo"
+                                        style={styles.composerCameraBtn}
+                                    >
+                                        <Icon name="camera-outline" size={ox(20)} color="#D1D5DB" />
+                                    </TouchableOpacity>
                                 </View>
                             </>
                         )}
@@ -3772,6 +3817,77 @@ export default function MessagesScreen({ route, navigation }: any) {
                 </View>
             </View>
 
+            <Modal
+                visible={imageCompose != null}
+                transparent
+                animationType="slide"
+                onRequestClose={handleCancelImageCompose}
+                statusBarTranslucent
+            >
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    style={styles.imageComposeOverlay}
+                >
+                    <TouchableOpacity
+                        style={styles.imageComposeBackdrop}
+                        activeOpacity={1}
+                        onPress={handleCancelImageCompose}
+                    />
+                    <View
+                        style={[
+                            styles.imageComposeSheet,
+                            {
+                                marginHorizontal: imageComposeSheetMargin,
+                                width: imageComposeSheetWidth,
+                                paddingBottom: Math.max(insets.bottom, 16),
+                            },
+                        ]}
+                    >
+                        <PassportSheetCanvas tone="ucl" contentStyle={styles.imageComposeInner}>
+                            <View style={styles.imageComposeHandleWrap}>
+                                <View style={styles.imageComposeHandle} />
+                            </View>
+                            <Text style={styles.imageComposeGazetteerLabel}>Gazetteer says</Text>
+                            <Text style={styles.imageComposeTitle}>Image preview</Text>
+                            <View style={styles.imageComposeRow}>
+                                <View style={styles.imageComposeThumb}>
+                                    <Image
+                                        source={{ uri: imageCompose?.imageUrl }}
+                                        style={styles.imageComposePreview}
+                                        resizeMode="cover"
+                                    />
+                                </View>
+                                <View style={styles.imageComposeBody}>
+                                    <TextInput
+                                        value={imageCompose?.caption ?? ''}
+                                        onChangeText={(caption) =>
+                                            setImageCompose((prev) => (prev ? { ...prev, caption } : prev))
+                                        }
+                                        placeholder="Add a caption (optional)"
+                                        placeholderTextColor={UCL_TEXT_PLACEHOLDER}
+                                        style={styles.imageComposeInput}
+                                        maxLength={280}
+                                        multiline
+                                        textAlignVertical="top"
+                                    />
+                                </View>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.imageComposeSendBtn}
+                                onPress={handleSendImageWithCaption}
+                            >
+                                <Text style={styles.imageComposeSendText}>Send</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.imageComposeCancelBtn}
+                                onPress={handleCancelImageCompose}
+                            >
+                                <Text style={styles.imageComposeCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                        </PassportSheetCanvas>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
             <GazetteerAlertSheet
                 visible={sheetAlert != null}
                 title={sheetAlert?.title ?? ''}
@@ -4185,8 +4301,16 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
         paddingLeft: 14,
-        paddingRight: 14,
+        paddingRight: 6,
         minHeight: 40,
+    },
+    composerCameraBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
     },
     input: {
         flex: 1,
@@ -4796,70 +4920,116 @@ const styles = StyleSheet.create({
         fontSize: ox(12),
         marginBottom: ox(12),
     },
-    imageComposeWrap: {
-        flexDirection: 'row',
-        gap: ox(10),
-        marginHorizontal: ox(16),
-        marginTop: ox(8),
-        padding: ox(10),
-        borderRadius: ox(12),
+    imageComposeOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    imageComposeBackdrop: {
+        ...StyleSheet.absoluteFill,
+        backgroundColor: 'rgba(0,0,0,0.72)',
+    },
+    imageComposeSheet: {
+        alignSelf: 'center',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        overflow: 'hidden',
+        backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.08)',
+    },
+    imageComposeInner: {
+        paddingHorizontal: 20,
+        paddingTop: 4,
+    },
+    imageComposeHandleWrap: {
+        alignItems: 'center',
+        paddingBottom: 8,
+    },
+    imageComposeHandle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.3)',
+    },
+    imageComposeGazetteerLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        color: UCL_TEXT_PRIMARY,
+        textAlign: 'center',
+        marginBottom: 12,
+    },
+    imageComposeRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 20,
+    },
+    imageComposeThumb: {
+        width: 80,
+        aspectRatio: 1,
+        borderRadius: 12,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: UCL_SHEET_BORDER,
+        backgroundColor: UCL_SHEET_SURFACE,
+        marginRight: 14,
     },
     imageComposePreview: {
-        width: ox(64),
-        height: ox(64),
-        borderRadius: ox(10),
+        width: '100%',
+        height: '100%',
     },
     imageComposeBody: {
         flex: 1,
+        minWidth: 0,
     },
     imageComposeTitle: {
-        color: '#E5E7EB',
-        fontSize: ox(12),
-        fontWeight: '700',
-        marginBottom: ox(6),
+        fontSize: 18,
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
+        textAlign: 'center',
+        marginBottom: 16,
     },
     imageComposeInput: {
-        borderRadius: ox(10),
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#0F172A',
-        color: '#FFFFFF',
-        paddingHorizontal: ox(10),
-        paddingVertical: ox(8),
-        fontSize: ox(13),
-    },
-    imageComposeActions: {
-        flexDirection: 'row',
-        justifyContent: 'flex-end',
-        gap: ox(8),
-        marginTop: ox(8),
-    },
-    imageComposeCancelBtn: {
-        borderRadius: ox(8),
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#1F2937',
-        paddingHorizontal: ox(10),
-        paddingVertical: ox(6),
-    },
-    imageComposeCancelText: {
-        color: '#D1D5DB',
-        fontSize: ox(12),
-        fontWeight: '700',
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: UCL_SHEET_SURFACE,
+        color: UCL_TEXT_PRIMARY,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        minHeight: 72,
+        maxHeight: 120,
+        fontSize: 15,
+        lineHeight: 20,
+        textAlignVertical: 'top',
     },
     imageComposeSendBtn: {
-        borderRadius: ox(8),
-        backgroundColor: '#3B82F6',
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(6),
+        borderRadius: 999,
+        backgroundColor: UCL_TEXT_PRIMARY,
+        paddingVertical: 14,
+        alignItems: 'center',
+        marginBottom: 8,
     },
     imageComposeSendText: {
-        color: '#FFFFFF',
-        fontSize: ox(12),
+        fontSize: 15,
         fontWeight: '700',
+        color: UCL_CANVAS_NAVY,
+    },
+    imageComposeCancelBtn: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        paddingVertical: 14,
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    imageComposeCancelText: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#FFFFFF',
     },
 });
 

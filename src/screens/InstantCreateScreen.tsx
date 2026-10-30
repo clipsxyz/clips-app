@@ -3,6 +3,7 @@ import {
     Animated,
     Easing,
     PanResponder,
+    Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -550,7 +551,9 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                 <TouchableOpacity style={styles.backBtn} onPress={handleBack} accessibilityLabel="Back">
                     <Icon name="arrow-back" size={ox(16)} color="#FFFFFF" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Create</Text>
+                <Text style={styles.headerTitle} pointerEvents="none" numberOfLines={1}>
+                    Create
+                </Text>
                 <View style={styles.headerSpacer} />
             </View>
 
@@ -662,7 +665,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: ox(16),
-        paddingVertical: ox(12),
+        paddingVertical: ox(10),
+        minHeight: ox(56),
+        overflow: 'visible',
         zIndex: 2,
     },
     backBtn: {
@@ -676,13 +681,15 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         position: 'absolute',
-        left: 0,
-        right: 0,
+        left: ox(52),
+        right: ox(52),
         textAlign: 'center',
         color: '#FFFFFF',
-        fontSize: ox(14),
-        fontWeight: '600',
-        letterSpacing: ox(0.3),
+        fontSize: ox(32),
+        lineHeight: ox(40),
+        fontWeight: '400',
+        fontFamily: Platform.OS === 'ios' ? 'Snell Roundhand' : 'cursive',
+        includeFontPadding: false,
     },
     headerSpacer: { width: ox(32) },
     body: {

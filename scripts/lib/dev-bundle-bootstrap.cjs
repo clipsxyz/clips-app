@@ -135,8 +135,14 @@ const readApplicationId = (root) => {
 };
 
 const PREFS = 'shared_prefs/ReactNativeDevSupport.xml';
+const defaultPrefsPath = (appId) => `shared_prefs/${appId}_preferences.xml`;
 
 const readDebugHost = (serial, appId) => {
+  const fromDefault = adbTry(['-s', serial, 'shell', `run-as ${appId} cat ${defaultPrefsPath(appId)}`]);
+  const fromDefaultHost = fromDefault
+    ? /<string name="debug_http_host">([^<]*)<\/string>/.exec(fromDefault)?.[1]
+    : null;
+  if (fromDefaultHost) return fromDefaultHost;
   const raw = adbTry(['-s', serial, 'shell', `run-as ${appId} cat ${PREFS}`]);
   if (raw === null) return null;
   return /<string name="debug_http_host">([^<]*)<\/string>/.exec(raw)?.[1] ?? null;
@@ -149,25 +155,33 @@ const readDebugHost = (serial, appId) => {
  * (local -> `adb shell` -> `run-as sh -c`) and nested quoting for XML corrupts the prefs
  * file in ways that are miserable to diagnose.
  */
+function writeOnePrefsFile(serial, appId, prefsPath, value) {
+  const raw = adbTry(['-s', serial, 'shell', `run-as ${appId} cat ${prefsPath}`]) || '';
+  const entry = `<string name="debug_http_host">${value}</string>`;
+  const next = /<string name="debug_http_host">[^<]*<\/string>/.test(raw)
+    ? raw.replace(/<string name="debug_http_host">[^<]*<\/string>/, entry)
+    : raw.includes('</map>')
+      ? raw.replace('</map>', `${entry}</map>`)
+      : `<?xml version="1.0" encoding="utf-8" standalone="yes" ?>\n<map>\n    ${entry}\n</map>\n`;
+  const written = adbTry(['-s', serial, 'shell', `run-as ${appId} sh -c "cat > ${prefsPath}"`], next);
+  return written !== null;
+}
+
 function writeDebugHost(serial, appId, host, port) {
   // Refuse anything that is not a bare IPv4 literal. Writing a malformed value here is
   // silent and self-inflicted: the app boots, fails to reach Metro, and blames the bundle.
   if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(host ?? ''))) {
     return { ok: false, reason: `invalid-host(${typeof host === 'object' ? 'object' : String(host)})` };
   }
-  const raw = adbTry(['-s', serial, 'shell', `run-as ${appId} cat ${PREFS}`]);
-  if (raw === null) return { ok: false, reason: 'prefs-unreadable' };
 
   const value = `${host}:${port}`;
-  const entry = `<string name="debug_http_host">${value}</string>`;
-  const next = /<string name="debug_http_host">[^<]*<\/string>/.test(raw)
-    ? raw.replace(/<string name="debug_http_host">[^<]*<\/string>/, entry)
-    : raw.includes('</map>')
-      ? raw.replace('</map>', `${entry}</map>`)
-      : `<map>${entry}</map>`;
-
-  const written = adbTry(['-s', serial, 'shell', `run-as ${appId} sh -c "cat > ${PREFS}"`], next);
-  return written === null ? { ok: false, reason: 'prefs-write-failed' } : { ok: true, value };
+  // RN PackagerConnectionSettings reads PreferenceManager default prefs
+  // (`{appId}_preferences.xml`), not ReactNativeDevSupport.xml.
+  const defaultOk = writeOnePrefsFile(serial, appId, defaultPrefsPath(appId), value);
+  const legacyOk = writeOnePrefsFile(serial, appId, PREFS, value);
+  if (!defaultOk && !legacyOk) return { ok: false, reason: 'prefs-write-failed' };
+  if (!defaultOk) return { ok: false, reason: 'prefs-unreadable' };
+  return { ok: true, value };
 }
 
 /**

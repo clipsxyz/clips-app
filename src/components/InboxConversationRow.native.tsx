@@ -1,8 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Swipeable, TouchableOpacity as SwipeActionButton } from 'react-native-gesture-handler';
-import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
+import StoryRingAvatar from './StoryRingAvatar.native';
 import { timeAgo } from '../utils/timeAgo';
 import type { ConversationSummary } from '../api/messages';
 
@@ -120,7 +120,7 @@ export default function InboxConversationRow({
     const lastMessage = conversationPreviewText(conv, viewerHandle);
     const timestamp = compactInboxTime(conv.lastMessage?.timestamp);
     const unread = conv.unread || 0;
-    const hasStoryRing = !isGroup && !!conv.hasUnviewedStories;
+    const storyHandle = isGroup ? '' : conv.otherHandle;
 
     useEffect(() => {
         if (isSwipeOpen) {
@@ -206,30 +206,21 @@ export default function InboxConversationRow({
                 style={styles.rowContainer}
             >
                 <View style={styles.avatarWrapper}>
-                    <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={onAvatarPress || handleOpen}
-                    >
-                        {hasStoryRing ? (
-                            <LinearGradient
-                                colors={['#2DD4BF', '#0EA5E9', '#D946EF']}
-                                start={{ x: 0, y: 1 }}
-                                end={{ x: 1, y: 0 }}
-                                style={styles.storyRing}
-                            >
-                                <View style={styles.storyRingInner}>
-                                    <Avatar
-                                        src={avatarSrc}
-                                        name={name}
-                                        size={48}
-                                        hideBorder
-                                    />
-                                </View>
-                            </LinearGradient>
-                        ) : (
+                    {isGroup || !storyHandle ? (
+                        <TouchableOpacity activeOpacity={0.85} onPress={onAvatarPress || handleOpen}>
                             <Avatar src={avatarSrc} name={name} size={52} hideBorder />
-                        )}
-                    </TouchableOpacity>
+                        </TouchableOpacity>
+                    ) : (
+                        <StoryRingAvatar
+                            handle={storyHandle}
+                            src={avatarSrc}
+                            name={name}
+                            size={52}
+                            initialUnseen={!!conv.hasUnviewedStories}
+                            probe={false}
+                            onPress={() => (onAvatarPress || handleOpen)()}
+                        />
+                    )}
                 </View>
 
                 <View style={styles.contentContainer}>
@@ -269,23 +260,6 @@ const styles = StyleSheet.create({
         height: 56,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    storyRing: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        padding: 2,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    storyRingInner: {
-        width: '100%',
-        height: '100%',
-        borderRadius: 999,
-        backgroundColor: '#000',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
     },
     contentContainer: {
         flex: 1,

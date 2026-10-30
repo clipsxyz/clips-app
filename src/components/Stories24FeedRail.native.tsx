@@ -1,4 +1,13 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, {
+    forwardRef,
+    useCallback,
+    useEffect,
+    useImperativeHandle,
+    useMemo,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from 'react';
 import {
     View,
     Text,
@@ -41,8 +50,16 @@ import {
     STORY_GRADIENT_RING_END,
     STORY_GRADIENT_RING_START,
     STORY_RING_GAP,
+    STORY_RING_NONE_COLOR,
     STORY_RING_WIDTH,
 } from '../utils/storyRingNative';
+import { markStoryAsViewedLocal, markStoryViewed } from '../api/stories';
+import {
+    getStoryViewedVersion,
+    isHandleStoryRingSeen,
+    isStoryMarkedViewed,
+    subscribeStoryViewed,
+} from '../utils/storyViewedStore';
 const CARD_W = 175;
 const CARD_H = 102;
 const CARD_RADIUS = 10;
@@ -169,6 +186,11 @@ function StoryCard({
     const avatarSrc = isOwnStory
         ? user?.avatarUrl || item.avatarUrl || getAvatarForHandle(item.handle)
         : item.avatarUrl || getAvatarForHandle(item.handle);
+    useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
+    const hasViewed =
+        !!item.hasViewed ||
+        isHandleStoryRingSeen(item.handle) ||
+        (!!item.storyId && isStoryMarkedViewed(item.storyId));
 
     const measureAndPress = () => {
         const fallback: CardRect = { x: 0, y: 0, width: CARD_W, height: CARD_H };
@@ -261,13 +283,8 @@ function StoryCard({
                     </Text>
                 ) : null}
                 <View style={styles.cardAvatarCenter} pointerEvents="none">
-                    <LinearGradient
-                        colors={[...STORY_GRADIENT_RING_COLORS]}
-                        start={STORY_GRADIENT_RING_START}
-                        end={STORY_GRADIENT_RING_END}
-                        style={styles.cardAvatarRing}
-                    >
-                        <View style={styles.cardAvatarRingInner}>
+                    {hasViewed ? (
+                        <View style={styles.cardAvatarSeen}>
                             <Avatar
                                 src={avatarSrc}
                                 name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
@@ -275,7 +292,23 @@ function StoryCard({
                                 hideBorder
                             />
                         </View>
-                    </LinearGradient>
+                    ) : (
+                        <LinearGradient
+                            colors={[...STORY_GRADIENT_RING_COLORS]}
+                            start={STORY_GRADIENT_RING_START}
+                            end={STORY_GRADIENT_RING_END}
+                            style={styles.cardAvatarRing}
+                        >
+                            <View style={styles.cardAvatarRingInner}>
+                                <Avatar
+                                    src={avatarSrc}
+                                    name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                                    size={CARD_AVATAR_PHOTO}
+                                    hideBorder
+                                />
+                            </View>
+                        </LinearGradient>
+                    )}
                 </View>
                 <View style={styles.cardFooter}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
@@ -549,6 +582,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     },
     ref,
 ) {
+    const { user } = useAuth();
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
     const [expandHideSource, setExpandHideSource] = useState(false);
     const [collapseHideSource, setCollapseHideSource] = useState(false);
@@ -580,6 +614,30 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     const registerCardRef = React.useCallback((handle: string, node: View | null) => {
         cardRefs.current[handle] = node;
     }, []);
+
+    const markRailItemSeen = useCallback(
+        (item: Stories24RailItem) => {
+            const ids =
+                item.storyIds && item.storyIds.length > 0
+                    ? item.storyIds
+                    : item.storyId
+                      ? [item.storyId]
+                      : [];
+            if (ids.length === 0) {
+                markStoryAsViewedLocal('', item.handle);
+                return;
+            }
+            ids.forEach((id) => markStoryAsViewedLocal(id, item.handle));
+            const viewerId = user?.id;
+            const viewerHandle = user?.handle;
+            if (viewerId) {
+                ids.forEach((id) => {
+                    void markStoryViewed(id, viewerId, viewerHandle).catch(() => {});
+                });
+            }
+        },
+        [user?.id, user?.handle],
+    );
 
     useEffect(() => {
         if (!collapsePayload) {
@@ -696,6 +754,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         if (!first || isStories24AddYoursHandle(first.handle)) {
             return false;
         }
+        markRailItemSeen(first);
         const handleKey = normalizeStories24Handle(first.handle);
         const node = cardRefs.current[handleKey];
         const startExpand = (rect: CardRect) => {
@@ -727,13 +786,14 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             startExpand({ x, y, width, height });
         });
         return true;
-    }, [items, onOpenStory, railHandles]);
+    }, [items, onOpenStory, railHandles, markRailItemSeen]);
 
     useImperativeHandle(ref, () => ({ openFirstStory: openFirstStoryFromRail }), [openFirstStoryFromRail]);
 
     if (items.length === 0) return null;
 
     const handleStoryCardPress = (item: Stories24RailItem, rect: CardRect) => {
+        markRailItemSeen(item);
         const handleKey = normalizeStories24Handle(item.handle);
         lastOpenRectByHandleRef.current[handleKey] = rect;
         // If a morph is already in flight (or stuck), open immediately instead of eating taps.
@@ -930,6 +990,17 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.45,
         shadowRadius: 4,
         elevation: 4,
+    },
+    cardAvatarSeen: {
+        width: CARD_AVATAR_RING,
+        height: CARD_AVATAR_RING,
+        borderRadius: CARD_AVATAR_RING / 2,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: STORY_RING_NONE_COLOR,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+        backgroundColor: '#000000',
     },
     cardAvatarRingInner: {
         width: '100%',

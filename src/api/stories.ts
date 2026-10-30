@@ -7,6 +7,10 @@ import {
     pickStoryPosterUri,
     resolveStoryMediaUrl,
 } from '../utils/storyMediaNative';
+import {
+    markStoryAsViewed as rememberStoryViewedLocal,
+    storyHasViewed,
+} from '../utils/storyViewedStore';
 
 let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
 export function getLastStoriesLoadSource(): 'api-paged' | 'api-user' | 'mock' {
@@ -793,7 +797,7 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         createdAt: story.created_at ? new Date(story.created_at).getTime() : Date.now(),
         expiresAt: story.expires_at ? new Date(story.expires_at).getTime() : Date.now(),
         views: Number(story.views_count ?? story.views ?? 0) || 0,
-        hasViewed: !!story.has_viewed,
+        hasViewed: storyHasViewed({ id: story.id, hasViewed: !!story.has_viewed, has_viewed: !!story.has_viewed }),
         reactions: [],
         replies: [],
         userReaction: story.user_reaction || undefined,
@@ -1146,11 +1150,24 @@ export async function createStory(
     }
 }
 
-// Mark story as viewed
-export async function markStoryViewed(storyId: string, _userId: string, viewerHandle?: string): Promise<void> {
-    await delay();
+/** Instant local seen (rail rings) without waiting for the view POST. */
+export function markStoryAsViewedLocal(storyId: string, handle?: string | null): void {
+    const story = stories.find((s) => s.id === storyId);
+    if (story) {
+        story.hasViewed = true;
+    }
+    rememberStoryViewedLocal(storyId, handle || story?.userHandle);
+    clearActiveStoryProbes();
+}
 
-    const story = stories.find(s => s.id === storyId);
+// Mark story as viewed
+export async function markStoryViewed(
+    storyId: string,
+    _userId: string,
+    viewerHandle?: string,
+    authorHandle?: string | null,
+): Promise<void> {
+    const story = stories.find((s) => s.id === storyId);
     if (story) {
         const normalizedHandle = (viewerHandle || '').trim();
         if (!Array.isArray(story.viewerHandles)) story.viewerHandles = [];
@@ -1163,9 +1180,19 @@ export async function markStoryViewed(storyId: string, _userId: string, viewerHa
         }
         story.hasViewed = true;
     }
+    markStoryAsViewedLocal(storyId, authorHandle || story?.userHandle);
 
-    // The cached active-story probe answers the avatar ring, so it must not outlive this view.
-    clearActiveStoryProbes();
+    if (isLaravelApiEnabled()) {
+        try {
+            const { apiRequest } = await import('./client');
+            await apiRequest(`/stories/${encodeURIComponent(storyId)}/view`, { method: 'POST' });
+        } catch (error) {
+            console.warn('markStoryViewed API failed:', error);
+        }
+        return;
+    }
+
+    await delay();
 }
 
 // Increment story view count
@@ -1397,7 +1424,9 @@ async function probeActiveStories(userHandle: string, userId?: string): Promise<
             const value: ActiveStoryProbe = {
                 any: list.length > 0,
                 // has_viewed is only reported when the viewer id is passed.
-                unviewed: userId ? list.some((s: any) => !s?.has_viewed) : list.length > 0,
+                unviewed: userId
+                    ? list.some((s: any) => !storyHasViewed({ id: s?.id, has_viewed: !!s?.has_viewed }))
+                    : list.length > 0,
             };
             storyProbes.set(key, { at: Date.now(), value });
             storyProbeFailures.delete(key);
@@ -1456,7 +1485,6 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string, userId?
 export async function fetchFollowedUsersStoryGroups(
     userId: string,
     followedUserHandles: string[],
-    filter?: string,
 ): Promise<StoryGroup[]> {
     if (isLaravelApiEnabled()) {
         try {
@@ -1466,20 +1494,31 @@ export async function fetchFollowedUsersStoryGroups(
             const maxPages = 5;
 
             do {
-                const page = await fetchStoriesPage(cursor, 50, userId, filter);
+                // Never pass the newsfeed location filter — Ireland/Discover must not
+                // leak unfollowed authors into the Stories 24 rail.
+                const page = await fetchStoriesPage(cursor, 50, userId);
                 collected.push(...page.items);
                 cursor = page.nextCursor;
                 pages += 1;
                 if (!page.hasMore) break;
             } while (cursor && pages < maxPages);
 
-            // The API (/stories/paged) is already scoped server-side to the viewer plus their
-            // accepted follows, so trust its results. The local follow cache can be empty or
-            // stale (e.g. follows made on another device), which previously hid followed users'
-            // stories from the rail. Only guard against other users' private (only_me) stories.
+            // The API (/stories/paged) is scoped to the viewer plus accepted follows.
+            // When the local follow cache has handles, drop anyone not in that set so a
+            // stale location-scoped payload cannot leak into the rail. An empty cache is
+            // trusted (follows made on another device). Direct profile/feed opens use
+            // fetchUserStories / fetchStoryGroupByHandle, not this rail list.
+            const followedSet = new Set(
+                (followedUserHandles || [])
+                    .map((h) => (h || '').trim().toLowerCase().replace(/^@/, ''))
+                    .filter(Boolean),
+            );
             const filtered = collected.filter((story) => {
                 if (story.userId === userId) return true;
-                return (story.audience || 'public') !== 'only_me';
+                if ((story.audience || 'public') === 'only_me') return false;
+                if (followedSet.size === 0) return true;
+                const handle = (story.userHandle || '').trim().toLowerCase().replace(/^@/, '');
+                return followedSet.has(handle);
             });
 
             const byUser = new Map<string, StoryGroup>();

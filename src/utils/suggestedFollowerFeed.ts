@@ -119,7 +119,7 @@ export function buildSuggestedFollowerFromPosts(
   for (const [handle, list] of byHandle) {
     const visual = list.filter((p) => postThumbVisual(p));
     if (visual.length < MIN_MEDIA_POSTS_FOR_SUGGESTED_FOLLOWER) continue;
-    const score = visual.reduce((sum, p) => sum + (p.stats?.views ?? 0), 0) + visual.length * 10;
+    const score = (visual || []).reduce((sum, p) => sum + (p.stats?.views ?? 0), 0) + visual.length * 10;
     if (score > bestScore) {
       bestScore = score;
       bestHandle = handle;

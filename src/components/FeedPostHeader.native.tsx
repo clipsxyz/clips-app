@@ -8,23 +8,16 @@ import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { useFollowState } from '../hooks/useFollowState';
-import { useStoryRingState } from '../hooks/useHasActiveStories';
-import Avatar from './Avatar';
+import StoryRingAvatar from './StoryRingAvatar.native';
 import VerifiedBadge from './VerifiedBadge.native';
 import { getPostSocialSourceLabel, getReclipDisplay } from '../utils/feedPostMeta';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
-import { storyRingColor, storyRingVisible } from '../utils/storyRingNative';
 
 /** Outer slot including ring + Instagram standoff so the photo stays ~30px. */
 const FEED_HEADER_AVATAR_SIZE = 36;
-/** Idle hairline; story rings use the thicker Instagram stroke. */
-const FEED_HEADER_AVATAR_IDLE_BORDER = 0.75;
-const FEED_HEADER_AVATAR_STORY_BORDER = 0.75;
-/** Dark gap between the photo and the outer ring (Instagram proportions). */
-const FEED_HEADER_AVATAR_RING_GAP = 2.5;
 /** Compact overlay badge (follow +, DM, follow check, request pill). */
 const FEED_HEADER_BADGE_SIZE = 10;
 const FEED_HEADER_BADGE_ICON = 6;
@@ -102,14 +95,6 @@ export default function FeedPostHeader({
     const reclipColor = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
 
     const viewerId = user?.id != null ? String(user.id) : undefined;
-    const storyRing = useStoryRingState(safeProfileHandle, {
-        viewerId,
-        isCurrentUser,
-        onHasStoryChange,
-    });
-    const hasStory = storyRing.hasStory;
-    const ringColor = storyRingColor(storyRing.state);
-    const showRing = storyRingVisible(storyRing.state);
 
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -131,31 +116,23 @@ export default function FeedPostHeader({
             style={[styles.avatarWrap, { width: FEED_HEADER_AVATAR_SIZE, height: FEED_HEADER_AVATAR_SIZE }]}
             collapsable={false}
         >
-            <TouchableOpacity
-                onPress={() => {
-                    if (onAvatarPress) {
-                        onAvatarPress(hasStory);
-                        return;
-                    }
-                    onProfileMenuPress?.();
-                }}
-                activeOpacity={0.85}
-                style={styles.avatarHit}
-                accessibilityRole="button"
-                accessibilityLabel={hasStory ? `View ${safeHandle} stories` : `View ${safeHandle} profile`}
-            >
-                <Avatar
+            <View style={styles.avatarHit}>
+                <StoryRingAvatar
+                    handle={safeProfileHandle}
                     src={avatarSrc}
                     name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
                     size={FEED_HEADER_AVATAR_SIZE}
-                    hasStory={hasStory}
-                    borderWidth={showRing ? FEED_HEADER_AVATAR_STORY_BORDER : FEED_HEADER_AVATAR_IDLE_BORDER}
-                    ringGap={FEED_HEADER_AVATAR_RING_GAP}
-                    gapColor="transparent"
-                    ringColor="#FFFFFF"
-                    hideBorder={false}
+                    viewerId={viewerId}
+                    onHasStoryChange={onHasStoryChange}
+                    onPress={(unseen) => {
+                        if (onAvatarPress) {
+                            onAvatarPress(unseen);
+                            return;
+                        }
+                        onProfileMenuPress?.();
+                    }}
                 />
-            </TouchableOpacity>
+            </View>
             {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
                 <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
                     <Icon name="add" size={FEED_HEADER_BADGE_ICON} color="#FFFFFF" />

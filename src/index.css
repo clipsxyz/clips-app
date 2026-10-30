@@ -129,7 +129,7 @@ video {
   }
 
   body {
-    @apply text-gray-900 dark:text-gray-100 antialiased;
+    @apply text-gray-100 antialiased;
     background-color: #000000;
   }
 

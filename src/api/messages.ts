@@ -1,4 +1,5 @@
 import { getRuntimeEnv, isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
+import { rememberUnseenStory } from '../utils/storyViewedStore';
 import { hasAuthTokenAsync } from '../utils/authTokenBridge';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 import { laravelMessageIsRead } from '../utils/dmThreadStatus';
@@ -948,7 +949,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
             const res = await apiClient.fetchConversations(0, 100);
             const items = res?.items ?? [];
             const { userHasUnviewedStoriesByHandle } = await import('./stories');
-            const summaries: ConversationSummary[] = await Promise.all(
+            const mapped = await Promise.all(
                 items.map(
                     async (row: {
                         type?: string;
@@ -979,7 +980,10 @@ export async function listConversations(forHandle: string): Promise<Conversation
                                 isMuted: false,
                             };
                         }
-                        const otherHandle = row.other_user?.handle ?? '';
+                        const otherHandle = (row.other_user?.handle ?? '').trim();
+                        if (!otherHandle) {
+                            return null;
+                        }
                         const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
                         const unread = liveThreadUnread(
                             forHandle,
@@ -989,6 +993,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
                             lastMessage?.senderHandle,
                         );
                         const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+                        rememberUnseenStory(otherHandle, hasUnviewedStories);
                         return {
                             kind: 'dm' as const,
                             otherHandle,
@@ -1002,6 +1007,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
                     },
                 ),
             );
+            const summaries = mapped.filter((row): row is ConversationSummary => row != null);
             return summaries.sort((a, b) => {
                 const ta = a.lastMessage?.timestamp ?? 0;
                 const tb = b.lastMessage?.timestamp ?? 0;
@@ -1041,6 +1047,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
     const allConversations = await Promise.all(
         Array.from(summaries.entries()).map(async ([otherHandle, v]) => {
             const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+            rememberUnseenStory(otherHandle, hasUnviewedStories);
             return {
                 otherHandle,
                 lastMessage: v.last,

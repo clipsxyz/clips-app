@@ -25,7 +25,8 @@ class StoryController extends Controller
 {
     /**
      * Get active stories with keyset cursor pagination.
-     * Followed authors always appear; location filter is OR'd, never exclusive.
+     * Stories 24 rail is viewer + accepted follows only — location/Discover
+     * query params must not inject unfollowed authors.
      */
     public function paged(Request $request): JsonResponse
     {
@@ -49,8 +50,7 @@ class StoryController extends Controller
         $query = app(StoryService::class)
             ->getStoriesRail(
                 $viewer instanceof User ? $viewer : null,
-                $request->get('userId'),
-                $request->get('filter')
+                $request->get('userId')
             )
             ->with(['user:id,handle,display_name,avatar_url'])
             ->withCount(['reactions', 'replies', 'views']);
@@ -111,8 +111,7 @@ class StoryController extends Controller
         $query = app(StoryService::class)
             ->getStoriesRail(
                 $viewer instanceof User ? $viewer : null,
-                $request->get('userId'),
-                $request->get('filter')
+                $request->get('userId')
             )
             ->with(['user:id,handle,display_name,avatar_url'])
             ->withCount(['reactions', 'replies', 'views']);

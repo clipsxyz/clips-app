@@ -12,6 +12,7 @@ import ScenesModal from '../components/ScenesModal';
 import CommentsModal from '../components/CommentsModal';
 import ShareModal from '../components/ShareModal';
 import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
+import { reachPercent, storyInsightRowStats, summarizeStoryInsights } from '../utils/storyInsightsAnalytics';
 import { listConversations, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
@@ -22,6 +23,7 @@ import { getFollowedUsers } from '../api/posts';
 import type { StoryGroup } from '../types';
 import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/client';
 import { fetchUserProfile } from '../api/client';
+import { describeFetchError } from '../api/httpClient';
 import { getSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
 import { markGroupConversationReadById } from '../api/messages';
@@ -461,6 +463,7 @@ export default function InboxPage() {
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
+    const [loadError, setLoadError] = React.useState<string | null>(null);
     const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages' | 'groups'>('messages');
     const [messageFilter, setMessageFilter] = React.useState<'all' | 'groups' | 'unread' | 'requests' | 'pinned'>('all');
     const [conversationQuery, setConversationQuery] = React.useState('');
@@ -642,6 +645,7 @@ export default function InboxPage() {
 
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
+        setLoadError(null);
         try {
             const [notifs, storyInsights, conversations, followedUsers] = await Promise.all([
                 getNotifications(user.handle),
@@ -782,7 +786,9 @@ export default function InboxPage() {
             }
             setLoading(false);
         } catch (error) {
-            console.error('Error loading inbox data:', error);
+            const message = describeFetchError(error);
+            console.error('Error loading inbox data:', message, error);
+            setLoadError(message);
             setNotifications([]);
             setInsights([]);
             setItems([]);
@@ -1078,6 +1084,15 @@ export default function InboxPage() {
                     (Array.isArray(insight.replies) && insight.replies.length > 0)
             ),
         [insights]
+    );
+    const insightsOverview = React.useMemo(
+        () =>
+            summarizeStoryInsights(actionableInsights, {
+                local: user?.local,
+                regional: user?.regional,
+                national: user?.national,
+            }),
+        [actionableInsights, user?.local, user?.national, user?.regional],
     );
 
     if (!user) {
@@ -1394,6 +1409,20 @@ export default function InboxPage() {
                     </div>
                 </div>
             )}
+
+            {loadError ? (
+                <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/15 px-3 py-2.5">
+                    <div className="text-sm font-semibold text-red-100">Could not load inbox</div>
+                    <p className="mt-1 text-xs text-red-100/80">{loadError}</p>
+                    <button
+                        type="button"
+                        onClick={() => void loadData()}
+                        className="mt-2 text-xs font-semibold text-white underline"
+                    >
+                        Retry
+                    </button>
+                </div>
+            ) : null}
 
             {/* Tabs */}
             <div className="flex mb-4 border-b border-gray-800">
@@ -1971,6 +2000,69 @@ export default function InboxPage() {
                     <div className="text-gray-500">No story insights yet.</div>
                 ) : (
                 <div className="space-y-2">
+                    {(() => {
+                        const reachTotal =
+                            insightsOverview.localViews +
+                                insightsOverview.regionalViews +
+                                insightsOverview.discoverViews || insightsOverview.totalViews;
+                        const reachRows: Array<{ label: string; count: number; color: string }> = [
+                            { label: 'Local', count: insightsOverview.localViews, color: '#34D399' },
+                            { label: 'Regional', count: insightsOverview.regionalViews, color: '#00F2FF' },
+                            { label: 'Discover', count: insightsOverview.discoverViews, color: '#A78BFA' },
+                        ];
+                        return (
+                            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3.5 mb-2">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-300 mb-1">
+                                    Creator analytics
+                                </div>
+                                <div className="text-white font-semibold text-[16px] mb-3">Story performance</div>
+                                <div className="grid grid-cols-3 gap-2 mb-3">
+                                    {[
+                                        { value: String(insightsOverview.totalViews), label: 'Total views' },
+                                        { value: `${insightsOverview.completionRate}%`, label: 'Completion' },
+                                        { value: String(insightsOverview.directShares), label: 'Direct shares' },
+                                    ].map((tile) => (
+                                        <div
+                                            key={tile.label}
+                                            className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-2.5 text-center"
+                                        >
+                                            <div className="text-white text-lg font-bold">{tile.value}</div>
+                                            <div className="text-[10px] text-slate-400 font-semibold mt-1">{tile.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden mb-1.5">
+                                    <div
+                                        className="h-full rounded-full bg-cyan-400"
+                                        style={{ width: `${insightsOverview.completionRate}%` }}
+                                    />
+                                </div>
+                                <div className="text-[11px] text-slate-400 mb-3.5">
+                                    Viewers who reacted or replied · {insightsOverview.uniqueViewers} unique
+                                </div>
+                                <div className="text-white text-xs font-bold mb-2">Geographical reach</div>
+                                {reachRows.map((row) => {
+                                    const pct = reachPercent(row.count, reachTotal);
+                                    return (
+                                        <div key={row.label} className="mb-2">
+                                            <div className="flex justify-between text-[12px] mb-1">
+                                                <span className="text-gray-200 font-semibold">{row.label}</span>
+                                                <span className="text-slate-400">
+                                                    {row.count} · {pct}%
+                                                </span>
+                                            </div>
+                                            <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                                                <div
+                                                    className="h-full rounded-full"
+                                                    style={{ width: `${pct}%`, backgroundColor: row.color }}
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })()}
                     {unseenInsightsCount > 0 && (
                         <div className="flex justify-end mb-2">
                             <button
@@ -1985,6 +2077,7 @@ export default function InboxPage() {
                         const primaryLiker = insight.likers?.[0];
                         const primaryViewer = insight.viewers?.[0];
                         const primaryHandle = primaryLiker || primaryViewer;
+                        const rowStats = storyInsightRowStats(insight);
                         return (
                         <div
                             key={insight.storyId}
@@ -2070,6 +2163,19 @@ export default function InboxPage() {
                                     ) : (
                                         'New story activity'
                                     )}
+                                </div>
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold text-gray-300">
+                                        {rowStats.views} views
+                                    </span>
+                                    <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold text-gray-300">
+                                        {rowStats.completionRate}% done
+                                    </span>
+                                    {rowStats.directShares > 0 ? (
+                                        <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold text-gray-300">
+                                            {rowStats.directShares} direct
+                                        </span>
+                                    ) : null}
                                 </div>
                             </div>
                             <div className="text-[10px] text-gray-400">

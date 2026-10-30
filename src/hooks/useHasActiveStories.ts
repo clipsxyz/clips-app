@@ -1,7 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { storyRingState } from '../utils/storyRingNative';
 import type { StoryRingState } from '../utils/storyRingNative';
+import {
+    getStoryViewedVersion,
+    hasUnseenStory as hasUnseenStoryFromStore,
+    isHandleStoryRingSeen,
+    rememberUnseenStory,
+    subscribeStoryViewed,
+} from '../utils/storyViewedStore';
 
 export interface UseHasActiveStoriesOptions {
     /** Viewing user id; lets the endpoint report has_viewed so the unviewed ring is accurate. */
@@ -10,6 +17,10 @@ export interface UseHasActiveStoriesOptions {
     isCurrentUser?: boolean;
     /** Raw "has any story" result, consumed by feed menus. Read through a ref — identity changes must not re-trigger the probe effect. */
     onHasStoryChange?: (hasStory: boolean) => void;
+    /** When false, skip the network probe (inbox rows already know unseen from the thread list). */
+    enabled?: boolean;
+    /** Optimistic unseen from a conversation/list payload until the probe (or a view) settles. */
+    initialUnseen?: boolean;
 }
 
 export interface StoryRingResult {
@@ -24,8 +35,10 @@ export interface StoryRingResult {
 /** Shared probe body: answers "has any" + "has unviewed" from one cached request pair. */
 function useStoryProbe(
     handle: string,
-    { viewerId, isCurrentUser = false, onHasStoryChange }: UseHasActiveStoriesOptions,
+    { viewerId, isCurrentUser = false, onHasStoryChange, enabled = true }: UseHasActiveStoriesOptions,
 ): StoryRingResult {
+    useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
+    const handleSeen = isHandleStoryRingSeen(handle);
     const [result, setResult] = useState<StoryRingResult>({
         state: 'none',
         hasStory: false,
@@ -37,6 +50,7 @@ function useStoryProbe(
     const reportedRef = useRef<boolean | null>(null);
 
     useEffect(() => {
+        if (!enabled) return undefined;
         let cancelled = false;
         async function checkStory() {
             const anyStory = await userHasStoriesByHandle(handle, viewerId);
@@ -67,8 +81,15 @@ function useStoryProbe(
         return () => {
             cancelled = true;
         };
-    }, [handle, viewerId, isCurrentUser]);
+    }, [handle, viewerId, isCurrentUser, enabled, handleSeen]);
 
+    if (handleSeen && result.hasStory) {
+        return {
+            ...result,
+            hasUnviewed: false,
+            state: storyRingState({ any: true, unviewed: false }),
+        };
+    }
     return result;
 }
 
@@ -103,4 +124,41 @@ export function useHasActiveStories(
     // Preserve the historical contract: own profile rings on "any story", others ring on
     // "unviewed story". New callers that need the distinction use `useStoryRingState`.
     return isCurrentUser ? result.hasStory : result.hasUnviewed;
+}
+
+/**
+ * Shared unseen-story getter for every avatar ring (feed header, inbox, rail).
+ * Equivalent to `useStoriesStore(s => s.hasUnseenStory(userId))`.
+ * Returns true only while this author has active stories the viewer has not opened.
+ */
+export function useHasUnseenStory(
+    userIdOrHandle: string,
+    options: UseHasActiveStoriesOptions = {},
+): boolean {
+    const { enabled = true, initialUnseen = false } = options;
+    const viewedVersion = useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
+    const ring = useStoryProbe(userIdOrHandle, options);
+    useEffect(() => {
+        if (!userIdOrHandle) return;
+        if (isHandleStoryRingSeen(userIdOrHandle)) {
+            rememberUnseenStory(userIdOrHandle, false);
+            return;
+        }
+        if (initialUnseen) {
+            rememberUnseenStory(userIdOrHandle, true);
+        }
+        if (!enabled) return;
+        if (ring.hasUnviewed) {
+            rememberUnseenStory(userIdOrHandle, true);
+        } else if (ring.hasStory) {
+            rememberUnseenStory(userIdOrHandle, false);
+        }
+    }, [userIdOrHandle, enabled, initialUnseen, ring.hasUnviewed, ring.hasStory, viewedVersion]);
+
+    if (isHandleStoryRingSeen(userIdOrHandle)) return false;
+    if (hasUnseenStoryFromStore(userIdOrHandle)) return true;
+    // Feed cards: never keep a gradient from a stale probe after the author was marked seen.
+    // Inbox rows (probe off) may show `initialUnseen` until the store is seeded.
+    if (!enabled) return !!initialUnseen;
+    return false;
 }

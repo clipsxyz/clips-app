@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
 import {
     View,
     Text,
@@ -36,11 +36,28 @@ import {
     markAllNotificationsRead,
     deleteNotification,
 } from '../api/notifications';
-import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle, fetchFollowedUsersStoryGroups } from '../api/stories';
+import {
+    getStoryInsightsForUser,
+    type StoryInsight,
+    fetchStoryGroupByHandle,
+    fetchFollowedUsersStoryGroups,
+    markStoryAsViewedLocal,
+    markStoryViewed,
+} from '../api/stories';
+import {
+    getStoryViewedVersion,
+    hasUnseenStory,
+    isHandleStoryRingSeen,
+    storyHasViewed,
+    subscribeStoryViewed,
+} from '../utils/storyViewedStore';
+import StoryInsightsOverview from '../components/StoryInsightsOverview.native';
+import { storyInsightRowStats, summarizeStoryInsights } from '../utils/storyInsightsAnalytics';
 import type { StoryGroup } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
 import { fetchUserProfile } from '../api/client';
+import { describeFetchError } from '../api/httpClient';
 import { acceptFollowRequest as acceptFollowRequestApi, denyFollowRequest as denyFollowRequestApi } from '../api/client';
 import { getFollowedUsers } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
@@ -214,6 +231,7 @@ export default function InboxScreen({ navigation, route }: any) {
     const [inboxAlert, setInboxAlert] = useState<InboxAlertConfig | null>(null);
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<InboxTab>('messages');
     const [messageFilter, setMessageFilter] = useState<MessageFilter>('all');
     const [refreshing, setRefreshing] = useState(false);
@@ -251,6 +269,15 @@ export default function InboxScreen({ navigation, route }: any) {
                     (Array.isArray(item.replies) && item.replies.length > 0)
             ),
         [insights]
+    );
+    const insightsOverview = useMemo(
+        () =>
+            summarizeStoryInsights(actionableInsights, {
+                local: user?.local,
+                regional: user?.regional,
+                national: user?.national,
+            }),
+        [actionableInsights, user?.local, user?.national, user?.regional],
     );
 
     const loadSeenInsights = useCallback(async (handle: string) => {
@@ -303,6 +330,7 @@ export default function InboxScreen({ navigation, route }: any) {
         () => insights.filter((insight) => insight.storyId && !seenInsightIds.has(insight.storyId)).length,
         [insights, seenInsightIds]
     );
+    const storyViewedVersion = useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
 
     useEffect(() => {
         loadData();
@@ -500,6 +528,27 @@ export default function InboxScreen({ navigation, route }: any) {
 
     const openFollowedStoryFromRail = useCallback(
         (group: StoryGroup) => {
+            const ids = (group.stories || []).map((s) => s.id).filter(Boolean);
+            if (ids.length === 0) {
+                markStoryAsViewedLocal('', group.userHandle);
+            } else {
+                ids.forEach((id) => markStoryAsViewedLocal(id, group.userHandle));
+                if (user?.id) {
+                    ids.forEach((id) => {
+                        void markStoryViewed(id, user.id, user.handle).catch(() => {});
+                    });
+                }
+            }
+            setStoryGroups((prev) =>
+                prev.map((row) =>
+                    row.userHandle === group.userHandle
+                        ? {
+                              ...row,
+                              stories: (row.stories || []).map((s) => ({ ...s, hasViewed: true })),
+                          }
+                        : row,
+                ),
+            );
             const railHandles = storyGroups
                 .map((g) => g.userHandle)
                 .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
@@ -529,7 +578,7 @@ export default function InboxScreen({ navigation, route }: any) {
             }
             navigation.navigate('Stories', params);
         },
-        [navigation, storyGroups],
+        [navigation, storyGroups, user?.id, user?.handle],
     );
 
     const loadData = async (opts?: { silent?: boolean }) => {
@@ -541,12 +590,28 @@ export default function InboxScreen({ navigation, route }: any) {
         if (!silent) {
             setLoading(true);
         }
+        setLoadError(null);
         try {
-            const [notifs, storyInsights, pending] = await Promise.all([
+            const settled = await Promise.allSettled([
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
                 fetchPendingGroupInvites(),
             ]);
+            const rejected = settled.filter((row) => row.status === 'rejected') as PromiseRejectedResult[];
+            rejected.forEach((row) => {
+                console.error('Error loading inbox:', describeFetchError(row.reason), row.reason);
+            });
+            if (settled.every((row) => row.status === 'rejected')) {
+                throw rejected[0]?.reason || new Error('Network request failed');
+            }
+            const notifs =
+                settled[0].status === 'fulfilled' ? settled[0].value : ([] as Awaited<ReturnType<typeof getNotifications>>);
+            const storyInsights =
+                settled[1].status === 'fulfilled' ? settled[1].value : ([] as Awaited<ReturnType<typeof getStoryInsightsForUser>>);
+            const pending = settled[2].status === 'fulfilled' ? settled[2].value : [];
+            if (rejected.length > 0) {
+                setLoadError(describeFetchError(rejected[0].reason));
+            }
             const pendingRows = Array.isArray(pending) ? pending : [];
             const dismissedInvites = dismissedInviteIdsRef.current;
             const actingId = actingInviteIdRef.current;
@@ -607,7 +672,13 @@ export default function InboxScreen({ navigation, route }: any) {
                 return next;
             });
             setInsights(storyInsights);
-            const convs = await listConversations(user.handle);
+            let convs: Awaited<ReturnType<typeof listConversations>> = [];
+            try {
+                convs = await listConversations(user.handle);
+            } catch (e) {
+                console.error('Error loading inbox conversations:', describeFetchError(e), e);
+                setLoadError((prev) => prev || describeFetchError(e));
+            }
             setConversations(Array.isArray(convs) ? convs : []);
 
             if (user?.id) {
@@ -633,7 +704,9 @@ export default function InboxScreen({ navigation, route }: any) {
                 setStoryGroups([]);
             }
         } catch (error) {
-            console.error('Error loading inbox:', error);
+            const message = describeFetchError(error);
+            console.error('Error loading inbox:', message, error);
+            setLoadError(message);
             setConversations([]);
         } finally {
             setLoading(false);
@@ -1199,7 +1272,12 @@ export default function InboxScreen({ navigation, route }: any) {
                 onPress={() => { void openConversation(item); }}
                 onOpenChatInfo={() => openInboxChatInfo(item)}
                 onAvatarPress={() => {
-                    if (!isGroup && item.hasUnviewedStories) {
+                    if (
+                        !isGroup &&
+                        (hasUnseenStory(item.otherHandle) ||
+                            (!!item.hasUnviewedStories && !isHandleStoryRingSeen(item.otherHandle)))
+                    ) {
+                        markStoryAsViewedLocal('', item.otherHandle);
                         navigation.navigate('Stories', { openUserHandle: item.otherHandle });
                         return;
                     }
@@ -1214,7 +1292,7 @@ export default function InboxScreen({ navigation, route }: any) {
         );
     };
 
-    if (loading) {
+    if (loading && !loadError) {
         return (
             <GazetteerScreenShell ambient={false} style={styles.pageShell} contentStyle={styles.loadingShell}>
                 <View style={styles.header}>
@@ -1259,6 +1337,12 @@ export default function InboxScreen({ navigation, route }: any) {
                     </TouchableOpacity>
                 ) : null}
             </View>
+            {loadError ? (
+                <View style={styles.loadErrorBanner}>
+                    <Text style={styles.loadErrorTitle}>Could not load inbox</Text>
+                    <Text style={styles.loadErrorText}>{loadError}</Text>
+                </View>
+            ) : null}
 
             {/* Web order: stories → tabs → content */}
             {storyGroups.length > 0 ? (
@@ -1269,7 +1353,10 @@ export default function InboxScreen({ navigation, route }: any) {
                     contentContainerStyle={styles.storiesRail}
                 >
                     {storyGroups.map((group) => {
-                        const hasUnviewed = (group.stories || []).some((s) => !s.hasViewed);
+                        const hasUnviewed =
+                            !isHandleStoryRingSeen(group.userHandle) &&
+                            (hasUnseenStory(group.userHandle) ||
+                                (group.stories || []).some((s) => !storyHasViewed(s)));
                         const ring = (
                             <View style={styles.storyRingInner}>
                                 <Avatar
@@ -1509,12 +1596,12 @@ export default function InboxScreen({ navigation, route }: any) {
                     data={actionableInsights}
                     keyExtractor={(item) => item.storyId}
                     ListHeaderComponent={
-                        unseenInsightsCount > 0 ? (
-                            <View style={styles.listActionRow}>
-                                <TouchableOpacity onPress={markAllInsightsSeen}>
-                                    <Text style={styles.headerActionText}>Mark all seen</Text>
-                                </TouchableOpacity>
-                            </View>
+                        actionableInsights.length > 0 ? (
+                            <StoryInsightsOverview
+                                stats={insightsOverview}
+                                unseenCount={unseenInsightsCount}
+                                onMarkAllSeen={markAllInsightsSeen}
+                            />
                         ) : null
                     }
                     renderItem={({ item }) => {
@@ -1535,6 +1622,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                 : 'Your story';
                         const reactionCount = item.reactions?.length || 0;
                         const replyCount = item.replies?.length || 0;
+                        const rowStats = storyInsightRowStats(item);
 
                         let activityLine: React.ReactNode = 'New story activity';
                         if (replyCount > 0 && primaryReply) {
@@ -1609,6 +1697,21 @@ export default function InboxScreen({ navigation, route }: any) {
                                 <Text style={styles.itemMessage} numberOfLines={2}>
                                     {activityLine}
                                 </Text>
+                                <View style={styles.insightMetricRow}>
+                                    <View style={styles.insightMetricBadge}>
+                                        <Text style={styles.insightMetricBadgeText}>{rowStats.views} views</Text>
+                                    </View>
+                                    <View style={styles.insightMetricBadge}>
+                                        <Text style={styles.insightMetricBadgeText}>{rowStats.completionRate}% done</Text>
+                                    </View>
+                                    {rowStats.directShares > 0 ? (
+                                        <View style={styles.insightMetricBadge}>
+                                            <Text style={styles.insightMetricBadgeText}>
+                                                {rowStats.directShares} direct
+                                            </Text>
+                                        </View>
+                                    ) : null}
+                                </View>
                                 {(reactionCount > 1 || (item.likers?.length || 0) > 1) ? (
                                     <TouchableOpacity
                                         onPress={() =>
@@ -1653,6 +1756,7 @@ export default function InboxScreen({ navigation, route }: any) {
             ) : activeTab === 'groups' ? (
                 <FlatList
                     key="groups"
+                    extraData={storyViewedVersion}
                     data={groupMessages}
                     keyExtractor={(item, idx) => `group-${item.chatGroupId || idx}`}
                     refreshControl={
@@ -1727,6 +1831,7 @@ export default function InboxScreen({ navigation, route }: any) {
                 <>
                 <FlatList
                     key={`messages-${messageFilter}`}
+                    extraData={storyViewedVersion}
                     data={
                         showMessageSections
                             ? [...pinnedSection, ...regularSection]
@@ -1761,7 +1866,9 @@ export default function InboxScreen({ navigation, route }: any) {
                     }}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyText}>No messages yet.</Text>
+                            <Text style={styles.emptyText}>
+                                {loadError ? loadError : 'No messages yet.'}
+                            </Text>
                         </View>
                     }
                 />
@@ -2054,6 +2161,25 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    insightMetricRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: ox(6),
+        marginTop: ox(6),
+    },
+    insightMetricBadge: {
+        borderRadius: ox(999),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(3),
+    },
+    insightMetricBadgeText: {
+        color: '#D1D5DB',
+        fontSize: ox(10),
+        fontWeight: '700',
+    },
     itemMessageStrong: {
         color: '#FFFFFF',
         fontWeight: '700',
@@ -2313,6 +2439,27 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.16)',
         gap: ox(10),
+    },
+    loadErrorBanner: {
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
+        borderRadius: ox(12),
+        backgroundColor: 'rgba(239, 68, 68, 0.16)',
+        borderWidth: 1,
+        borderColor: 'rgba(248, 113, 113, 0.35)',
+    },
+    loadErrorTitle: {
+        color: '#FECACA',
+        fontSize: ox(13),
+        fontWeight: '700',
+        marginBottom: ox(4),
+    },
+    loadErrorText: {
+        color: 'rgba(254, 226, 226, 0.9)',
+        fontSize: ox(12),
+        lineHeight: ox(17),
     },
     emptyContainer: {
         flex: 1,

@@ -34,7 +34,7 @@ import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client'
 import { followOrRequest } from '../utils/followOrRequest';
 import { emitFollowStatusChanged } from '../hooks/useFollowState';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
-import { clearActiveStoryProbes, userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
+import { clearActiveStoryProbes, markStoryAsViewedLocal, userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { storyRingState as resolveStoryRingState } from '../utils/storyRingNative';
 import type { StoryRingState } from '../utils/storyRingNative';
 import {
@@ -462,6 +462,7 @@ const result = await followOrRequest({
 
     const handleStoryPress = () => {
         clearActiveStoryProbes();
+        markStoryAsViewedLocal('', handle);
         navigation.navigate('Stories', {
             openUserHandle: handle,
             targetHandle: handle,

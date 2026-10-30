@@ -66,27 +66,27 @@ export default function StoryBottomBar({
             pointerEvents="box-none"
         >
             {ownerMode ? (
-                <View style={styles.tray}>
+                <View style={styles.ownerRow} pointerEvents="box-none">
                     <TouchableOpacity
-                        style={styles.messagePill}
+                        style={styles.insightsPill}
                         onPress={onOpenInsights}
-                        activeOpacity={0.75}
+                        activeOpacity={0.8}
                         accessibilityRole="button"
-                        accessibilityLabel="Story insights"
+                        accessibilityLabel="Open story insights"
                     >
-                        <Text style={styles.messagePillText} numberOfLines={1}>
+                        <Text style={styles.insightsPillText} numberOfLines={1}>
                             {ownerSummary}
                         </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         onPress={onShare}
-                        style={styles.actionBtn}
+                        style={styles.ownerShareBtn}
                         activeOpacity={0.7}
                         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                         accessibilityRole="button"
                         accessibilityLabel="Share story"
                     >
-                        <Icon name="arrow-redo-outline" size={ox(28)} color="#FFFFFF" />
+                        <Icon name="arrow-redo-outline" size={ox(22)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
             ) : showReplyComposer ? (
@@ -194,9 +194,47 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         zIndex: 120,
-        elevation: 24,
-        paddingHorizontal: ox(10),
-        paddingTop: ox(8),
+        elevation: Platform.OS === 'android' ? 120 : 24,
+        paddingHorizontal: ox(16),
+        paddingTop: ox(28),
+    },
+    ownerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        width: '100%',
+    },
+    insightsPill: {
+        flex: 1,
+        minHeight: ox(44),
+        borderRadius: ox(999),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.28)',
+        backgroundColor: 'rgba(0,0,0,0.58)',
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
+        justifyContent: 'center',
+        zIndex: 121,
+        elevation: Platform.OS === 'android' ? 121 : 0,
+    },
+    insightsPillText: {
+        color: 'rgba(255,255,255,0.92)',
+        fontSize: ox(13),
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    ownerShareBtn: {
+        width: ox(44),
+        height: ox(44),
+        marginLeft: ox(8),
+        borderRadius: ox(22),
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.22)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 121,
+        elevation: Platform.OS === 'android' ? 121 : 0,
+        flexShrink: 0,
     },
     tray: {
         flexDirection: 'row',

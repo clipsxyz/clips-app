@@ -7,7 +7,8 @@ import React, { useEffect, useState } from 'react';
 import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { CommonActions, DarkTheme, NavigationContainer } from '@react-navigation/native';
+import { CommonActions, DarkTheme, NavigationContainer, StackActions } from '@react-navigation/native';
+import { isMainTabName } from './src/navigation/mainTabs';
 import { resetRootToScreen, rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
 import {
   getNativeShareNavState,
@@ -61,6 +62,7 @@ import ScenesScreen from './src/screens/ScenesScreen';
 import ImageFullscreenScreen from './src/screens/ImageFullscreenScreen.native';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
+import { resetGlobalVideoMutedForNewSession } from './src/utils/globalVideoMuteNative';
 import { schedulePushNotificationNavigation } from './src/utils/pushNotificationNavigationNative';
 import UploadProgressToast from './src/components/UploadProgressToast.native';
 
@@ -125,34 +127,37 @@ const TAB_BAR_STYLE = {
 };
 
 function inboxStackIndex(state: { routes?: Array<{ name: string; state?: { index?: number } }> } | undefined): number {
-  const inbox = state?.routes?.find((route) => route.name === 'Inbox');
+  const inbox = (state?.routes || []).find((route) => route.name === 'Inbox');
   const nested = inbox?.state;
   if (!nested || typeof nested.index !== 'number') return 0;
   return nested.index;
 }
 
 /** Drop PostDetail / ViewProfile from Inbox without refocusing the Inbox tab. */
-function popInboxStackToList(navigation: { dispatch: (action: any) => void }) {
+function popInboxStackToList(navigation: { getState?: () => any; dispatch: (action: any) => void }) {
+  const current = navigation.getState?.();
+  if (!current || inboxStackIndex(current) === 0) return;
+
   navigation.dispatch((state: any) => {
-    const inboxIndex = state.routes.findIndex((route: { name: string }) => route.name === 'Inbox');
-    if (inboxIndex < 0) return state;
-    const inboxRoute = state.routes[inboxIndex];
-    const nested = inboxRoute.state;
-    if (!nested || nested.index === 0) return state;
-    const nextRoutes = state.routes.slice();
-    nextRoutes[inboxIndex] = {
-      ...inboxRoute,
-      state: {
-        ...nested,
-        index: 0,
-        routes: nested.routes.slice(0, 1),
-      },
+    const tabRoutes = Array.isArray(state?.routes) ? state.routes : [];
+    const rawFocused = tabRoutes[state?.index]?.name;
+    const focusedName = isMainTabName(rawFocused) ? rawFocused : 'Home';
+    const inboxRoute = tabRoutes.find((route: { name: string }) => route.name === 'Inbox');
+    const nested = inboxRoute?.state;
+    const nestedKey = typeof nested?.key === 'string' ? nested.key : '';
+    const nestedIndex = typeof nested?.index === 'number' ? nested.index : 0;
+
+    // Dispatch helpers MUST return an action (`NAVIGATE` / `POP_TO_TOP`).
+    // Returning the tab navigator `state` (`type: 'tab'`) triggers
+    // "The action 'tab' was not handled by any navigator."
+    if (!nestedKey || nestedIndex === 0) {
+      return CommonActions.navigate({ name: focusedName });
+    }
+
+    return {
+      ...StackActions.popToTop(),
+      target: nestedKey,
     };
-    return CommonActions.reset({
-      ...state,
-      routes: nextRoutes,
-      index: state.index,
-    });
   });
 }
 
@@ -303,11 +308,12 @@ function MainTabs() {
 }
 
 function App(): React.JSX.Element {
-    const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
+  const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
     schedulePushNotificationNavigation(() => navigationRef, data || {});
   }, []);
 
   React.useEffect(() => {
+    resetGlobalVideoMutedForNewSession();
     void hydrateAuthTokenFromStorage();
   }, []);
 

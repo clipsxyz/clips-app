@@ -17,11 +17,12 @@ function toFileUri(path: string): string {
     return `file://${raw}`;
 }
 
-function cropImageToAsset(img: CropImage & { duration?: number | null }): Asset {
+function cropImageToAsset(img: CropImage & { duration?: number | null; data?: string | null }): Asset {
     const mime = String(img.mime || '');
     const durationRaw = Number(img.duration || 0);
     const durationSec = durationRaw > 1000 ? durationRaw / 1000 : durationRaw;
     const isVideo = mime.startsWith('video/') || /\.(mp4|mov|m4v|webm|3gp)$/i.test(img.path || '');
+    const base64 = typeof img.data === 'string' && img.data.length > 0 ? img.data : undefined;
     return {
         uri: toFileUri(img.path),
         type: mime || (isVideo ? 'video/mp4' : 'image/jpeg'),
@@ -30,7 +31,21 @@ function cropImageToAsset(img: CropImage & { duration?: number | null }): Asset 
         height: img.height,
         fileSize: img.size,
         duration: isVideo && durationSec > 0 ? durationSec : undefined,
+        base64,
     };
+}
+
+export type FullGalleryMediaType = 'any' | 'photo';
+
+export type PickFromFullGalleryOptions = {
+    mediaType?: FullGalleryMediaType;
+    includeBase64?: boolean;
+};
+
+function isVideoAsset(asset: { type?: string; uri?: string }): boolean {
+    const mime = String(asset.type || '').toLowerCase();
+    const uri = String(asset.uri || '').toLowerCase();
+    return mime.startsWith('video/') || /\.(mp4|mov|m4v|webm|3gp)(\?|#|$)/i.test(uri);
 }
 
 function isCancel(err: unknown): boolean {
@@ -47,15 +62,21 @@ function isCancel(err: unknown): boolean {
  * Android: ACTION_PICK against MediaStore (Oppo Gallery), not DocumentsUI Recents.
  * iOS: Photos library via image-crop-picker.
  */
-export async function pickFromFullGallery(selectionLimit = CAROUSEL_MAX_ITEMS): Promise<Asset[] | 'denied' | 'cancel'> {
+export async function pickFromFullGallery(
+    selectionLimit = CAROUSEL_MAX_ITEMS,
+    options: PickFromFullGalleryOptions = {},
+): Promise<Asset[] | 'denied' | 'cancel'> {
     const allowed = await ensureGalleryMediaPermission();
     if (!allowed) return 'denied';
 
+    const photosOnly = options.mediaType === 'photo';
+    const nativeMediaType = photosOnly ? 'image' : 'any';
+    const cropMediaType = photosOnly ? 'photo' : 'any';
     const multiple = selectionLimit !== 1;
 
     if (Platform.OS === 'android' && GalleryRollPicker?.open) {
         try {
-            const items = await GalleryRollPicker.open({ multiple, mediaType: 'any' });
+            const items = await GalleryRollPicker.open({ multiple, mediaType: nativeMediaType });
             const assets = (items || [])
                 .map((item) => ({
                     uri: item.uri,
@@ -64,7 +85,8 @@ export async function pickFromFullGallery(selectionLimit = CAROUSEL_MAX_ITEMS): 
                     fileSize: typeof item.fileSize === 'number' ? item.fileSize : undefined,
                     duration: typeof item.duration === 'number' ? item.duration : undefined,
                 }))
-                .filter((asset) => !!asset.uri) as Asset[];
+                .filter((asset) => !!asset.uri)
+                .filter((asset) => (photosOnly ? !isVideoAsset(asset) : true)) as Asset[];
             return assets.length > 0 ? assets.slice(0, Math.max(1, selectionLimit)) : 'cancel';
         } catch (err) {
             if (isCancel(err)) return 'cancel';
@@ -74,14 +96,20 @@ export async function pickFromFullGallery(selectionLimit = CAROUSEL_MAX_ITEMS): 
 
     try {
         const result = await ImageCropPicker.openPicker({
-            mediaType: 'any',
+            mediaType: cropMediaType,
             multiple,
             maxFiles: Math.max(1, selectionLimit),
             compressImageQuality: 0.9,
-            smartAlbums: ['UserLibrary', 'Favorites', 'Videos', 'SelfPortraits', 'Screenshots'],
+            includeBase64: !!options.includeBase64,
+            smartAlbums: photosOnly
+                ? ['UserLibrary', 'Favorites', 'SelfPortraits', 'Screenshots', 'RecentlyAdded']
+                : ['UserLibrary', 'Favorites', 'Videos', 'SelfPortraits', 'Screenshots'],
         });
         const list = Array.isArray(result) ? result : [result];
-        return list.map(cropImageToAsset).filter((asset) => !!asset.uri);
+        return list
+            .map(cropImageToAsset)
+            .filter((asset) => !!asset.uri)
+            .filter((asset) => (photosOnly ? !isVideoAsset(asset) : true));
     } catch (err) {
         if (isCancel(err)) return 'cancel';
         console.warn('[pickFromFullGallery]', err);
