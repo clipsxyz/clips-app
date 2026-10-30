@@ -1344,8 +1344,10 @@ export default function InboxScreen({ navigation, route }: any) {
                 </View>
             ) : null}
 
-            {/* Web order: stories → tabs → content */}
+            {/* Stories rail, then tabs, then list — column stack, no overlay. */}
+            <View style={styles.inboxTopStack}>
             {storyGroups.length > 0 ? (
+                <View style={styles.storiesRailWrap}>
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -1391,6 +1393,7 @@ export default function InboxScreen({ navigation, route }: any) {
                         );
                     })}
                 </ScrollView>
+                </View>
             ) : null}
 
             <View style={styles.tabs}>
@@ -1442,6 +1445,7 @@ export default function InboxScreen({ navigation, route }: any) {
                         </View>
                     )}
                 </TouchableOpacity>
+            </View>
             </View>
 
             {/* Content */}
@@ -2019,7 +2023,19 @@ const styles = StyleSheet.create({
         paddingBottom: ox(24),
         width: '100%',
     },
+    inboxTopStack: {
+        flexDirection: 'column',
+        flexGrow: 0,
+        flexShrink: 0,
+        position: 'relative',
+    },
+    storiesRailWrap: {
+        flexDirection: 'column',
+        marginBottom: ox(16),
+        paddingBottom: ox(12),
+    },
     storiesRail: {
+        flexDirection: 'row',
         paddingHorizontal: ox(12),
         paddingBottom: ox(4),
         gap: ox(12),
@@ -2027,8 +2043,8 @@ const styles = StyleSheet.create({
     },
     storiesRailScroll: {
         flexGrow: 0,
-        height: ox(84),
-        marginBottom: ox(8),
+        flexShrink: 0,
+        height: ox(56) + ox(4) + ox(16),
     },
     storyRailItem: {
         width: ox(72),
@@ -2058,14 +2074,20 @@ const styles = StyleSheet.create({
     storyRailLabel: {
         maxWidth: ox(72),
         fontSize: ox(11),
+        lineHeight: ox(16),
         color: '#D1D5DB',
+        textAlign: 'center',
     },
     tabs: {
         flexDirection: 'row',
+        flexGrow: 0,
+        flexShrink: 0,
         gap: ox(6),
         paddingHorizontal: ox(12),
+        marginTop: 0,
         marginBottom: ox(10),
         backgroundColor: 'transparent',
+        position: 'relative',
     },
     tab: {
         flexDirection: 'row',
