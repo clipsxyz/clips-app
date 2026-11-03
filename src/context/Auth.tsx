@@ -12,6 +12,7 @@ import {
     hydrateAuthTokenFromStorage,
 } from '../utils/authTokenBridge';
 import { onUnauthorized } from '../utils/authSessionEvents';
+import { bindStoryViewedUser } from '../utils/storyViewedStore';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 const USER_STORAGE_KEY = 'user';
@@ -66,6 +67,10 @@ const Ctx = React.createContext<AuthCtx | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null);
   const [ready, setReady] = React.useState(false);
+
+  React.useEffect(() => {
+    bindStoryViewedUser(user?.id ?? null);
+  }, [user?.id]);
   const authRefreshGenRef = React.useRef(0);
 
   React.useEffect(() => {

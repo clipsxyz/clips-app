@@ -71,7 +71,7 @@ class LinkPreviewService
             return $this->directVideoPreview($url);
         }
 
-        $cacheKey = 'link_preview:v4:'.sha1($url);
+        $cacheKey = 'link_preview:v5:'.sha1($url);
         $cached = Cache::get($cacheKey);
         if (is_array($cached) && ! empty($cached['url'])) {
             return $this->withInstagramFallback($url, $this->finalizePreview($cached));
@@ -86,17 +86,24 @@ class LinkPreviewService
         }
 
         $preview = $this->fetchOEmbed($url);
+        $og = $this->fetchOpenGraph($url);
         if ($preview === null) {
-            $preview = $this->fetchOpenGraph($url);
-        } elseif (empty($preview['video_url']) && str_contains($host, 'tiktok.com')) {
-            $og = $this->fetchOpenGraph($url);
-            if (is_array($og)) {
-                if (! empty($og['video_url'])) {
-                    $preview['video_url'] = $og['video_url'];
+            $preview = $og;
+        } elseif (is_array($og)) {
+            foreach (['title', 'description', 'image_url', 'site_name'] as $field) {
+                if (empty($preview[$field]) && ! empty($og[$field])) {
+                    $preview[$field] = $og[$field];
                 }
-                if (empty($preview['image_url']) && ! empty($og['image_url'])) {
-                    $preview['image_url'] = $og['image_url'];
-                }
+            }
+            if (! empty($og['description'])) {
+                $preview['description'] = $og['description'];
+            }
+            if (empty($preview['video_url']) && ! empty($og['video_url'])) {
+                $preview['video_url'] = $og['video_url'];
+            }
+            if (! empty($og['site_name'])) {
+                $preview['site_name'] = $og['site_name'];
+                $preview['source'] = $this->sourceLabel($url, $og['site_name']);
             }
         }
 
@@ -373,15 +380,25 @@ class LinkPreviewService
             $finalUrl = $this->normalizeUrl((string) $response->effectiveUri()) ?: $url;
             $og = $this->parseMeta($html);
             $title = $this->cleanText($og['og:title'] ?? $og['twitter:title'] ?? $this->parseHtmlTitle($html), 200);
-            $description = $this->cleanText($og['og:description'] ?? $og['twitter:description'] ?? $og['description'] ?? null, 300);
-            $siteName = $this->cleanText($og['og:site_name'] ?? null, 80);
-            $image = $this->absolutizeUrl((string) ($og['og:image'] ?? $og['twitter:image'] ?? ''), $finalUrl);
+            $description = $this->cleanText(
+                $og['og:description'] ?? $og['twitter:description'] ?? $og['description'] ?? null,
+                300
+            );
+            $siteName = $this->cleanText($og['og:site_name'] ?? $og['application-name'] ?? null, 80);
+            $image = $this->absolutizeUrl((string) (
+                $og['og:image:secure_url']
+                ?? $og['og:image']
+                ?? $og['og:image:url']
+                ?? $og['twitter:image']
+                ?? $og['twitter:image:src']
+                ?? ''
+            ), $finalUrl);
             $video = $this->playableMediaUrl(
                 (string) ($og['og:video:secure_url'] ?? $og['og:video:url'] ?? $og['og:video'] ?? $og['twitter:player:stream'] ?? ''),
                 $finalUrl
             );
 
-            if ($title === null && $image === null && $video === null) {
+            if ($title === null && $description === null && $siteName === null && $image === null && $video === null) {
                 return null;
             }
 
@@ -420,7 +437,7 @@ class LinkPreviewService
             if (preg_match('/content\s*=\s*["\']([^"\']*)["\']/i', $tag, $m)) {
                 $content = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
             }
-            if ($property && $content !== null && $content !== '') {
+            if ($property && $content !== null && $content !== '' && ! isset($out[$property])) {
                 $out[$property] = $content;
             }
         }

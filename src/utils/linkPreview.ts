@@ -170,10 +170,10 @@ export function mapApiLinkPreview(raw: any): LinkPreview | undefined {
                 : undefined,
         imageUrl,
         siteName:
-            typeof raw.site_name === 'string'
-                ? raw.site_name
-                : typeof raw.siteName === 'string'
-                    ? raw.siteName
+            typeof raw.site_name === 'string' && raw.site_name.trim()
+                ? raw.site_name.trim()
+                : typeof raw.siteName === 'string' && raw.siteName.trim()
+                    ? raw.siteName.trim()
                     : undefined,
         source,
         isDirectVideo,

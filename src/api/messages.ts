@@ -941,7 +941,7 @@ export async function markGroupConversationReadById(groupId: string, viewerHandl
     dispatchBrowserEvent('conversationUpdated');
 }
 
-export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
+export async function listConversations(forHandle: string, viewerId?: string): Promise<ConversationSummary[]> {
     if (useLiveInboxApi()) {
         if (!(await hasAuthTokenAsync())) return [];
         try {
@@ -992,7 +992,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
                             lastMessage?.timestamp,
                             lastMessage?.senderHandle,
                         );
-                        const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+                        const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle, viewerId);
                         rememberUnseenStory(otherHandle, hasUnviewedStories);
                         return {
                             kind: 'dm' as const,
@@ -1046,7 +1046,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
     // For now, we'll check follow status in the component where we have userId
     const allConversations = await Promise.all(
         Array.from(summaries.entries()).map(async ([otherHandle, v]) => {
-            const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+            const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle, viewerId);
             rememberUnseenStory(otherHandle, hasUnviewedStories);
             return {
                 otherHandle,

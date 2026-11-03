@@ -223,11 +223,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
 import Stories24FeedRail, { type Stories24FeedRailHandle } from '../components/Stories24FeedRail.native';
+import AddToStorySheet from '../components/AddToStorySheet.native';
 import StoriesPromoCard from '../components/StoriesPromoCard.native';
 import { getInboxUnreadPollMs, getStoriesRailPollMs } from '../utils/backgroundPollMs';
 import {
     buildStories24RailItems,
     consumeStories24FeedScrollRestore,
+    orderStories24RailItems,
     consumeStories24RailReturn,
     persistStories24RailOpenHandle,
     buildStories24StoryNavParams,
@@ -2084,6 +2086,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [suggestedFollowerDismissed, setSuggestedFollowerDismissed] = React.useState(false);
     const [hiddenFollowerHandles, setHiddenFollowerHandles] = React.useState<Set<string>>(new Set());
     const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
+    const [addToStoryOpen, setAddToStoryOpen] = useState(false);
     const [stories24CollapsePayload, setStories24CollapsePayload] =
         React.useState<Stories24RailReturnPayload | null>(null);
     /** Incoming live drops that arrived while the list was scrolled away from top. */
@@ -2091,6 +2094,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
+    /**
+     * Scroll offset captured when the next-page footer appears.
+     * On Android, mounting that footer (and then the new rows) can make
+     * VirtualizedList report a too-small content height for a frame and clamp
+     * contentOffset to 0 — the feed jumps to the top. We put the offset back.
+     */
+    const loadMoreScrollAnchorRef = useRef<number | null>(null);
     const pinFeedScrollSoon = useCallback((explicitY?: number | null) => {
         const y = explicitY ?? feedScrollYRef.current;
         const apply = () => {
@@ -2101,6 +2111,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             apply();
             requestAnimationFrame(apply);
         });
+    }, []);
+    const holdLoadMoreScrollAnchor = useCallback(() => {
+        const y = loadMoreScrollAnchorRef.current;
+        if (y == null || y < 80) return;
+        flatListRef.current?.scrollToOffset({ offset: y, animated: false });
     }, []);
     /** One feed-level burst Modal — per-card Modal show/hide jumps FlatList on Android. */
     const [feedLikeBurst, setFeedLikeBurst] = useState<{ x: number; y: number; key: number } | null>(
@@ -2252,6 +2267,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     );
                 }
                 if (scrollY != null) pendingFeedScrollRestoreRef.current = scrollY;
+                // No rail shrink: put the reader back without scrolling the top rail on screen.
+                if (scrollY != null && !payload && !sync) {
+                    pendingFeedScrollRestoreRef.current = null;
+                    requestAnimationFrame(() => {
+                        flatListRef.current?.scrollToOffset({ offset: scrollY, animated: false });
+                    });
+                }
             })();
             return () => {
                 active = false;
@@ -3697,6 +3719,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         loadingMoreRef.current = true;
         const gen = feedLoadGenRef.current;
+        // Capture before the footer mounts. A later onScroll(0) must not replace this.
+        if (feedScrollYRef.current > 80) {
+            loadMoreScrollAnchorRef.current = feedScrollYRef.current;
+        }
         setLoadingMore(true);
         setError(null);
         try {
@@ -3740,6 +3766,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         } finally {
             loadingMoreRef.current = false;
             setLoadingMore(false);
+            const anchoredAt = loadMoreScrollAnchorRef.current;
+            setTimeout(() => {
+                if (loadMoreScrollAnchorRef.current === anchoredAt) {
+                    loadMoreScrollAnchorRef.current = null;
+                }
+            }, 450);
         }
     }, [buildFeedFetchParams, cursor, end, initialLoading]);
 
@@ -4075,21 +4107,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 return;
             }
             setStories24Items((prev) =>
-                prev.map((row) =>
-                    normalizeStories24Handle(row.handle) === normalizeStories24Handle(item.handle)
-                        ? { ...row, hasViewed: true }
-                        : row,
+                orderStories24RailItems(
+                    prev.map((row) =>
+                        normalizeStories24Handle(row.handle) === normalizeStories24Handle(item.handle)
+                            ? { ...row, hasViewed: true }
+                            : row,
+                    ),
+                    user?.handle,
                 ),
             );
             void snapshotStories24FeedScroll(feedScrollYRef.current);
             void persistStories24RailOpenHandle(item.handle);
             navigation.navigate('Stories', buildStories24StoryNavParams(item, railHandles));
         },
-        [navigation],
+        [navigation, user?.handle],
     );
 
-    const openStories24FromHeader = React.useCallback(async () => {
-        let items = stories24Items;
+    const openStories24FromHeader = React.useCallback(async (opts?: { skipRailReturn?: boolean }) => {
+        const skipRailReturn = opts?.skipRailReturn === true;
+        let items = orderStories24RailItems(stories24Items, user?.handle);
         let target = resolveStories24OpenTarget(items);
 
         if (!target && user?.id) {
@@ -4105,7 +4141,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         void snapshotStories24FeedScroll(feedScrollYRef.current);
 
         if (!target) {
-            navigation.navigate('Stories', { fromStories24Rail: true, forceRefreshAt: Date.now() });
+            navigation.navigate('Stories', {
+                fromStories24Rail: true,
+                forceRefreshAt: Date.now(),
+                ...(skipRailReturn ? { skipStories24RailReturn: true } : {}),
+            });
             return;
         }
 
@@ -4127,14 +4167,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
 
         setStories24Items((prev) =>
-            prev.map((row) =>
-                normalizeStories24Handle(row.handle) === normalizeStories24Handle(target.item.handle)
-                    ? { ...row, hasViewed: true }
-                    : row,
+            orderStories24RailItems(
+                prev.map((row) =>
+                    normalizeStories24Handle(row.handle) ===
+                    normalizeStories24Handle(target.item.handle)
+                        ? { ...row, hasViewed: true }
+                        : row,
+                ),
+                user?.handle,
             ),
         );
         void persistStories24RailOpenHandle(target.item.handle);
-        navigation.navigate('Stories', buildStories24StoryNavParams(target.item, target.railHandles));
+        navigation.navigate('Stories', {
+            ...buildStories24StoryNavParams(target.item, target.railHandles),
+            ...(skipRailReturn ? { skipStories24RailReturn: true } : {}),
+        });
     }, [stories24Items, user?.id, user?.handle, navigation, railFilter]);
 
     const previewLocalBusinessPosts = React.useMemo(() => {
@@ -4760,7 +4807,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 return wrapRow(
                     <StoriesPromoCard
                         onPress={() => {
-                            void openStories24FromHeader();
+                            // Stay on this card. A rail return scrolls the top Stories 24
+                            // strip into view for the shrink, then jumps back down here.
+                            void openStories24FromHeader({ skipRailReturn: true });
                         }}
                         storyCount={stories24Items.length}
                         stories={stories24Items.filter(
@@ -4776,7 +4825,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         items={stories24Items}
                         previewVideosPaused={false}
                         onOpenStory={openStoryFromRail}
-                        onAddYours={() => navigation.navigate('Clip')}
+                        onAddYours={() => setAddToStoryOpen(true)}
                         onScrollCardIntoView={scrollStories24RailIntoView}
                         collapsePayload={stories24CollapsePayload}
                         onCollapseHandled={() => setStories24CollapsePayload(null)}
@@ -5306,7 +5355,6 @@ onVisitProfile={() =>
             handleShareToStoriesSuccess,
             openShareToStoriesForPost,
             updatePost,
-            loadMore,
             openShareForPost,
             tryReclipPost,
             toggleCollectionsSaveForPost,
@@ -5435,6 +5483,9 @@ onVisitProfile={() =>
                 // list holds its frames; the measured-size cache keeps recycled cells stable.
                 removeClippedSubviews={false}
                 onScrollBeginDrag={() => {
+                    // A finger on the list owns the offset. Drop the pagination anchor so
+                    // we don't fight a real scroll while the next page is still loading.
+                    loadMoreScrollAnchorRef.current = null;
                     // Raw touch-down: arm the displacement guard only. Nothing pauses here —
                     // the playing card keeps running while the list is dragged.
                     feedScrollDragOriginRef.current = feedScrollYRef.current;
@@ -5462,13 +5513,24 @@ onVisitProfile={() =>
                     // Momentum has stopped — release the scroll freeze immediately rather
                     // than waiting out the trailing debounce. Re-baseline the drag origin
                     // and clear the moved flag so the next touch-down starts clean.
-                    feedScrollYRef.current = e.nativeEvent.contentOffset.y;
+                    const endY = e.nativeEvent.contentOffset.y;
+                    const anchor = loadMoreScrollAnchorRef.current;
+                    if (anchor != null && anchor > 120 && endY < 24) {
+                        holdLoadMoreScrollAnchor();
+                        return;
+                    }
+                    feedScrollYRef.current = endY;
                     feedScrollDragOriginRef.current = feedScrollYRef.current;
                     feedScrollDragMovedRef.current = false;
                     markFeedScrolling(false);
                 }}
                 onScrollEndDrag={(e) => {
                     const y = e.nativeEvent.contentOffset.y;
+                    const anchor = loadMoreScrollAnchorRef.current;
+                    if (anchor != null && anchor > 120 && y < 24) {
+                        holdLoadMoreScrollAnchor();
+                        return;
+                    }
                     feedScrollYRef.current = y;
                     // Force-clear the moved flag on every release. Keeping it sticky across
                     // gestures was bypassing the displacement guard and letting a resting
@@ -5494,8 +5556,24 @@ onVisitProfile={() =>
                 // Scroll performance. Every real offset change freezes the active-video
                 // handoff (never pauses playback); armFeedScrollSettle / momentum-end
                 // release it.
+                onContentSizeChange={() => {
+                    const anchor = loadMoreScrollAnchorRef.current;
+                    if (anchor != null && anchor > 120 && feedScrollYRef.current < 24) {
+                        holdLoadMoreScrollAnchor();
+                    }
+                }}
+                // Keep the post on screen when the next page is appended under it.
+                // minIndexForVisible 1 lets the Stories rail (index 0) scroll away.
+                maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
                 onScroll={(e) => {
                     const y = e.nativeEvent.contentOffset.y;
+                    const anchor = loadMoreScrollAnchorRef.current;
+                    // Android clamps to 0 when the pagination footer mounts. Put the
+                    // reader back and don't record that 0 as their real position.
+                    if (anchor != null && anchor > 120 && y < 24) {
+                        holdLoadMoreScrollAnchor();
+                        return;
+                    }
                     feedScrollYRef.current = y;
                     // After a rest release, the throttled trailing onScroll repeats the
                     // resting offset — ignore it so it cannot re-arm the debounce and
@@ -5546,11 +5624,15 @@ onVisitProfile={() =>
                 onEndReachedThreshold={0.5}
                 ListFooterComponent={
                     <>
-                        {loadingMore ? (
-                            <View style={styles.loadingContainer}>
+                        {/* Fixed height so the spinner doesn't change content size.
+                            A 0→N footer while scrolling is what snaps Android back to y=0. */}
+                        <View style={styles.loadingContainer}>
+                            {loadingMore ? (
                                 <ActivityIndicator size="small" color="#8B5CF6" />
-                            </View>
-                        ) : null}
+                            ) : (
+                                <View style={styles.loadingSpacer} />
+                            )}
+                        </View>
                         {!initialLoading && feedPostCount === 0 && (flatForRender || []).length > 0 ? (
                             <View style={styles.emptyContainer}>
                                 {error ? (
@@ -5758,6 +5840,12 @@ onVisitProfile={() =>
             ) : null}
             </View>
             </FeedPageLayout>
+
+            <AddToStorySheet
+                visible={addToStoryOpen}
+                onDismiss={() => setAddToStoryOpen(false)}
+                navigation={navigation}
+            />
 
             <FeedOverlayHost
                 userHandle={user?.handle}
@@ -6544,8 +6632,12 @@ feedSwitchPillBorder: {
         fontSize: ox(14),
     },
     loadingContainer: {
-        padding: ox(20),
+        height: ox(56),
         alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loadingSpacer: {
+        height: ox(20),
     },
     emptyContainer: {
         padding: ox(24),

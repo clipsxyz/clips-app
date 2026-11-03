@@ -10,6 +10,9 @@ const seenHandles = new Set<string>();
 const unseenHandles = new Set<string>();
 const listeners = new Set<Listener>();
 let version = 0;
+/** Seen rings belong to the signed-in account, not the device. */
+let activeUserId: string | null = null;
+let hydrateGen = 0;
 
 function normalizeHandle(handle?: string | null): string {
     return String(handle || '')
@@ -18,40 +21,46 @@ function normalizeHandle(handle?: string | null): string {
         .replace(/^@/, '');
 }
 
-/** `Barry@Galway` and `Barry` must share ring state (inbox vs rail vs feed). */
-function handleKeys(userIdOrHandle?: string | null): string[] {
-    const key = normalizeHandle(userIdOrHandle);
-    if (!key) return [];
-    const keys = [key];
+function exactKey(userIdOrHandle?: string | null): string {
+    return normalizeHandle(userIdOrHandle);
+}
+
+/**
+ * Inbox sometimes stores `Barry` and the feed stores `Barry@Galway` for the same
+ * person. `Gazetteer@Dublin` and `Gazetteer@Cork` are different people, so a full
+ * handle must not paint every other `Gazetteer@…` ring as seen.
+ */
+function setHasHandle(set: Set<string>, userIdOrHandle?: string | null): boolean {
+    const key = exactKey(userIdOrHandle);
+    if (!key) return false;
+    if (set.has(key)) return true;
     const at = key.indexOf('@');
     if (at > 0) {
         const local = key.slice(0, at);
-        if (local) keys.push(local);
+        return !!local && set.has(local);
     }
-    return keys;
-}
-
-function setHasHandle(set: Set<string>, userIdOrHandle?: string | null): boolean {
-    const keys = handleKeys(userIdOrHandle);
-    if (keys.length === 0) return false;
-    if (keys.some((k) => set.has(k))) return true;
+    const prefix = `${key}@`;
     for (const existing of set) {
-        for (const key of keys) {
-            if (existing.startsWith(`${key}@`) || key.startsWith(`${existing}@`)) return true;
-        }
+        if (existing.startsWith(prefix)) return true;
     }
     return false;
 }
 
+function storageKey(userId: string): string {
+    return `clips:storyViewed:v2:${userId}`;
+}
+
 function persist(): void {
+    if (!activeUserId) return;
     if (typeof process !== 'undefined' && process.env.VITEST) return;
     try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         if (!AsyncStorage?.setItem) return;
+        const userId = activeUserId;
         void Promise.resolve(
             AsyncStorage.setItem(
-                'clips:storyViewed:v1',
+                storageKey(userId),
                 JSON.stringify({ ids: [...viewedStoryIds], seen: [...seenHandles] }),
             ),
         ).catch(() => {});
@@ -60,43 +69,59 @@ function persist(): void {
     }
 }
 
-function hydrate(): void {
+function applyHydrated(raw: string | null): void {
+    if (!raw) return;
+    let parsed: { ids?: string[]; seen?: string[] };
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return;
+    }
+    let changed = false;
+    for (const id of parsed.ids || []) {
+        if (id && !viewedStoryIds.has(id)) {
+            viewedStoryIds.add(id);
+            changed = true;
+        }
+    }
+    for (const handle of parsed.seen || []) {
+        const key = exactKey(handle);
+        if (!key) continue;
+        if (!seenHandles.has(key)) {
+            seenHandles.add(key);
+            changed = true;
+        }
+        if (unseenHandles.delete(key)) changed = true;
+    }
+    if (changed) emit();
+}
+
+function hydrateUser(userId: string, gen: number): void {
+    if (typeof process !== 'undefined' && process.env.VITEST) return;
     try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-        void AsyncStorage.getItem('clips:storyViewed:v1').then((raw: string | null) => {
-            if (!raw) return;
-            let parsed: { ids?: string[]; seen?: string[] };
-            try {
-                parsed = JSON.parse(raw);
-            } catch {
-                return;
-            }
-            let changed = false;
-            for (const id of parsed.ids || []) {
-                if (id && !viewedStoryIds.has(id)) {
-                    viewedStoryIds.add(id);
-                    changed = true;
-                }
-            }
-            for (const handle of parsed.seen || []) {
-                for (const key of handleKeys(handle)) {
-                    if (!seenHandles.has(key)) {
-                        seenHandles.add(key);
-                        changed = true;
-                    }
-                    if (unseenHandles.delete(key)) changed = true;
-                }
-            }
-            if (changed) emit();
+        void AsyncStorage.getItem(storageKey(userId)).then((raw: string | null) => {
+            if (gen !== hydrateGen || activeUserId !== userId) return;
+            applyHydrated(raw);
         });
     } catch {
         /* vitest / web without AsyncStorage */
     }
 }
 
-if (typeof process === 'undefined' || !process.env.VITEST) {
-    hydrate();
+/** Load this account's watched stories. Another sign-in must not keep their rings dark. */
+export function bindStoryViewedUser(userId?: string | null): void {
+    const next = String(userId || '').trim() || null;
+    if (next === activeUserId) return;
+    activeUserId = next;
+    const gen = ++hydrateGen;
+    viewedStoryIds.clear();
+    seenHandles.clear();
+    unseenHandles.clear();
+    emit();
+    if (!next) return;
+    hydrateUser(next, gen);
 }
 
 function emit(): void {
@@ -123,15 +148,13 @@ export function markStoryAsViewed(storyId?: string | null, handle?: string | nul
         viewedStoryIds.add(id);
         changed = true;
     }
-    const keys = handleKeys(handle);
-    for (const key of keys) {
-        if (!seenHandles.has(key)) {
-            seenHandles.add(key);
-            changed = true;
-        }
-        if (unseenHandles.delete(key)) {
-            changed = true;
-        }
+    const key = exactKey(handle);
+    if (key && !seenHandles.has(key)) {
+        seenHandles.add(key);
+        changed = true;
+    }
+    if (key && unseenHandles.delete(key)) {
+        changed = true;
     }
     if (changed) {
         persist();
@@ -141,28 +164,20 @@ export function markStoryAsViewed(storyId?: string | null, handle?: string | nul
 
 /** Record whether a handle currently has unseen stories (from a probe or inbox payload). */
 export function rememberUnseenStory(userIdOrHandle?: string | null, unseen = true): void {
-    const keys = handleKeys(userIdOrHandle);
-    if (keys.length === 0) return;
+    const key = exactKey(userIdOrHandle);
+    if (!key) return;
     if (setHasHandle(seenHandles, userIdOrHandle)) {
-        let cleared = false;
-        for (const key of keys) {
-            if (unseenHandles.delete(key)) cleared = true;
-        }
-        if (cleared) emit();
+        if (unseenHandles.delete(key)) emit();
         return;
     }
     let changed = false;
     if (unseen) {
-        for (const key of keys) {
-            if (!unseenHandles.has(key)) {
-                unseenHandles.add(key);
-                changed = true;
-            }
+        if (!unseenHandles.has(key)) {
+            unseenHandles.add(key);
+            changed = true;
         }
-    } else {
-        for (const key of keys) {
-            if (unseenHandles.delete(key)) changed = true;
-        }
+    } else if (unseenHandles.delete(key)) {
+        changed = true;
     }
     if (changed) emit();
 }
@@ -193,6 +208,8 @@ export function storyHasViewed(story: { id?: string; hasViewed?: boolean; has_vi
 
 /** Test helper: drop optimistic seen/unseen so cases don't leak across files. */
 export function resetStoryViewedStore(): void {
+    activeUserId = null;
+    hydrateGen += 1;
     viewedStoryIds.clear();
     seenHandles.clear();
     unseenHandles.clear();

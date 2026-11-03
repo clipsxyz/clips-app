@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
-import { isHandleStoryRingSeen, storyHasViewed } from './storyViewedStore';
+import { isHandleStoryRingSeen, isStoryMarkedViewed, storyHasViewed } from './storyViewedStore';
 import { getFollowedUsers, posts as localPosts } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
@@ -94,6 +94,93 @@ export function pickFirstStories24RailStory(items: Stories24RailItem[]): Stories
     return (
         items.find((item) => item.handle && !isStories24AddYoursHandle(item.handle)) ?? null
     );
+}
+
+/**
+ * An account is watched only when every current story has been seen.
+ * A newer unwatched story pulls them back to the front of the tray.
+ */
+export function stories24RailItemIsSeen(item: Stories24RailItem): boolean {
+    if (isStories24AddYoursHandle(item.handle)) return false;
+    const ids =
+        item.storyIds && item.storyIds.length > 0
+            ? item.storyIds
+            : item.storyId
+              ? [item.storyId]
+              : [];
+    if (ids.length > 0) {
+        if (ids.every((id) => isStoryMarkedViewed(id))) return true;
+        if (!item.hasViewed) return false;
+        const watchedLocally = ids.some((id) => isStoryMarkedViewed(id));
+        const allLocal = ids.every((id) => isStoryMarkedViewed(id));
+        if (watchedLocally && !allLocal) return false;
+        return true;
+    }
+    return !!item.hasViewed || isHandleStoryRingSeen(item.handle);
+}
+
+/**
+ * Instagram tray order: your story stays first, unwatched accounts follow in
+ * their current order, and fully watched accounts move to the back.
+ */
+export function orderStories24RailItems(
+    items: Stories24RailItem[],
+    viewerHandle?: string | null,
+): Stories24RailItem[] {
+    const viewer = normalizeStories24Handle(viewerHandle || '');
+    const addYours: Stories24RailItem[] = [];
+    const mine: Stories24RailItem[] = [];
+    const unseen: Stories24RailItem[] = [];
+    const seen: Stories24RailItem[] = [];
+    for (const item of items) {
+        if (isStories24AddYoursHandle(item.handle)) {
+            addYours.push(item);
+            continue;
+        }
+        if (viewer && normalizeStories24Handle(item.handle) === viewer) {
+            mine.push(item);
+            continue;
+        }
+        if (stories24RailItemIsSeen(item)) seen.push(item);
+        else unseen.push(item);
+    }
+    return [...addYours, ...mine, ...unseen, ...seen];
+}
+
+type OrderableStoryGroup = {
+    userHandle: string;
+    stories?: Array<{ id?: string; hasViewed?: boolean; has_viewed?: boolean }>;
+};
+
+/** Same seen/unseen signal the feed rail uses, for one inbox story author. */
+export function storyGroupAsRailItem(group: OrderableStoryGroup): Stories24RailItem {
+    const stories = group.stories || [];
+    const storyIds = stories.map((story) => story.id).filter((id): id is string => !!id);
+    return {
+        handle: group.userHandle,
+        title: group.userHandle,
+        storyId: storyIds[0],
+        storyIds,
+        hasViewed: stories.length > 0 && stories.every((story) => storyHasViewed(story)),
+    };
+}
+
+/** Inbox story bubbles: your story, then unwatched, then watched. */
+export function orderStoryGroupsLikeRail<T extends OrderableStoryGroup>(
+    groups: T[],
+    viewerHandle?: string | null,
+): T[] {
+    const buckets = new Map<string, T[]>();
+    const items = groups.map((group) => {
+        const key = normalizeStories24Handle(group.userHandle);
+        const bucket = buckets.get(key);
+        if (bucket) bucket.push(group);
+        else buckets.set(key, [group]);
+        return storyGroupAsRailItem(group);
+    });
+    return orderStories24RailItems(items, viewerHandle)
+        .map((item) => buckets.get(normalizeStories24Handle(item.handle))?.shift())
+        .filter((group): group is T => !!group);
 }
 
 /** Ranked cards shown in the horizontal rail (NOW TV / Netflix-style 1–9). */
@@ -248,8 +335,7 @@ export async function buildStories24RailItems(
             group.userHandle.trim().toLowerCase() === normalizedViewerHandle;
         const storyIds = sortedStories.map((s) => s.id).filter(Boolean);
         const hasViewed =
-            isHandleStoryRingSeen(group.userHandle) ||
-            (sortedStories.length > 0 && sortedStories.every((s) => storyHasViewed(s)));
+            sortedStories.length > 0 && sortedStories.every((s) => storyHasViewed(s));
         nextItems.push({
             handle: group.userHandle,
             title,
@@ -273,16 +359,16 @@ export async function buildStories24RailItems(
         (item) => item.handle.trim().toLowerCase() === normalizedUserHandle,
     );
 
-    const ordered =
+    const withViewer =
         userItemIndex > 0
             ? [baseItems[userItemIndex], ...baseItems.filter((_, idx) => idx !== userItemIndex)]
             : [...baseItems];
 
     if (normalizedUserHandle && userItemIndex === -1) {
-        ordered.unshift({ handle: STORIES24_ADD_YOURS_HANDLE, title: 'Add yours' });
+        withViewer.unshift({ handle: STORIES24_ADD_YOURS_HANDLE, title: 'Add yours' });
     }
 
-    return ordered.slice(0, 12);
+    return orderStories24RailItems(withViewer, userHandle).slice(0, 12);
 }
 
 export async function persistStories24RailOpenHandle(handle: string): Promise<void> {

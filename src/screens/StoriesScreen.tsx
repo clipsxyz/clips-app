@@ -28,6 +28,8 @@ import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
 import StoryViewerMedia from '../components/stories/StoryViewerMedia.native';
+import { getStoryTextContent } from '../utils/storyTextStyleNative';
+import { extractFirstHttpUrl } from '../utils/linkPreview';
 import StorySharedPostViewer from '../components/stories/StorySharedPostViewer.native';
 import StoryProfileCard from '../components/stories/StoryProfileCard.native';
 import StoryDeliveryFx, {
@@ -59,12 +61,11 @@ import {
 import {
     STORIES24_LOADING_HOLD_MS,
     clearStories24RailOpenHandle,
-    persistStories24RailReturn,
     readStories24RailOpenHandle,
 } from '../utils/stories24Rail';
 import { storyHasRenderableMedia } from '../utils/storyMediaNative';
 import { isGazetteerWorldGroup, withGazetteerWorldGroup } from '../utils/gazetteerWorldStories';
-import { isStoryVideo, resolveStoryVideoPlaybackUrl } from '../utils/storyMediaNative';
+import { isStoryVideo } from '../utils/storyMediaNative';
 import {
     deliverStoryReactionToInbox,
     deliverStoryReplyToInbox,
@@ -127,16 +128,12 @@ export default function StoriesScreen({ route, navigation }: any) {
         openStoryId,
         fromStories24Rail,
         railHandles: railHandlesParam,
-        previewThumb: routePreviewThumb,
-        previewVideoUrl: routePreviewVideoUrl,
-        skipStories24RailReturn,
         forceRefreshAt,
         targetHandle,
         soloMode,
     } = route.params || {};
     const railHandles = Array.isArray(railHandlesParam) ? railHandlesParam : [];
     const railHandlesKey = railHandles.join('|');
-    const shouldReturnToStories24Rail = skipStories24RailReturn !== true;
     const insets = useSafeAreaInsets();
     const normalizedOpenUserHandle = React.useMemo(() => {
         if (!openUserHandle || typeof openUserHandle !== 'string') return '';
@@ -777,43 +774,12 @@ export default function StoriesScreen({ route, navigation }: any) {
             return;
         }
 
-        const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
-        const mediaUrl = currentStory?.mediaUrl;
-        const isVideo =
-            currentStory?.mediaType === 'video' ||
-            (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
-
-        // MP4 from Stories 24 rail: cut straight back to feed (no fade-to-black gap).
-        if (stories24OpenFromFeedRail && isVideo && viewingStories) {
-            navigation.setOptions({ animation: 'none' });
+        // Stories 24 closes with the same native pop as a passport post.
+        // Don't kill the animation or shrink back onto the feed rail.
+        if (stories24OpenFromFeedRail) {
             void clearStories24RailOpenHandle();
             finalizeCloseNavigation();
             return;
-        }
-
-        if (stories24OpenFromFeedRail && normalizedOpenUserHandle) {
-            const avatarUrl = getAvatarForHandle(normalizedOpenUserHandle);
-            const rawThumb =
-                routePreviewThumb ||
-                (!isVideo && mediaUrl ? mediaUrl : undefined) ||
-                undefined;
-            // Don't shrink back onto a profile pic for shared/video stories.
-            const previewThumb =
-                rawThumb && avatarUrl && rawThumb === avatarUrl ? undefined : rawThumb;
-            const previewVideoUrl =
-                routePreviewVideoUrl ||
-                (isVideo ? resolveStoryVideoPlaybackUrl(mediaUrl) : undefined);
-
-            // Disable native modal dismiss — custom Apple-TV shrink runs on the feed rail.
-            navigation.setOptions({ animation: 'none' });
-            if (shouldReturnToStories24Rail) {
-                void persistStories24RailReturn({
-                    handle: normalizedOpenUserHandle,
-                    previewThumb,
-                    previewVideoUrl,
-                });
-            }
-            void clearStories24RailOpenHandle();
         }
 
         finalizeCloseNavigation();
@@ -1401,7 +1367,13 @@ export default function StoriesScreen({ route, navigation }: any) {
                         />
                         <View
                             style={StyleSheet.absoluteFill}
-                            pointerEvents={currentStory.sharedFromPost ? 'box-none' : 'none'}
+                            pointerEvents={
+                                currentStory.sharedFromPost ||
+                                (!currentStory.mediaUrl &&
+                                    !!extractFirstHttpUrl(getStoryTextContent(currentStory)))
+                                    ? 'box-none'
+                                    : 'none'
+                            }
                         >
                             {currentStory.sharedFromPost ? (
                                 suspendStoryMedia ? (
@@ -1432,6 +1404,8 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     story={currentStory}
                                     isMuted={isMuted}
                                     paused={paused || isHoldingToPause || !!deliveryFx}
+                                    authorAvatar={currentGroup.avatarUrl}
+                                    authorName={currentGroup.userHandle}
                                 />
                             )}
                         </View>

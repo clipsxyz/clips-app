@@ -48,9 +48,13 @@ import {
     getStoryViewedVersion,
     hasUnseenStory,
     isHandleStoryRingSeen,
-    storyHasViewed,
     subscribeStoryViewed,
 } from '../utils/storyViewedStore';
+import {
+    orderStoryGroupsLikeRail,
+    stories24RailItemIsSeen,
+    storyGroupAsRailItem,
+} from '../utils/stories24Rail';
 import StoryInsightsOverview from '../components/StoryInsightsOverview.native';
 import { storyInsightRowStats, summarizeStoryInsights } from '../utils/storyInsightsAnalytics';
 import type { StoryGroup } from '../types';
@@ -331,6 +335,22 @@ export default function InboxScreen({ navigation, route }: any) {
         [insights, seenInsightIds]
     );
     const storyViewedVersion = useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
+    useEffect(() => {
+        setConversations((prev) => {
+            let changed = false;
+            const next = prev.map((row) => {
+                if (row.kind === 'group' || !row.hasUnviewedStories) return row;
+                if (!isHandleStoryRingSeen(row.otherHandle)) return row;
+                changed = true;
+                return { ...row, hasUnviewedStories: false };
+            });
+            return changed ? next : prev;
+        });
+    }, [storyViewedVersion]);
+    const orderedStoryGroups = useMemo(
+        () => orderStoryGroupsLikeRail(storyGroups, user?.handle),
+        [storyGroups, user?.handle, storyViewedVersion],
+    );
 
     useEffect(() => {
         loadData();
@@ -528,6 +548,10 @@ export default function InboxScreen({ navigation, route }: any) {
 
     const openFollowedStoryFromRail = useCallback(
         (group: StoryGroup) => {
+            const ordered = orderStoryGroupsLikeRail(storyGroups, user?.handle);
+            const railHandles = ordered
+                .map((g) => g.userHandle)
+                .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
             const ids = (group.stories || []).map((s) => s.id).filter(Boolean);
             if (ids.length === 0) {
                 markStoryAsViewedLocal('', group.userHandle);
@@ -540,18 +564,18 @@ export default function InboxScreen({ navigation, route }: any) {
                 }
             }
             setStoryGroups((prev) =>
-                prev.map((row) =>
-                    row.userHandle === group.userHandle
-                        ? {
-                              ...row,
-                              stories: (row.stories || []).map((s) => ({ ...s, hasViewed: true })),
-                          }
-                        : row,
+                orderStoryGroupsLikeRail(
+                    prev.map((row) =>
+                        row.userHandle === group.userHandle
+                            ? {
+                                  ...row,
+                                  stories: (row.stories || []).map((s) => ({ ...s, hasViewed: true })),
+                              }
+                            : row,
+                    ),
+                    user?.handle,
                 ),
             );
-            const railHandles = storyGroups
-                .map((g) => g.userHandle)
-                .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
             const latest = [...(group.stories || [])].sort(
                 (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
             )[0];
@@ -674,7 +698,7 @@ export default function InboxScreen({ navigation, route }: any) {
             setInsights(storyInsights);
             let convs: Awaited<ReturnType<typeof listConversations>> = [];
             try {
-                convs = await listConversations(user.handle);
+                convs = await listConversations(user.handle, user.id);
             } catch (e) {
                 console.error('Error loading inbox conversations:', describeFetchError(e), e);
                 setLoadError((prev) => prev || describeFetchError(e));
@@ -1278,7 +1302,20 @@ export default function InboxScreen({ navigation, route }: any) {
                             (!!item.hasUnviewedStories && !isHandleStoryRingSeen(item.otherHandle)))
                     ) {
                         markStoryAsViewedLocal('', item.otherHandle);
-                        navigation.navigate('Stories', { openUserHandle: item.otherHandle });
+                        setConversations((prev) =>
+                            prev.map((row) =>
+                                row.kind !== 'group' &&
+                                row.otherHandle.trim().toLowerCase() === item.otherHandle.trim().toLowerCase()
+                                    ? { ...row, hasUnviewedStories: false }
+                                    : row,
+                            ),
+                        );
+                        navigation.navigate('Stories', {
+                            openUserHandle: item.otherHandle,
+                            fromStories24Rail: true,
+                            skipStories24RailReturn: true,
+                            forceRefreshAt: Date.now(),
+                        });
                         return;
                     }
                     void openConversation(item);
@@ -1346,7 +1383,7 @@ export default function InboxScreen({ navigation, route }: any) {
 
             {/* Stories rail, then tabs, then list — column stack, no overlay. */}
             <View style={styles.inboxTopStack}>
-            {storyGroups.length > 0 ? (
+            {orderedStoryGroups.length > 0 ? (
                 <View style={styles.storiesRailWrap}>
                 <ScrollView
                     horizontal
@@ -1354,11 +1391,8 @@ export default function InboxScreen({ navigation, route }: any) {
                     style={styles.storiesRailScroll}
                     contentContainerStyle={styles.storiesRail}
                 >
-                    {storyGroups.map((group) => {
-                        const hasUnviewed =
-                            !isHandleStoryRingSeen(group.userHandle) &&
-                            (hasUnseenStory(group.userHandle) ||
-                                (group.stories || []).some((s) => !storyHasViewed(s)));
+                    {orderedStoryGroups.map((group) => {
+                        const hasUnviewed = !stories24RailItemIsSeen(storyGroupAsRailItem(group));
                         const ring = (
                             <View style={styles.storyRingInner}>
                                 <Avatar

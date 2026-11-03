@@ -42,9 +42,17 @@ import {
     STORIES24_EXPAND_MS,
     isStories24AddYoursHandle,
     normalizeStories24Handle,
+    orderStories24RailItems,
     pickFirstStories24RailStory,
+    stories24RailItemIsSeen,
     rankStories24RailItems,
 } from '../utils/stories24Rail';
+import {
+    FEED_GRID_TILE_BG,
+    FEED_GRID_TILE_BORDER_COLOR,
+    FEED_GRID_TILE_BORDER_WIDTH,
+    FEED_GRID_TILE_RADIUS,
+} from './FeedPageLayout.native';
 import {
     STORY_GRADIENT_RING_COLORS,
     STORY_GRADIENT_RING_END,
@@ -54,15 +62,11 @@ import {
     STORY_RING_WIDTH,
 } from '../utils/storyRingNative';
 import { markStoryAsViewedLocal, markStoryViewed } from '../api/stories';
-import {
-    getStoryViewedVersion,
-    isHandleStoryRingSeen,
-    isStoryMarkedViewed,
-    subscribeStoryViewed,
-} from '../utils/storyViewedStore';
-const CARD_W = 175;
-const CARD_H = 102;
-const CARD_RADIUS = 10;
+import { getStoryViewedVersion, subscribeStoryViewed } from '../utils/storyViewedStore';
+/** Same silhouette as a passport post tile: portrait 3:4, grid corner radius. */
+const CARD_W = 118;
+const CARD_H = Math.round((CARD_W * 4) / 3);
+const CARD_RADIUS = FEED_GRID_TILE_RADIUS;
 /** Outer story-card avatar slot; stroke + gap match the newsfeed header. */
 const CARD_AVATAR_RING = 58;
 const CARD_AVATAR_PHOTO = CARD_AVATAR_RING - (STORY_RING_WIDTH + STORY_RING_GAP) * 2;
@@ -187,10 +191,7 @@ function StoryCard({
         ? user?.avatarUrl || item.avatarUrl || getAvatarForHandle(item.handle)
         : item.avatarUrl || getAvatarForHandle(item.handle);
     useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
-    const hasViewed =
-        !!item.hasViewed ||
-        isHandleStoryRingSeen(item.handle) ||
-        (!!item.storyId && isStoryMarkedViewed(item.storyId));
+    const hasViewed = stories24RailItemIsSeen(item);
 
     const measureAndPress = () => {
         const fallback: CardRect = { x: 0, y: 0, width: CARD_W, height: CARD_H };
@@ -583,6 +584,11 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     ref,
 ) {
     const { user } = useAuth();
+    const viewedVersion = useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
+    const orderedItems = useMemo(
+        () => orderStories24RailItems(items, user?.handle),
+        [items, user?.handle, viewedVersion],
+    );
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
     const [expandHideSource, setExpandHideSource] = useState(false);
     const [collapseHideSource, setCollapseHideSource] = useState(false);
@@ -734,82 +740,44 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     }, [collapsePayload]);
 
     const railHandles = useMemo(
-        () => items.map((i) => i.handle).filter((h) => h && h !== STORIES24_ADD_YOURS_HANDLE),
-        [items],
+        () => orderedItems.map((i) => i.handle).filter((h) => h && h !== STORIES24_ADD_YOURS_HANDLE),
+        [orderedItems],
     );
 
-    // Rail render only: top 9 story cards (+ Add yours). `railHandles` above stays uncapped
-    // so the full-screen viewer keeps swiping past rank 9.
-    const displayCards = useMemo(() => rankStories24RailItems(items), [items]);
+    // Rail render only: top 9 story cards. `railHandles` above stays uncapped
+    // so the full-screen viewer keeps swiping past rank 9, in the same order.
+    const displayCards = useMemo(
+        () =>
+            rankStories24RailItems(orderedItems).filter(
+                ({ item }) => !isStories24AddYoursHandle(item.handle),
+            ),
+        [orderedItems],
+    );
 
     const firstStoryPreviewHandle = useMemo(
-        () => items.find((i) => i.handle !== STORIES24_ADD_YOURS_HANDLE)?.handle ?? null,
-        [items],
+        () => orderedItems.find((i) => i.handle !== STORIES24_ADD_YOURS_HANDLE)?.handle ?? null,
+        [orderedItems],
     );
 
     const previewsPaused = previewVideosPaused || railScrolling || !appActive;
 
     const openFirstStoryFromRail = React.useCallback(() => {
-        const first = pickFirstStories24RailStory(items);
+        const first = pickFirstStories24RailStory(orderedItems);
         if (!first || isStories24AddYoursHandle(first.handle)) {
             return false;
         }
         markRailItemSeen(first);
-        const handleKey = normalizeStories24Handle(first.handle);
-        const node = cardRefs.current[handleKey];
-        const startExpand = (rect: CardRect) => {
-            if (expandingRef.current) {
-                onOpenStory(first, railHandles);
-                setExpanding(null);
-                setExpandHideSource(false);
-                return;
-            }
-            // MP4 → straight to Stories splash (no card→fullscreen video morph).
-            if (first.previewVideoUrl) {
-                lastOpenRectByHandleRef.current[handleKey] = rect;
-                onOpenStory(first, railHandles);
-                return;
-            }
-            lastOpenRectByHandleRef.current[handleKey] = rect;
-            setExpandHideSource(false);
-            setExpanding({ item: first, railHandles, rect });
-        };
-        if (!node) {
-            onOpenStory(first, railHandles);
-            return true;
-        }
-        node.measureInWindow((x, y, width, height) => {
-            if (width < 8 || height < 8) {
-                onOpenStory(first, railHandles);
-                return;
-            }
-            startExpand({ x, y, width, height });
-        });
+        onOpenStory(first, railHandles);
         return true;
-    }, [items, onOpenStory, railHandles, markRailItemSeen]);
+    }, [orderedItems, onOpenStory, railHandles, markRailItemSeen]);
 
     useImperativeHandle(ref, () => ({ openFirstStory: openFirstStoryFromRail }), [openFirstStoryFromRail]);
 
     if (items.length === 0) return null;
 
-    const handleStoryCardPress = (item: Stories24RailItem, rect: CardRect) => {
+    const handleStoryCardPress = (item: Stories24RailItem, _rect: CardRect) => {
         markRailItemSeen(item);
-        const handleKey = normalizeStories24Handle(item.handle);
-        lastOpenRectByHandleRef.current[handleKey] = rect;
-        // If a morph is already in flight (or stuck), open immediately instead of eating taps.
-        if (expandingRef.current) {
-            onOpenStory(item, railHandles);
-            setExpanding(null);
-            setExpandHideSource(false);
-            return;
-        }
-        // MP4 → Stories splash only (skip expanding video before the loading hold).
-        if (item.previewVideoUrl) {
-            onOpenStory(item, railHandles);
-            return;
-        }
-        setExpandHideSource(false);
-        setExpanding({ item, railHandles, rect });
+        onOpenStory(item, railHandles);
     };
 
     const finishExpand = () => {
@@ -828,9 +796,22 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     return (
         <View collapsable={false} style={styles.root}>
             <View style={styles.headerRow}>
-                <Stories24MapPinIcon size={16} color="#FFFFFF" />
-                <Text style={styles.railTitle}>Stories 24</Text>
+                <View style={styles.headerTitle}>
+                    <Stories24MapPinIcon size={16} color="#FFFFFF" />
+                    <Text style={styles.railTitle}>Stories 24</Text>
+                </View>
+                <TouchableOpacity
+                    style={styles.addYoursPill}
+                    onPress={onAddYours}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add yours"
+                >
+                    <FeedPlusIcon size={12} color="#FFFFFF" strokeWidth={2.5} />
+                    <Text style={styles.addYoursPillText}>Add yours</Text>
+                </TouchableOpacity>
             </View>
+            {displayCards.length > 0 ? (
             <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -875,6 +856,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                     );
                 })}
             </ScrollView>
+            ) : null}
             {expanding ? (
                 <Stories24ExpandOverlay
                     key={`expand-${normalizeStories24Handle(expanding.item.handle)}`}
@@ -910,15 +892,38 @@ const styles = StyleSheet.create({
     headerRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 6,
+        justifyContent: 'space-between',
         paddingHorizontal: 16,
         marginBottom: 12,
+    },
+    headerTitle: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 6,
+        flexShrink: 1,
     },
     railTitle: {
         color: '#FFFFFF',
         fontSize: 17,
         fontWeight: '400',
         letterSpacing: 0.2,
+    },
+    addYoursPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 6,
+        marginLeft: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.45)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    addYoursPillText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
     },
     scrollContent: {
         paddingLeft: 16,
@@ -931,9 +936,9 @@ const styles = StyleSheet.create({
         height: CARD_H,
         borderRadius: CARD_RADIUS,
         overflow: 'hidden',
-        backgroundColor: '#000000',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.15)',
+        backgroundColor: FEED_GRID_TILE_BG,
+        borderWidth: FEED_GRID_TILE_BORDER_WIDTH,
+        borderColor: FEED_GRID_TILE_BORDER_COLOR,
     },
     addYoursCard: {
         backgroundColor: 'transparent',
@@ -943,11 +948,10 @@ const styles = StyleSheet.create({
     },
     addYoursInner: {
         flex: 1,
-        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        columnGap: 8,
-        paddingHorizontal: 12,
+        rowGap: 8,
+        paddingHorizontal: 8,
     },
     addYoursIconCircle: {
         width: 28,

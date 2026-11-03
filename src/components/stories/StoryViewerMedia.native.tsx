@@ -13,15 +13,25 @@ import {
     storyVideoSource,
 } from '../../utils/storyMediaNative';
 import StorySafeVideo from './StorySafeVideo.native';
+import StoryLinkCard from './StoryLinkCard.native';
+import { useLinkPreview } from '../../hooks/useLinkPreview';
+import {
+    captionWithoutLinkUrl,
+    extractFirstHttpUrl,
+    fallbackLinkPreview,
+} from '../../utils/linkPreview';
+import { storyLinkBrandForUrl } from '../../utils/storyLinkBrand';
 
 type Props = {
     story: Story;
     isMuted: boolean;
     paused: boolean;
+    authorAvatar?: string;
+    authorName?: string;
 };
 
 /** Regular (non–shared-post) story media: video, image, or text-only template. */
-export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
+export default function StoryViewerMedia({ story, isMuted, paused, authorAvatar, authorName }: Props) {
     const text = getStoryTextContent(story);
     const mediaUri = pickStoryMediaUri(story) || story.mediaUrl;
     const videoSource = storyVideoSource(mediaUri);
@@ -73,6 +83,19 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
         );
     }
 
+    const linkUrl = text ? extractFirstHttpUrl(text) : undefined;
+    if (linkUrl) {
+        return (
+            <StoryLinkStory
+                url={linkUrl}
+                caption={captionWithoutLinkUrl(text, linkUrl)}
+                story={story}
+                authorAvatar={authorAvatar}
+                authorName={authorName || story.userHandle}
+            />
+        );
+    }
+
     if (text) {
         const { gradientColors, color, fontSize } = getTextStoryStyle(story);
         return (
@@ -88,6 +111,49 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
         <View style={[StyleSheet.absoluteFill, styles.empty]}>
             <ActivityIndicator color="#fff" />
         </View>
+    );
+}
+
+function StoryLinkStory({
+    url,
+    caption,
+    story,
+    authorAvatar,
+    authorName,
+}: {
+    url: string;
+    caption: string;
+    story: Story;
+    authorAvatar?: string;
+    authorName?: string;
+}) {
+    const { preview: fetched, loading } = useLinkPreview(url, { debounceMs: 0 });
+    const preview = fetched || fallbackLinkPreview(url);
+    const { color, fontSize } = getTextStoryStyle(story);
+    const canvas = storyLinkBrandForUrl(url).canvas;
+
+    return (
+        <LinearGradient
+            colors={[...canvas]}
+            start={{ x: 0.15, y: 0 }}
+            end={{ x: 0.85, y: 1 }}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="box-none"
+        >
+            <View style={styles.linkWrap} pointerEvents="box-none">
+                {caption ? (
+                    <Text style={[styles.linkCaption, { color, fontSize }]} numberOfLines={3}>
+                        {caption}
+                    </Text>
+                ) : null}
+                <StoryLinkCard
+                    preview={preview}
+                    loading={loading && !fetched}
+                    authorAvatar={authorAvatar}
+                    authorName={authorName}
+                />
+            </View>
+        </LinearGradient>
     );
 }
 
@@ -107,5 +173,15 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         textAlign: 'center',
         lineHeight: 28,
+    },
+    linkWrap: {
+        flex: 1,
+        justifyContent: 'center',
+        paddingHorizontal: 28,
+    },
+    linkCaption: {
+        marginBottom: 16,
+        fontWeight: '700',
+        textAlign: 'center',
     },
 });

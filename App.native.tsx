@@ -401,15 +401,23 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="Stories"
             component={StoriesScreen}
-            options={({ route }) => ({
-              presentation: 'fullScreenModal',
-              contentStyle: { backgroundColor: '#000000' },
-              // From Stories 24 rail: no native transition — card morph hands off to fullscreen.
-              animation: (route.params as { fromStories24Rail?: boolean } | undefined)
-                ?.fromStories24Rail
-                ? 'none'
-                : 'default',
-            })}
+            options={({ route }) => {
+              const fromStories24 = Boolean(
+                (route.params as { fromStories24Rail?: boolean } | undefined)?.fromStories24Rail,
+              );
+              // Stories 24 uses the same card push/pop as passport PostDetail.
+              if (fromStories24) {
+                return {
+                  contentStyle: { backgroundColor: '#000000' },
+                  animation: 'default' as const,
+                };
+              }
+              return {
+                presentation: 'fullScreenModal' as const,
+                contentStyle: { backgroundColor: '#000000' },
+                animation: 'default' as const,
+              };
+            }}
           />
           <Stack.Screen
             name="Scenes"

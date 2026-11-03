@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+    bindStoryViewedUser,
     getStoryViewedVersion,
     hasUnseenStory,
     isHandleStoryRingSeen,
@@ -47,6 +48,23 @@ describe('storyViewedStore', () => {
         markStoryAsViewed('story-c', 'cara@galway');
         rememberUnseenStory('cara@galway', true);
         expect(hasUnseenStory('cara@galway')).toBe(false);
+    });
+
+    it('does not treat every Gazetteer@ place as the same watched story', () => {
+        rememberUnseenStory('Gazetteer@Cork', true);
+        markStoryAsViewed('story-dublin', 'Gazetteer@Dublin');
+        expect(isHandleStoryRingSeen('Gazetteer@Dublin')).toBe(true);
+        expect(isHandleStoryRingSeen('Gazetteer@Cork')).toBe(false);
+        expect(hasUnseenStory('Gazetteer@Cork')).toBe(true);
+    });
+
+    it('drops another account’s watched stories when a different person signs in', () => {
+        bindStoryViewedUser('user-a');
+        markStoryAsViewed('story-g', 'Gazetteer@Dublin');
+        expect(isHandleStoryRingSeen('Gazetteer@Dublin')).toBe(true);
+        bindStoryViewedUser('user-debs');
+        expect(isStoryMarkedViewed('story-g')).toBe(false);
+        expect(isHandleStoryRingSeen('Gazetteer@Dublin')).toBe(false);
     });
 
     it('drops the ring on inbox/feed handles that share the same username', () => {

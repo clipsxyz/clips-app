@@ -81,6 +81,30 @@ class LinkPreviewTest extends TestCase
         $this->assertSame('Example', $preview['source']);
     }
 
+    public function test_open_graph_falls_back_to_title_and_meta_description(): void
+    {
+        Http::fake([
+            'https://news.example.com/story' => Http::response(
+                '<html><head>'
+                .'<title>Evening bulletin</title>'
+                .'<meta name="description" content="The day in one paragraph">'
+                .'<meta property="og:site_name" content="Example News">'
+                .'<meta content="https://news.example.com/hero.jpg" property="og:image">'
+                .'<meta property="og:image" content="https://news.example.com/logo.png">'
+                .'</head></html>',
+                200
+            ),
+        ]);
+
+        $preview = (new LinkPreviewService)->fetch('https://news.example.com/story');
+
+        $this->assertSame('Evening bulletin', $preview['title']);
+        $this->assertSame('The day in one paragraph', $preview['description']);
+        $this->assertSame('Example News', $preview['site_name']);
+        $this->assertSame('Example News', $preview['source']);
+        $this->assertSame('https://news.example.com/hero.jpg', $preview['image_url']);
+    }
+
     public function test_authenticated_preview_endpoint_returns_og_payload(): void
     {
         Http::fake([
