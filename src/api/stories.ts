@@ -698,6 +698,59 @@ function normalizeStickerOverlay(sticker: any): StickerOverlay {
     } as StickerOverlay;
 }
 
+function normalizeTaggedHandles(raw: unknown): string[] | undefined {
+    let value = raw;
+    if (typeof value === 'string' && value.trim()) {
+        try {
+            value = JSON.parse(value);
+        } catch {
+            return undefined;
+        }
+    }
+    if (!Array.isArray(value)) return undefined;
+    const handles = value
+        .map((item) => {
+            if (typeof item === 'string') return item.replace(/^@/, '').trim();
+            if (item && typeof item === 'object' && typeof (item as { handle?: string }).handle === 'string') {
+                return (item as { handle: string }).handle.replace(/^@/, '').trim();
+            }
+            return '';
+        })
+        .filter(Boolean);
+    return handles.length > 0 ? handles : undefined;
+}
+
+function normalizeTaggedPositions(
+    raw: unknown,
+): Array<{ handle: string; x: number; y: number }> | undefined {
+    let value = raw;
+    if (typeof value === 'string' && value.trim()) {
+        try {
+            value = JSON.parse(value);
+        } catch {
+            return undefined;
+        }
+    }
+    if (!Array.isArray(value)) return undefined;
+    const pins = value
+        .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const handle = String((item as { handle?: string }).handle || '')
+                .replace(/^@/, '')
+                .trim();
+            if (!handle) return null;
+            const x = Number((item as { x?: number }).x);
+            const y = Number((item as { y?: number }).y);
+            return {
+                handle,
+                x: Number.isFinite(x) ? x : 50,
+                y: Number.isFinite(y) ? y : 50,
+            };
+        })
+        .filter((pin): pin is { handle: string; x: number; y: number } => Boolean(pin));
+    return pins.length > 0 ? pins : undefined;
+}
+
 function normalizeStoryStickers(stickers: any): StickerOverlay[] | undefined {
     if (!Array.isArray(stickers)) return undefined;
     return stickers.map(normalizeStickerOverlay);
@@ -808,7 +861,10 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         userReaction: story.user_reaction || undefined,
         textStyle: story.text_style || undefined,
         stickers: normalizeStoryStickers(story.stickers),
-        taggedUsers: story.tagged_users || undefined,
+        taggedUsers: normalizeTaggedHandles(story.tagged_users ?? story.taggedUsers),
+        taggedUsersPositions: normalizeTaggedPositions(
+            story.tagged_users_positions ?? story.taggedUsersPositions,
+        ),
         videoPosterUrl: pickStoryPosterUri(story) || undefined,
         audience: story.audience || 'public',
         sharedFromPost: story.shared_from_post_id || undefined,

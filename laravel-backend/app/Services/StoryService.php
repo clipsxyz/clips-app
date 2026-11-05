@@ -77,6 +77,48 @@ class StoryService
         }
 
         $query->whereIn('user_id', $authorIds->all());
+
+        $viewerId = (string) ($viewer?->id ?: $userIdParam);
+        // Own stories stay visible in every audience. Other authors on this rail are
+        // accepted follows, so they can see public and followers stories, not private ones.
+        $query->where(function ($q) use ($viewerId) {
+            $q->where(function ($visible) {
+                $visible->whereIn('audience', ['public', 'close_friends'])
+                    ->orWhereNull('audience');
+            });
+            if ($viewerId !== '') {
+                $q->orWhere('user_id', $viewerId);
+            }
+        });
+    }
+
+    public function viewerFollowsAuthor(string $viewerId, string $authorId): bool
+    {
+        if ($viewerId === '' || $authorId === '' || $viewerId === $authorId) {
+            return false;
+        }
+
+        return in_array($authorId, $this->acceptedFollowingIds($viewerId), true);
+    }
+
+    /**
+     * Public stories are visible to anyone who can open the author.
+     * Followers stories are visible to accepted followers.
+     * Private stories are visible only to the author.
+     */
+    public function applyVisibleAudience(Builder $query, ?string $viewerId, string $authorId): void
+    {
+        if ($viewerId && $viewerId === $authorId) {
+            return;
+        }
+
+        $allowed = ($viewerId && $this->viewerFollowsAuthor($viewerId, $authorId))
+            ? ['public', 'close_friends']
+            : ['public'];
+
+        $query->where(function ($q) use ($allowed) {
+            $q->whereIn('audience', $allowed)->orWhereNull('audience');
+        });
     }
 
     public static function forgetRailCacheForUser(?string $userId): void

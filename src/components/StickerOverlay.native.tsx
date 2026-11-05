@@ -72,15 +72,23 @@ export default function StickerOverlayNative({
         (Boolean(overlay.textContent) && !isLocationSticker && !isLinkSticker);
     const isPillSticker = isLocationSticker || isLinkSticker;
 
-    const baseSize = overlay.sticker.category === 'GIF' ? 80 : isTextSticker ? 120 : 50;
+    const textFont = fontSizePx(overlay.fontSize);
+    const captionLength = (overlay.textContent || overlay.sticker.name || '').length;
+    const textWidth = isTextSticker ? Math.max(160, containerWidth * 0.78) : 0;
+    const textLines = isTextSticker
+        ? Math.min(4, Math.max(1, Math.ceil(Math.max(captionLength, 1) / 22)))
+        : 1;
+    const baseSize = overlay.sticker.category === 'GIF' ? 80 : isTextSticker ? textWidth : 50;
     const width = isPillSticker
         ? Math.max(120, ((overlay.textContent || overlay.sticker.name || '').length * 7 + 48) * overlay.scale)
-        : baseSize * overlay.scale;
+        : isTextSticker
+          ? textWidth
+          : baseSize * overlay.scale;
     const height =
         overlay.sticker.category === 'GIF'
             ? 80 * overlay.scale
             : isTextSticker
-              ? 72 * overlay.scale
+              ? Math.max(56, textLines * textFont * 1.25 + 16) * overlay.scale
               : isPillSticker
                 ? 36 * overlay.scale
                 : 50 * overlay.scale;
@@ -222,6 +230,7 @@ export default function StickerOverlayNative({
             style={[
                 styles.textSticker,
                 {
+                    width: Math.max(120, textWidth - 20),
                     color: overlay.textColor || '#FFFFFF',
                     fontSize: fontSizePx(overlay.fontSize) * overlay.scale,
                 },

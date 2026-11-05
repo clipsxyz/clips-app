@@ -3,9 +3,11 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    Keyboard,
     LayoutChangeEvent,
     NativeScrollEvent,
     NativeSyntheticEvent,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -16,6 +18,7 @@ import {
     View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Avatar from '../components/Avatar.native';
 import Video, { type VideoRef } from 'react-native-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
@@ -25,12 +28,10 @@ import StickerOverlayNative from '../components/StickerOverlay.native';
 import StoryModalShell from '../components/StoryModalShell.native';
 import StoryNewsHeadlineScaffold, {
     NEWS_HEADLINE_CTA_LABEL,
-    NEWS_HEADLINE_MAX_CHARS,
 } from '../components/StoryNewsHeadlineScaffold.native';
 import TaggedUserOverlayNative, {
     type TaggedUserOverlayItem,
 } from '../components/TaggedUserOverlay.native';
-import TextStickerModalNative from '../components/TextStickerModal.native';
 import UserTaggingModalNative from '../components/UserTaggingModal.native';
 import type { StickerOverlay } from '../types';
 import {
@@ -48,8 +49,11 @@ type RailAction = 'text' | 'location' | 'link' | 'tag' | 'audience';
 const RAIL_ACTIONS: RailAction[] = ['text', 'location', 'link', 'tag', 'audience'];
 const RAIL_SLOT = 72;
 
-/** Fixed position for persisted headline sticker (percent of canvas). */
-const HEADLINE_STICKER_Y = 48;
+/** Fixed position for the caption sticker (percent of canvas). */
+const CAPTION_STICKER_Y = 42;
+/** Instagram story text is a soft visual cap of about 250 characters. */
+const CAPTION_MAX_CHARS = 250;
+const CAPTION_STICKER_ID = 'story-caption';
 /** Spawn free-move stickers mid-canvas so they aren't under the footer rail. */
 const DEFAULT_STICKER_Y = 50;
 
@@ -75,8 +79,14 @@ function normalizeStoryLinkUrl(rawUrl: string): string | null {
 
 function audienceLabel(audience: StoryAudience): string {
     if (audience === 'close_friends') return 'Followers';
-    if (audience === 'only_me') return 'Only me';
+    if (audience === 'only_me') return 'Private';
     return 'Public';
+}
+
+function audienceHint(audience: StoryAudience): string {
+    if (audience === 'close_friends') return 'Followers can view this story';
+    if (audience === 'only_me') return 'Only you can view this story';
+    return 'Anyone can view this story';
 }
 
 function audienceHintColor(audience: StoryAudience): string {
@@ -115,20 +125,22 @@ function RailIcon({
     return <Icon name="people-outline" size={size} color="#FFFFFF" />;
 }
 
-function buildHeadlineSticker(headline: string): StickerOverlay | null {
-    const trimmed = headline.trim().toUpperCase().slice(0, NEWS_HEADLINE_MAX_CHARS);
-    if (!trimmed) return null;
-    const id = 'news-headline';
+function buildCaptionSticker(
+    caption: string,
+    existing?: Pick<StickerOverlay, 'x' | 'y' | 'scale' | 'rotation'> | null,
+): StickerOverlay | null {
+    const text = caption.slice(0, CAPTION_MAX_CHARS);
+    if (!text.trim()) return null;
     return {
-        id,
-        stickerId: id,
-        sticker: { id, name: trimmed, category: 'Headline', isTrending: false },
-        x: 50,
-        y: HEADLINE_STICKER_Y,
-        scale: 1,
-        rotation: 0,
+        id: CAPTION_STICKER_ID,
+        stickerId: CAPTION_STICKER_ID,
+        sticker: { id: CAPTION_STICKER_ID, name: text.trim(), category: 'Text', isTrending: false },
+        x: existing?.x ?? 50,
+        y: existing?.y ?? CAPTION_STICKER_Y,
+        scale: existing?.scale ?? 1,
+        rotation: existing?.rotation ?? 0,
         opacity: 1,
-        textContent: trimmed,
+        textContent: text,
         textColor: '#FFFFFF',
         fontSize: 'large',
     };
@@ -164,7 +176,9 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
         route.params?.mediaType === 'video' ? 'video' : 'image';
     const videoCoverTime = Number(route.params?.videoCoverTime || 0);
 
-    const [headlineText, setHeadlineText] = useState('');
+    const [captionSticker, setCaptionSticker] = useState<StickerOverlay | null>(null);
+    const [captionOpen, setCaptionOpen] = useState(false);
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
     const [linkSticker, setLinkSticker] = useState<StickerOverlay | null>(null);
     const [locationStickers, setLocationStickers] = useState<StickerOverlay[]>([]);
     const [taggedUsers, setTaggedUsers] = useState<TaggedUserOverlayItem[]>([]);
@@ -175,7 +189,6 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
     const [isPosting, setIsPosting] = useState(false);
 
-    const [showTextModal, setShowTextModal] = useState(false);
     const [showLocationModal, setShowLocationModal] = useState(false);
     const [showLinkModal, setShowLinkModal] = useState(false);
     const [showTagModal, setShowTagModal] = useState(false);
@@ -184,17 +197,30 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
 
     const railRef = useRef<ScrollView | null>(null);
     const videoRef = useRef<VideoRef>(null);
+    const captionInputRef = useRef<TextInput>(null);
+    const captionAnchor = useRef({ x: 50, y: CAPTION_STICKER_Y, scale: 1, rotation: 0 });
+    const captionText = captionSticker?.textContent ?? '';
 
     const movableStickers = useMemo(() => {
         const list: StickerOverlay[] = [...locationStickers];
         if (linkSticker) list.push(linkSticker);
+        if (captionSticker?.textContent) list.push(captionSticker);
         return list;
-    }, [linkSticker, locationStickers]);
+    }, [captionSticker, linkSticker, locationStickers]);
 
     const allOverlays = useMemo(() => {
-        const headline = buildHeadlineSticker(headlineText);
-        return [...(headline ? [headline] : []), ...movableStickers];
-    }, [headlineText, movableStickers]);
+        const text = captionSticker?.textContent?.trim() ?? '';
+        const caption = text
+            ? {
+                  ...captionSticker!,
+                  textContent: text,
+                  sticker: { ...captionSticker!.sticker, name: text },
+              }
+            : null;
+        const extras: StickerOverlay[] = [...locationStickers];
+        if (linkSticker) extras.push(linkSticker);
+        return [...(caption ? [caption] : []), ...extras];
+    }, [captionSticker, linkSticker, locationStickers]);
 
     const centerRailAction = useCallback(
         (action: RailAction, animated = true) => {
@@ -258,20 +284,69 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
             centerRailAction('audience');
             return;
         }
+        if (action === 'text') {
+            setCenteredRail('text');
+            centerRailAction('text');
+            openCaptionBar();
+            return;
+        }
         if (centeredRail !== action) {
             setCenteredRail(action);
             centerRailAction(action);
             return;
         }
-        if (action === 'text') setShowTextModal(true);
         if (action === 'location') setShowLocationModal(true);
         if (action === 'link') openLinkEditor();
         if (action === 'tag') setShowTagModal(true);
     };
 
-    const saveHeadline = (text: string) => {
-        setHeadlineText(text.trim().toUpperCase().slice(0, NEWS_HEADLINE_MAX_CHARS));
-    };
+    const openCaptionBar = useCallback(() => {
+        setCaptionOpen(true);
+        requestAnimationFrame(() => captionInputRef.current?.focus());
+    }, []);
+
+    const updateCaptionText = useCallback((value: string) => {
+        const next = value.slice(0, CAPTION_MAX_CHARS);
+        setCaptionSticker((current) => {
+            if (current) {
+                captionAnchor.current = {
+                    x: current.x,
+                    y: current.y,
+                    scale: current.scale,
+                    rotation: current.rotation,
+                };
+            }
+            return buildCaptionSticker(next, current ?? captionAnchor.current);
+        });
+    }, []);
+
+    const closeCaptionBar = useCallback(() => {
+        setCaptionSticker((current) => {
+            if (!current) return null;
+            captionAnchor.current = {
+                x: current.x,
+                y: current.y,
+                scale: current.scale,
+                rotation: current.rotation,
+            };
+            return buildCaptionSticker(current.textContent?.trim() || '', current);
+        });
+        setCaptionOpen(false);
+        Keyboard.dismiss();
+    }, []);
+
+    useEffect(() => {
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(showEvent, (event) => {
+            setKeyboardHeight(event.endCoordinates?.height || 0);
+        });
+        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     const addLocationSticker = () => {
         const label = locationDraft.trim();
@@ -322,6 +397,16 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     };
 
     const updateMovableSticker = useCallback((updated: StickerOverlay) => {
+        if (updated.id === CAPTION_STICKER_ID || updated.sticker.category === 'Text') {
+            captionAnchor.current = {
+                x: updated.x,
+                y: updated.y,
+                scale: updated.scale,
+                rotation: updated.rotation,
+            };
+            setCaptionSticker(updated);
+            return;
+        }
         if (updated.sticker.category === 'Link' || updated.linkUrl) {
             setLinkSticker(updated);
             return;
@@ -331,7 +416,9 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
 
     const removeMovableSticker = useCallback(
         (id: string) => {
-            if (linkSticker?.id === id) {
+            if (id === CAPTION_STICKER_ID) {
+                setCaptionSticker(null);
+            } else if (linkSticker?.id === id) {
                 setLinkSticker(null);
             } else {
                 setLocationStickers((prev) => prev.filter((o) => o.id !== id));
@@ -436,7 +523,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
         label: string;
         count?: number;
     }> = [
-        { id: 'text', label: 'Text', count: headlineText ? 1 : 0 },
+        { id: 'text', label: 'Text', count: captionText.trim() ? 1 : 0 },
         { id: 'location', label: 'Location', count: locationStickers.length },
         { id: 'link', label: 'Link', count: linkSticker ? 1 : 0 },
         { id: 'tag', label: 'Tag', count: taggedUsers.length },
@@ -475,15 +562,11 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                     onPress={() => {
                         setSelectedOverlayId(null);
                         setSelectedTaggedUserId(null);
+                        if (captionOpen) closeCaptionBar();
                     }}
                 />
 
-                <StoryNewsHeadlineScaffold
-                    mode="editor"
-                    headline={headlineText}
-                    showEmptyGuides
-                    onPressHeadline={() => setShowTextModal(true)}
-                />
+                <StoryNewsHeadlineScaffold mode="editor" showEmptyGuides={false} />
 
                 {previewSize.width > 0 &&
                     movableStickers.map((overlay) => (
@@ -548,12 +631,13 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                     </TouchableOpacity>
                 </View>
 
+                {captionOpen ? null : (
                 <View
                     style={[styles.footerOverlay, { paddingBottom: Math.max(insets.bottom, 12) }]}
                     pointerEvents="box-none"
                 >
                     <Text style={[styles.audienceHint, { color: audienceHintColor(storyAudience) }]}>
-                        Audience: {audienceLabel(storyAudience)}
+                        {audienceHint(storyAudience)}
                     </Text>
                     <ScrollView
                         ref={railRef}
@@ -631,15 +715,53 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                         <View style={{ width: railPadWidth }} />
                     </ScrollView>
                 </View>
-            </View>
+                )}
 
-            <TextStickerModalNative
-                visible={showTextModal}
-                onClose={() => setShowTextModal(false)}
-                onConfirm={(text) => saveHeadline(text)}
-                variant="story"
-                initialText={headlineText}
-            />
+                {captionOpen ? (
+                    <View
+                        style={[
+                            styles.captionBar,
+                            {
+                                bottom: Platform.OS === 'ios' ? keyboardHeight : 0,
+                                paddingBottom:
+                                    Platform.OS === 'ios' && keyboardHeight > 0
+                                        ? ox(10)
+                                        : Math.max(insets.bottom, ox(10)),
+                            },
+                        ]}
+                    >
+                        <Avatar
+                            src={user?.avatarUrl}
+                            name={user?.handle || 'You'}
+                            size={ox(34)}
+                            hideBorder
+                        />
+                        <TextInput
+                            ref={captionInputRef}
+                            value={captionText}
+                            onChangeText={updateCaptionText}
+                            placeholder="Add a caption..."
+                            placeholderTextColor="rgba(255,255,255,0.55)"
+                            style={styles.captionInput}
+                            maxLength={CAPTION_MAX_CHARS}
+                            multiline
+                            autoFocus
+                            returnKeyType="done"
+                            blurOnSubmit
+                            onSubmitEditing={closeCaptionBar}
+                        />
+                        <TouchableOpacity
+                            style={styles.captionDone}
+                            onPress={closeCaptionBar}
+                            accessibilityRole="button"
+                            accessibilityLabel="Done"
+                            hitSlop={8}
+                        >
+                            <Icon name="checkmark" size={ox(20)} color="#111827" />
+                        </TouchableOpacity>
+                    </View>
+                ) : null}
+            </View>
 
             <StoryModalShell
                 visible={showLocationModal}
@@ -854,4 +976,34 @@ const styles = StyleSheet.create({
     countBadgeText: { color: '#000000', fontSize: ox(10), fontWeight: '700' },
     railLabel: { marginTop: ox(4), color: '#FFFFFF', fontSize: ox(10), opacity: 0.75, textAlign: 'center' },
     railLabelActive: { opacity: 0.95, fontWeight: '600' },
+    captionBar: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        zIndex: 60,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: ox(12),
+        paddingTop: ox(10),
+        backgroundColor: 'rgba(15,23,42,0.78)',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.22)',
+    },
+    captionInput: {
+        flex: 1,
+        marginHorizontal: ox(10),
+        maxHeight: ox(88),
+        color: '#FFFFFF',
+        fontSize: ox(16),
+        fontWeight: '600',
+        paddingVertical: ox(8),
+    },
+    captionDone: {
+        width: ox(34),
+        height: ox(34),
+        borderRadius: ox(17),
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
 });

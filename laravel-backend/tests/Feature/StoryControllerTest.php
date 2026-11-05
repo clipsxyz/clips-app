@@ -471,6 +471,69 @@ class StoryControllerTest extends TestCase
             ]);
     }
 
+    public function test_story_audience_is_visible_only_to_the_right_viewers(): void
+    {
+        $author = User::factory()->create(['is_private' => false]);
+        $follower = User::factory()->create(['is_private' => false]);
+        $stranger = User::factory()->create(['is_private' => false]);
+
+        \Illuminate\Support\Facades\DB::table('user_follows')->insert([
+            'follower_id' => $follower->id,
+            'following_id' => $author->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $public = Story::factory()->forUser($author)->create([
+            'text' => 'Public story',
+            'audience' => 'public',
+            'expires_at' => now()->addDay(),
+        ]);
+        $followers = Story::factory()->forUser($author)->create([
+            'text' => 'Followers story',
+            'audience' => 'close_friends',
+            'expires_at' => now()->addDay(),
+        ]);
+        $private = Story::factory()->forUser($author)->create([
+            'text' => 'Private story',
+            'audience' => 'only_me',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $ownerIds = collect($this->actingAs($author, 'sanctum')
+            ->getJson('/api/stories/user/'.$author->handle)
+            ->assertOk()
+            ->json())->pluck('id');
+        $this->assertTrue($ownerIds->contains($public->id));
+        $this->assertTrue($ownerIds->contains($followers->id));
+        $this->assertTrue($ownerIds->contains($private->id));
+
+        $followerIds = collect($this->actingAs($follower, 'sanctum')
+            ->getJson('/api/stories/user/'.$author->handle)
+            ->assertOk()
+            ->json())->pluck('id');
+        $this->assertTrue($followerIds->contains($public->id));
+        $this->assertTrue($followerIds->contains($followers->id));
+        $this->assertFalse($followerIds->contains($private->id));
+
+        $strangerIds = collect($this->actingAs($stranger, 'sanctum')
+            ->getJson('/api/stories/user/'.$author->handle)
+            ->assertOk()
+            ->json())->pluck('id');
+        $this->assertTrue($strangerIds->contains($public->id));
+        $this->assertFalse($strangerIds->contains($followers->id));
+        $this->assertFalse($strangerIds->contains($private->id));
+
+        $railIds = collect($this->actingAs($follower, 'sanctum')
+            ->getJson('/api/stories/paged')
+            ->assertOk()
+            ->json('items'))->pluck('id');
+        $this->assertTrue($railIds->contains($public->id));
+        $this->assertTrue($railIds->contains($followers->id));
+        $this->assertFalse($railIds->contains($private->id));
+    }
+
     public function test_guest_cannot_view_close_friends_or_private_account_story(): void
     {
         $publicUser = User::factory()->create(['is_private' => false]);

@@ -39,6 +39,7 @@ class Story extends Model
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers', // JSON array of StickerOverlay objects
         'tagged_users', // JSON array of user handles
+        'tagged_users_positions', // JSON array of { handle, x, y }
         'audience', // public | close_friends | only_me
         'video_poster_url', // still frame for Stories 24 rail thumbs
         'link_preview', // JSON: server-resolved OG/oEmbed payload { url, title, description, image_url, source, ... }
@@ -51,6 +52,7 @@ class Story extends Model
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers' => 'array', // Array of StickerOverlay objects
         'tagged_users' => 'array', // Array of user handles
+        'tagged_users_positions' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

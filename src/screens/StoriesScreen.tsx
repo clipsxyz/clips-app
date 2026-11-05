@@ -122,6 +122,34 @@ const STORY_SAFE_ZONE_BOTTOM = 82;
 const STORY_DISMISS_MS = 280;
 const STORY_DISMISS_EASE = Easing.out(Easing.cubic);
 
+function storyTagPins(story: {
+    taggedUsers?: string[];
+    taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>;
+}): Array<{ handle: string; x: number; y: number }> {
+    const positions = Array.isArray(story.taggedUsersPositions) ? story.taggedUsersPositions : [];
+    const placed = positions
+        .map((pin) => ({
+            handle: String(pin?.handle || '').replace(/^@/, '').trim(),
+            x: Number(pin?.x),
+            y: Number(pin?.y),
+        }))
+        .filter((pin) => pin.handle)
+        .map((pin) => ({
+            handle: pin.handle,
+            x: Number.isFinite(pin.x) ? pin.x : 50,
+            y: Number.isFinite(pin.y) ? pin.y : 50,
+        }));
+    if (placed.length > 0) return placed;
+    const handles = Array.isArray(story.taggedUsers) ? story.taggedUsers : [];
+    return handles
+        .map((handle, index) => ({
+            handle: String(handle || '').replace(/^@/, '').trim(),
+            x: 50,
+            y: Math.min(82, 62 + index * 8),
+        }))
+        .filter((pin) => pin.handle);
+}
+
 export default function StoriesScreen({ route, navigation }: any) {
     const {
         openUserHandle,
@@ -1501,9 +1529,8 @@ export default function StoriesScreen({ route, navigation }: any) {
                     ) : null}
 
                     {Array.isArray(currentStory.stickers) &&
-                        currentStory.stickers
-                            .filter((overlay) => !!overlay?.linkUrl)
-                            .map((overlay) => {
+                        currentStory.stickers.map((overlay) => {
+                            if (overlay?.linkUrl) {
                                 const label = (overlay.linkName || overlay.textContent || 'Shop now').trim();
                                 const iconColor = '#E11D48';
                                 const labelColor = '#111111';
@@ -1535,7 +1562,83 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         </Text>
                                     </TouchableOpacity>
                                 );
-                            })}
+                            }
+
+                            const caption = String(overlay?.textContent || '').trim();
+                            if (!caption) return null;
+                            const isLocation = overlay.sticker?.category === 'Location';
+                            const fontSize =
+                                overlay.fontSize === 'small'
+                                    ? ox(16)
+                                    : overlay.fontSize === 'large'
+                                      ? ox(28)
+                                      : ox(22);
+                            return (
+                                <View
+                                    key={overlay.id}
+                                    pointerEvents="none"
+                                    style={[
+                                        styles.storyTextSticker,
+                                        { flexDirection: isLocation ? 'row' : 'column' },
+                                        {
+                                            left: `${overlay.x ?? 50}%`,
+                                            top: `${overlay.y ?? 42}%`,
+                                            opacity: overlay.opacity ?? 1,
+                                            transform: [
+                                                { translateX: '-50%' },
+                                                { translateY: '-50%' },
+                                                { scale: overlay.scale || 1 },
+                                                { rotate: `${overlay.rotation || 0}deg` },
+                                            ],
+                                        },
+                                    ]}
+                                >
+                                    {isLocation ? (
+                                        <Icon name="location" size={ox(16)} color={overlay.textColor || '#FFFFFF'} />
+                                    ) : null}
+                                    <Text
+                                        numberOfLines={4}
+                                        style={[
+                                            styles.storyTextStickerLabel,
+                                            {
+                                                color: overlay.textColor || '#FFFFFF',
+                                                fontSize,
+                                                lineHeight: Math.round(fontSize * 1.2),
+                                                marginLeft: isLocation ? ox(6) : 0,
+                                            },
+                                        ]}
+                                    >
+                                        {caption}
+                                    </Text>
+                                </View>
+                            );
+                        })}
+
+                    {storyTagPins(currentStory).map((pin) => (
+                        <TouchableOpacity
+                            key={`tag-${pin.handle}`}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                                closeStories();
+                                setTimeout(() => {
+                                    navigation.navigate('ViewProfile', { handle: pin.handle });
+                                }, 100);
+                            }}
+                            style={[
+                                styles.storyTagPill,
+                                {
+                                    left: `${pin.x}%`,
+                                    top: `${pin.y}%`,
+                                },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`View @${pin.handle}`}
+                        >
+                            <Text style={styles.storyTagPillText} numberOfLines={1}>
+                                @{pin.handle}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
 
                     <StoryBottomBar
                         hidden={isHoldingToPause}
@@ -2083,6 +2186,41 @@ const styles = StyleSheet.create({
         top: 0,
         bottom: 0,
         width: width * 0.3,
+    },
+    storyTagPill: {
+        position: 'absolute',
+        zIndex: 32,
+        transform: [{ translateX: '-50%' }, { translateY: '-50%' }],
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
+        borderRadius: ox(999),
+        backgroundColor: 'rgba(255,255,255,0.22)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.4)',
+        maxWidth: '70%',
+    },
+    storyTagPillText: {
+        color: '#FFFFFF',
+        fontSize: ox(14),
+        fontWeight: '700',
+        textShadowColor: 'rgba(0,0,0,0.55)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+    },
+    storyTextSticker: {
+        position: 'absolute',
+        zIndex: 30,
+        maxWidth: '82%',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    storyTextStickerLabel: {
+        flexShrink: 1,
+        fontWeight: '800',
+        textAlign: 'center',
+        textShadowColor: 'rgba(0,0,0,0.75)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
     },
     storyLinkSticker: {
         position: 'absolute',

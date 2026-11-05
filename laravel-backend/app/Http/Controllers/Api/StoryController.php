@@ -17,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -176,12 +177,24 @@ class StoryController extends Controller
         $user = User::where('handle', $handle)->firstOrFail();
         $userId = $request->get('userId') ?: Auth::id();
         $hasViewer = !empty($userId);
-        $isOwner = Auth::id() && Auth::id() === $user->id;
+        $viewerId = Auth::id() ? (string) Auth::id() : null;
+        $isOwner = $viewerId !== null && $viewerId === (string) $user->id;
+        $storyService = app(StoryService::class);
+        $follows = $viewerId
+            ? $storyService->viewerFollowsAuthor($viewerId, (string) $user->id)
+            : false;
+
+        // A private account's stories stay hidden until the viewer is an accepted follower.
+        if (! $isOwner && $user->is_private && ! $follows) {
+            return response()->json([]);
+        }
 
         $query = Story::where('user_id', $user->id)
             ->active()
             ->withCount(['reactions', 'replies', 'views'])
             ->orderBy('created_at', 'desc');
+
+        $storyService->applyVisibleAudience($query, $viewerId, (string) $user->id);
 
         if ($isOwner) {
             $query->with([
@@ -311,6 +324,10 @@ class StoryController extends Controller
             'stickers' => 'nullable|array',
             'taggedUsers' => 'nullable|array',
             'taggedUsers.*' => 'required|string|exists:users,handle',
+            'taggedUsersPositions' => 'nullable|array',
+            'taggedUsersPositions.*.handle' => 'required|string|max:255',
+            'taggedUsersPositions.*.x' => 'nullable|numeric',
+            'taggedUsersPositions.*.y' => 'nullable|numeric',
             'audience' => 'nullable|in:public,close_friends,only_me',
             // Poster is optional decoration; never reject a story just because the still is
             // not an absolute URL (local file://, blob:, or empty are all acceptable).
@@ -342,7 +359,7 @@ class StoryController extends Controller
         $linkPreview = $this->resolveLinkPreview($request);
 
         $story = DB::transaction(function () use ($request, $user, $sharedPost, $linkPreview) {
-            $story = Story::create([
+            $attributes = [
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
                 'media_url' => $request->media_url,
@@ -362,7 +379,11 @@ class StoryController extends Controller
                 'video_poster_url' => $request->video_poster_url,
                 'expires_at' => now()->addHours(24), // 24 hours from now
                 'link_preview' => $linkPreview,
-            ]);
+            ];
+            if (Schema::hasColumn('stories', 'tagged_users_positions')) {
+                $attributes['tagged_users_positions'] = $request->input('taggedUsersPositions');
+            }
+            $story = Story::create($attributes);
 
             return $story;
         });
