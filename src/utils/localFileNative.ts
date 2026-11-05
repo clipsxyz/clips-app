@@ -1,5 +1,5 @@
-import { NativeModules } from 'react-native';
-import { toFileUri } from './ffmpegNative';
+import { NativeModules, Platform } from 'react-native';
+import { isAppWritableVideoPath, toFileUri, toFfmpegPath } from './ffmpegNative';
 
 type GalleryRollFs = {
     copyUriToCache?: (uri: string) => Promise<{ uri?: string; fileSize?: number }>;
@@ -48,19 +48,29 @@ export async function copyLocalUriToCacheFile(uri: string): Promise<string> {
     if (isRemoteOrData(trimmed)) {
         return trimmed;
     }
-    if (trimmed.startsWith('file://')) {
-        return trimmed;
-    }
-    if (trimmed.startsWith('/') && !trimmed.includes('://')) {
-        return toFileUri(trimmed);
+    if (trimmed.startsWith('file://') || (trimmed.startsWith('/') && !trimmed.includes('://'))) {
+        const fileUri = trimmed.startsWith('file://') ? trimmed : toFileUri(trimmed);
+        if (Platform.OS !== 'android' || isAppWritableVideoPath(toFfmpegPath(fileUri))) {
+            return fileUri;
+        }
     }
 
     if (typeof GalleryFs?.copyUriToCache === 'function') {
-        const copied = await GalleryFs.copyUriToCache(trimmed);
-        const dest = String(copied?.uri || '').trim();
-        if (dest) {
-            return dest.startsWith('file://') ? dest : toFileUri(dest);
+        try {
+            const copied = await GalleryFs.copyUriToCache(
+                trimmed.startsWith('/') && !trimmed.includes('://') ? toFileUri(trimmed) : trimmed,
+            );
+            const dest = String(copied?.uri || '').trim();
+            if (dest) {
+                return dest.startsWith('file://') ? dest : toFileUri(dest);
+            }
+        } catch (err) {
+            console.warn('[FFmpeg] copy into app cache failed', { uri: trimmed.slice(0, 160), err });
         }
+    }
+
+    if (trimmed.startsWith('file://') || (trimmed.startsWith('/') && !trimmed.includes('://'))) {
+        return trimmed.startsWith('file://') ? trimmed : toFileUri(trimmed);
     }
 
     throw new Error(

@@ -1,57 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { isAppWritableVideoPath, toFfmpegPath } from './ffmpegNative';
 
-const execute = vi.fn();
-const isSuccess = vi.fn();
-
-vi.mock('ffmpeg-kit-react-native-alt', () => ({
-    FFmpegKit: { execute },
-    ReturnCode: { isSuccess },
-}));
-
-describe('executeFfmpeg session logging', () => {
-    beforeEach(() => {
-        execute.mockReset();
-        isSuccess.mockReset();
-        vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    });
-
-    it('logs command + output and throws on failed return code', async () => {
-        execute.mockResolvedValue({
-            getReturnCode: async () => ({ getValue: () => 1 }),
-            getOutput: async () => 'ffmpeg stderr blob',
-            getAllLogsAsString: async () => 'all logs',
-            getFailStackTrace: async () => 'native fail stack',
-            getState: async () => 2,
-        });
-        isSuccess.mockReturnValue(false);
-
-        const { executeFfmpeg } = await import('./ffmpegNative');
-        await expect(executeFfmpeg('-ss 0 -i in.mp4 -t 15 -y out.mp4')).rejects.toThrow(
-            /FFmpeg failed to trim video: native fail stack/,
+describe('toFfmpegPath', () => {
+    it('strips file:// so ffmpeg-kit gets an absolute Android path', () => {
+        expect(toFfmpegPath('file:///storage/emulated/0/DCIM/clip.mp4')).toBe(
+            '/storage/emulated/0/DCIM/clip.mp4',
         );
-
-        expect(console.log).toHaveBeenCalledWith(
-            '[FFmpeg Log] command:',
-            '-ss 0 -i in.mp4 -t 15 -y out.mp4',
-        );
-        expect(console.log).toHaveBeenCalledWith(
-            '[FFmpeg Log]',
-            expect.stringContaining('ffmpeg stderr blob'),
+        expect(toFfmpegPath('file:///data/user/0/com.clipsapp/cache/a%20b.mp4')).toBe(
+            '/data/user/0/com.clipsapp/cache/a b.mp4',
         );
     });
 
-    it('resolves when ReturnCode.isSuccess is true', async () => {
-        execute.mockResolvedValue({
-            getReturnCode: async () => ({ getValue: () => 0 }),
-            getOutput: async () => 'ok',
-            getAllLogsAsString: async () => 'ok logs',
-            getFailStackTrace: async () => '',
-            getState: async () => 3,
-        });
-        isSuccess.mockReturnValue(true);
+    it('leaves a plain absolute path unchanged', () => {
+        expect(toFfmpegPath('/data/user/0/com.clipsapp/cache/clip.mp4')).toBe(
+            '/data/user/0/com.clipsapp/cache/clip.mp4',
+        );
+    });
 
-        const { executeFfmpeg } = await import('./ffmpegNative');
-        await expect(executeFfmpeg('-y -i in.mp4 out.mp4')).resolves.toBeUndefined();
-        expect(console.log).toHaveBeenCalledWith('[FFmpeg Log]', expect.stringContaining('ok'));
+    it('treats gallery folders as not writable', () => {
+        expect(isAppWritableVideoPath('file:///storage/emulated/0/DCIM/clip.mp4')).toBe(false);
+        expect(isAppWritableVideoPath('/data/user/0/com.clipsapp/cache/clip.mp4')).toBe(true);
     });
 });

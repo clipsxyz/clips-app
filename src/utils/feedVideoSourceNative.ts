@@ -4,12 +4,12 @@
  * reuses previously buffered bytes instead of re-downloading.
  */
 export const FEED_VIDEO_BUFFER_CONFIG = {
-    minBufferMs: 1500,
-    maxBufferMs: 12000,
-    bufferForPlaybackMs: 250,
-    bufferForPlaybackAfterRebufferMs: 500,
+    minBufferMs: 4000,
+    maxBufferMs: 30000,
+    bufferForPlaybackMs: 1200,
+    bufferForPlaybackAfterRebufferMs: 2000,
     /** Disk cache budget for previously loaded remote MP4s (Android SimpleCache). */
-    cacheSizeMB: 150,
+    cacheSizeMB: 256,
 } as const;
 
 type VideoSourceLike = {
@@ -24,6 +24,8 @@ function isRemoteHttpUri(uri: unknown): uri is string {
     return typeof uri === 'string' && /^https?:\/\//i.test(uri.trim());
 }
 
+const cachedSources = new Map<string, object>();
+
 /**
  * Attach shouldCache + bufferConfig for remote HTTP(S) feed videos.
  * Local/file/require sources are returned unchanged.
@@ -33,7 +35,10 @@ export function withFeedVideoCache<T extends VideoSourceLike | number>(source: T
     if (typeof source !== 'object') return source;
     const uri = source.uri;
     if (!isRemoteHttpUri(uri)) return source;
-    return {
+    const cacheKey = `${uri.trim()}|${String(source.type || 'mp4')}`;
+    const hit = cachedSources.get(cacheKey);
+    if (hit) return hit as T;
+    const next = {
         ...source,
         shouldCache: true,
         bufferConfig: {
@@ -41,4 +46,6 @@ export function withFeedVideoCache<T extends VideoSourceLike | number>(source: T
             ...(source.bufferConfig || {}),
         },
     };
+    cachedSources.set(cacheKey, next);
+    return next;
 }

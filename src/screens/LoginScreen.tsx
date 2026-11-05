@@ -263,8 +263,13 @@ export default function LoginScreen({ navigation, route }: any) {
     const passwordNorm = normalizeSignupPassword(password);
     const confirmPasswordNorm = normalizeSignupPassword(confirmPassword);
     const passwordsMatch = passwordNorm.length >= 8 && passwordNorm === confirmPasswordNorm;
+    const acceptedAgreement = acceptedTerms && acceptedGuidelines;
+    const setAcceptedAgreement = (next: boolean) => {
+        setAcceptedTerms(next);
+        setAcceptedGuidelines(next);
+    };
     const step1CanContinue = Boolean(
-        accountType && email.trim() && passwordsMatch && acceptedTerms && acceptedGuidelines
+        accountType && email.trim() && passwordsMatch && acceptedAgreement
     );
     const step1MissingHints = (() => {
         const missing: string[] = [];
@@ -272,8 +277,7 @@ export default function LoginScreen({ navigation, route }: any) {
         if (!email.trim()) missing.push('email');
         if (passwordNorm.length < 8) missing.push('password (8+)');
         else if (!confirmPasswordNorm || passwordNorm !== confirmPasswordNorm) missing.push('matching confirm password');
-        if (!acceptedTerms) missing.push('Terms');
-        if (!acceptedGuidelines) missing.push('Guidelines');
+        if (!acceptedAgreement) missing.push('Terms & Guidelines');
         return missing;
     })();
     const step2CanContinue = Boolean(name.trim() && !validateSignupUsername(username) && birthdateComplete);
@@ -604,8 +608,9 @@ export default function LoginScreen({ navigation, route }: any) {
             nextErrors.confirmPassword = 'Passwords do not match.';
         }
         if (!accountType) nextErrors.accountType = 'Choose personal or business.';
-        if (!acceptedTerms) nextErrors.terms = 'You must accept Terms.';
-        if (!acceptedGuidelines) nextErrors.guidelines = 'You must accept Community Guidelines.';
+        if (!acceptedTerms || !acceptedGuidelines) {
+            nextErrors.terms = 'You must agree to the Terms & Conditions and Community Guidelines.';
+        }
         if (Object.keys(nextErrors).length > 0) {
             setFieldErrors(nextErrors);
             setErrorText('Please fix the highlighted fields.');
@@ -1439,40 +1444,33 @@ export default function LoginScreen({ navigation, route }: any) {
                         <Text style={styles.swalEyebrow}>Gazetteer says</Text>
                         <Text style={styles.swalTitle}>Required to continue</Text>
 
-                        <TouchableOpacity style={styles.swalCheckRow} onPress={() => setAcceptedTerms((v) => !v)}>
-                            <Icon
-                                name={acceptedTerms ? 'checkbox' : 'square-outline'}
-                                size={ox(20)}
-                                color={acceptedTerms ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
-                            />
+                        <View style={styles.swalCheckRow}>
+                            <TouchableOpacity
+                                onPress={() => setAcceptedAgreement(!acceptedAgreement)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: acceptedAgreement }}
+                            >
+                                <Icon
+                                    name={acceptedAgreement ? 'checkbox' : 'square-outline'}
+                                    size={ox(20)}
+                                    color={acceptedAgreement ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
+                                />
+                            </TouchableOpacity>
                             <Text style={styles.swalCheckLabel}>
-                                I accept{' '}
-                                <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>
+                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}>
+                                    I agree to the{' '}
+                                </Text>
+                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
                                     Terms & Conditions
                                 </Text>
-                            </Text>
-                        </TouchableOpacity>
-                        {!!getFieldError('terms') && <Text style={styles.fieldErrorText}>{getFieldError('terms')}</Text>}
-
-                        <TouchableOpacity
-                            style={styles.swalCheckRow}
-                            onPress={() => setAcceptedGuidelines((v) => !v)}
-                        >
-                            <Icon
-                                name={acceptedGuidelines ? 'checkbox' : 'square-outline'}
-                                size={ox(20)}
-                                color={acceptedGuidelines ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
-                            />
-                            <Text style={styles.swalCheckLabel}>
-                                I accept{' '}
-                                <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>
+                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}> & </Text>
+                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
                                     Community Guidelines
                                 </Text>
                             </Text>
-                        </TouchableOpacity>
-                        {!!getFieldError('guidelines') && (
-                            <Text style={styles.fieldErrorText}>{getFieldError('guidelines')}</Text>
-                        )}
+                        </View>
+                        {!!getFieldError('terms') && <Text style={styles.fieldErrorText}>{getFieldError('terms')}</Text>}
 
                         <TouchableOpacity
                             onPress={handleStep1Submit}
@@ -1561,37 +1559,31 @@ export default function LoginScreen({ navigation, route }: any) {
                         <View style={styles.swalHandleWrap}>
                             <View style={styles.swalHandle} />
                         </View>
-                        <View style={styles.consentCompact}>
+                        <View style={styles.swalCheckRow}>
                             <TouchableOpacity
-                                style={styles.swalCheckRowCompact}
-                                onPress={() => {
-                                    Keyboard.dismiss();
-                                    setAcceptedTerms((v) => !v);
-                                }}
-                                hitSlop={8}
+                                onPress={() => setAcceptedAgreement(!acceptedAgreement)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: acceptedAgreement }}
                             >
                                 <Icon
-                                    name={acceptedTerms ? 'checkbox' : 'square-outline'}
+                                    name={acceptedAgreement ? 'checkbox' : 'square-outline'}
                                     size={ox(18)}
-                                    color={acceptedTerms ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
+                                    color={acceptedAgreement ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
                                 />
-                                <Text style={styles.swalCheckLabelCompact}>Terms</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.swalCheckRowCompact}
-                                onPress={() => {
-                                    Keyboard.dismiss();
-                                    setAcceptedGuidelines((v) => !v);
-                                }}
-                                hitSlop={8}
-                            >
-                                <Icon
-                                    name={acceptedGuidelines ? 'checkbox' : 'square-outline'}
-                                    size={ox(18)}
-                                    color={acceptedGuidelines ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
-                                />
-                                <Text style={styles.swalCheckLabelCompact}>Guidelines</Text>
-                            </TouchableOpacity>
+                            <Text style={styles.swalCheckLabel}>
+                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}>
+                                    I agree to the{' '}
+                                </Text>
+                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
+                                    Terms & Conditions
+                                </Text>
+                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}> & </Text>
+                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
+                                    Community Guidelines
+                                </Text>
+                            </Text>
                         </View>
                         <TouchableOpacity
                             onPress={handleStep1Submit}
@@ -2242,12 +2234,12 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: 400,
         alignSelf: 'center',
-        borderTopLeftRadius: ox(20),
-        borderTopRightRadius: ox(20),
-        paddingHorizontal: ox(16),
-        paddingTop: ox(6),
-        paddingBottom: ox(10),
-        gap: ox(6),
+        borderTopLeftRadius: ox(16),
+        borderTopRightRadius: ox(16),
+        paddingHorizontal: ox(12),
+        paddingTop: ox(4),
+        paddingBottom: ox(6),
+        gap: ox(4),
         backgroundColor: 'transparent',
         borderWidth: 1,
         borderBottomWidth: 0,
@@ -2286,11 +2278,11 @@ const styles = StyleSheet.create({
     },
     swalCheckRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: ox(8),
-        paddingVertical: ox(8),
-        paddingHorizontal: ox(10),
-        borderRadius: ox(12),
+        paddingVertical: ox(6),
+        paddingHorizontal: ox(8),
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.18)',
         backgroundColor: SCREEN_CANVAS_BASE,
@@ -2301,11 +2293,17 @@ const styles = StyleSheet.create({
         color: '#F3F4F6',
         lineHeight: ox(18),
     },
+    swalCheckLink: {
+        color: '#7A8AF0',
+        fontSize: ox(13),
+        lineHeight: ox(18),
+        textDecorationLine: 'underline',
+    },
     swalConfirmBtn: {
-        marginTop: ox(2),
+        marginTop: 0,
         borderRadius: 999,
         backgroundColor: '#FFFFFF',
-        paddingVertical: ox(11),
+        paddingVertical: ox(9),
         alignItems: 'center',
     },
     swalConfirmBtnText: {

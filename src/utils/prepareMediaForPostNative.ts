@@ -12,6 +12,10 @@ import {
 } from './autoTrimVideoNative';
 import { probeLocalVideoBounds } from './validateLocalVideoNative';
 import { statLocalFileBytes } from './localFileNative';
+import {
+    compressVideoForUploadNative,
+    VideoCompressCancelled,
+} from './compressVideoForUploadNative';
 
 type NativeMediaType = 'image' | 'video' | null;
 
@@ -24,6 +28,8 @@ type PrepareNativeMediaArgs = {
     /** Cover frame time in seconds (used for FFmpeg poster fallback). */
     videoCoverTime?: number;
     onStage?: (stage: 'compress' | 'poster' | 'upload') => void;
+    /** 0–1 while react-native-compressor is running. Does not block the UI thread. */
+    onCompressProgress?: (fraction: number) => void;
     /**
      * Upload destination controls hard-trim caps:
      * Stories 24 → 0–15s; newsfeed → 0–90s.
@@ -119,9 +125,10 @@ async function resolveVideoPosterUrl(
 
 /**
  * On-device pipeline order (strict):
- * 1) FFmpeg hard-trim + scale (always for local video)
- * 2) optional filter bake / poster
- * 3) HTTP upload (never of the raw gallery URI)
+ * 1) FFmpeg hard-trim (duration cap)
+ * 2) optional filter bake
+ * 3) react-native-compressor at 1080p — this file is what gets uploaded
+ * 4) HTTP upload (Laravel stores it; no server transcode)
  */
 export async function prepareMediaForPostNative({
     mediaUrl,
@@ -130,6 +137,7 @@ export async function prepareMediaForPostNative({
     captureVideoPoster,
     videoCoverTime = 0,
     onStage,
+    onCompressProgress,
     destination = 'feed',
 }: PrepareNativeMediaArgs): Promise<PrepareNativeMediaResult> {
     if (!mediaUrl || !mediaType) {
@@ -145,6 +153,7 @@ export async function prepareMediaForPostNative({
     let videoPosterUrl: string | undefined;
     let filterExportFailed = false;
     let videoCompressFailed = false;
+    let trimFailed = false;
     const maxSeconds = maxVideoDurationForDestination(destination);
     const trimEndTime = maxSeconds;
 
@@ -162,25 +171,37 @@ export async function prepareMediaForPostNative({
             throw new Error('Video trim is unavailable. Rebuild the app with FFmpeg linked.');
         }
 
-        const hardTrim = await hardTrimVideoWindowForUpload(workingUrl, destination, {
-            startTime: 0,
-            endTime: trimEndTime,
-            notify: true,
-        });
+        try {
+            const hardTrim = await hardTrimVideoWindowForUpload(workingUrl, destination, {
+                startTime: 0,
+                endTime: trimEndTime,
+                notify: true,
+            });
 
-        if (!hardTrim.wasTrimmed || !hardTrim.uri || hardTrim.uri === workingUrl) {
-            throw new Error('Could not trim this video. Try another clip.');
+            if (!hardTrim.wasTrimmed || !hardTrim.uri || hardTrim.uri === workingUrl) {
+                throw new Error('Could not trim this video. Try another clip.');
+            }
+            workingUrl = hardTrim.uri;
+            const trimmedSize =
+                hardTrim.sizeBytes ?? (await statLocalFileBytes(workingUrl));
+            console.log(
+                '[MediaPrep] Original video size:',
+                rawSize,
+                'Trimmed video size:',
+                trimmedSize,
+            );
+        } catch (err) {
+            trimFailed = true;
+            videoCompressFailed = true;
+            const detail =
+                err instanceof Error
+                    ? (err as Error & { detail?: string }).detail || err.message
+                    : String(err);
+            console.error('[MediaPrep] FFmpeg trim failed; uploading the original video', {
+                uri: workingUrl.slice(0, 160),
+                detail,
+            });
         }
-        workingUrl = hardTrim.uri;
-
-        const trimmedSize =
-            hardTrim.sizeBytes ?? (await statLocalFileBytes(workingUrl));
-        console.log(
-            '[MediaPrep] Original video size:',
-            rawSize,
-            'Trimmed video size:',
-            trimmedSize,
-        );
     }
 
     const shouldBake = isFiltered(filterInfo);
@@ -223,12 +244,32 @@ export async function prepareMediaForPostNative({
         }
     }
 
+    if (mediaType === 'video' && isLocalUri(workingUrl) && !isRemoteUrl(workingUrl)) {
+        onStage?.('compress');
+        try {
+            const compressed = await compressVideoForUploadNative(workingUrl, (fraction) => {
+                onCompressProgress?.(fraction);
+            });
+            if (compressed && compressed !== normalizedUrl) {
+                workingUrl = compressed;
+            }
+        } catch (err) {
+            if (err instanceof VideoCompressCancelled) throw err;
+            videoCompressFailed = true;
+        }
+    }
+
     if (mediaType === 'video') {
         onStage?.('poster');
         videoPosterUrl = await resolveVideoPosterUrl(workingUrl, coverTime, captureVideoPoster);
     }
 
-    if (mediaType === 'video' && workingUrl === normalizedUrl && !isRemoteUrl(workingUrl)) {
+    if (
+        mediaType === 'video' &&
+        workingUrl === normalizedUrl &&
+        !isRemoteUrl(workingUrl) &&
+        !videoCompressFailed
+    ) {
         throw new Error('Refusing to upload untrimmed video. Trim step did not run.');
     }
 
@@ -243,7 +284,7 @@ export async function prepareMediaForPostNative({
             try {
                 const bounds = await probeLocalVideoBounds(workingUrl);
                 const durationSec = bounds.durationSec;
-                if (durationSec != null && durationSec > trimEndTime + 0.5) {
+                if (!trimFailed && durationSec != null && durationSec > trimEndTime + 0.5) {
                     throw new Error(
                         `Video is still ${Math.ceil(durationSec)}s after trim (max ${trimEndTime}s).`,
                     );

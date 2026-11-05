@@ -10,11 +10,13 @@ export type UploadOverlayState = {
     title: string;
     message: string;
     status: UploadOverlayStatus;
+    /** 0–1 while a video is compressing. Absent once upload continues. */
+    fraction?: number;
 };
 
 export type UploadOverlayController = {
     id: string;
-    progress: (message?: string, title?: string) => void;
+    progress: (message?: string, title?: string, fraction?: number) => void;
     success: (message?: string) => void;
     error: (message?: string) => void;
     dismiss: () => void;
@@ -52,10 +54,13 @@ export function showUploadOverlayNative(opts: {
 
     let currentTitle = uploadingTitle;
     let currentMessage = opts.initialMessage ?? 'Posting to Gazetteer…';
+    let currentFraction: number | undefined;
 
-    const update = (status: UploadOverlayStatus, message: string, title: string) => {
+    const update = (status: UploadOverlayStatus, message: string, title: string, fraction?: number) => {
         currentTitle = title;
         currentMessage = message;
+        if (fraction === undefined) currentFraction = undefined;
+        else currentFraction = Math.max(0, Math.min(1, fraction));
         emit({
             id,
             thumbUri: opts.thumbUri,
@@ -65,6 +70,7 @@ export function showUploadOverlayNative(opts: {
             title,
             message,
             status,
+            fraction: currentFraction,
         });
     };
 
@@ -72,8 +78,13 @@ export function showUploadOverlayNative(opts: {
 
     const controller: UploadOverlayController = {
         id,
-        progress(message?: string, title?: string) {
-            update('uploading', message ?? currentMessage, title ?? currentTitle);
+        progress(message?: string, title?: string, fraction?: number) {
+            update(
+                'uploading',
+                message ?? currentMessage,
+                title ?? currentTitle,
+                fraction === undefined ? undefined : fraction,
+            );
         },
         success(message = 'Your post is now live') {
             update('success', message, successTitle);

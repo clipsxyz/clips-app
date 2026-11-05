@@ -3,6 +3,7 @@ import { getFfmpegVideoFilter, type InstantFilterName } from './instantFiltersNa
 import {
     buildInstagramDeliveryEncodeArgs,
     buildInstagramDeliveryVideoFilterChain,
+    escapeFfmpegFilterCommas,
 } from './instagramVideoDeliveryNative';
 import { resolveLocalMediaUriForFfmpeg } from './resolveLocalMediaUriForFfmpegNative';
 
@@ -14,7 +15,7 @@ export type TranscodeVideoForUploadOptions = {
 };
 
 /**
- * Pre-upload transcode: 720p / 30 fps / ultrafast H.264 + AAC MP4.
+ * Pre-upload transcode: 1080p / 30 fps / CRF 20 H.264 + AAC MP4.
  * Optional color filter is applied in the same -vf chain (one encode pass).
  */
 export async function transcodeVideoForUploadNative(
@@ -23,7 +24,7 @@ export async function transcodeVideoForUploadNative(
 ): Promise<string> {
     const resolvedInput = await resolveLocalMediaUriForFfmpeg(inputUri);
     const colorFilter = options.filterName ? getFfmpegVideoFilter(options.filterName) : null;
-    const vf = buildInstagramDeliveryVideoFilterChain(colorFilter);
+    const vf = escapeFfmpegFilterCommas(buildInstagramDeliveryVideoFilterChain(colorFilter));
     const inputPath = toFfmpegPath(resolvedInput);
     const outputPath = makeSiblingOutputPath(resolvedInput, 'upload', 'mp4');
     const encodeArgs = buildInstagramDeliveryEncodeArgs();
@@ -55,7 +56,7 @@ export async function compressImageForUploadNative(inputUri: string): Promise<st
     const command = [
         '-y',
         `-i "${inputPath}"`,
-        `-vf "scale='min(1080,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:flags=fast_bilinear"`,
+        `-vf "scale='min(1080\\,iw)':'min(1080\\,ih)':force_original_aspect_ratio=decrease:flags=lanczos"`,
         '-q:v 5',
         `"${outputPath}"`,
     ].join(' ');

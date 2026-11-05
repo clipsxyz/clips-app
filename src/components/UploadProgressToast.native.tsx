@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
     Animated,
     ImageBackground,
+    Pressable,
     StyleSheet,
     Text,
     View,
@@ -14,6 +15,7 @@ import {
     subscribeUploadOverlay,
     type UploadOverlayState,
 } from '../utils/uploadOverlayNative';
+import { cancelActiveVideoCompression } from '../utils/compressVideoForUploadNative';
 
 function FlowingUploadIcon() {
     const shimmer = useRef(new Animated.Value(0)).current;
@@ -122,10 +124,26 @@ export default function UploadProgressToast() {
     return (
         <View
             style={[styles.wrap, { top: insets.top + 10 }]}
-            pointerEvents="none"
+            pointerEvents="box-none"
         >
-            {isUploading ? (
-                <Animated.View style={[styles.box, { opacity: boxOpacity }]}>
+            {isUploading && typeof state.fraction === 'number' ? (
+                <Animated.View style={[styles.compressCard, { opacity: boxOpacity }]} pointerEvents="auto">
+                    <Text style={styles.compressTitle}>{state.title || 'Optimizing video…'}</Text>
+                    <Text style={styles.compressMessage}>{state.message}</Text>
+                    <View style={styles.compressTrack}>
+                        <View style={[styles.compressFill, { width: `${Math.round(state.fraction * 100)}%` }]} />
+                    </View>
+                    <Pressable
+                        onPress={() => cancelActiveVideoCompression()}
+                        style={styles.compressCancel}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel video optimization"
+                    >
+                        <Text style={styles.compressCancelText}>Cancel</Text>
+                    </Pressable>
+                </Animated.View>
+            ) : isUploading ? (
+                <Animated.View style={[styles.box, { opacity: boxOpacity }]} pointerEvents="none">
                     <ImageBackground
                         source={thumbSource}
                         style={[
@@ -225,5 +243,48 @@ const styles = StyleSheet.create({
     },
     popupTextError: {
         color: '#FECACA',
+    },
+    compressCard: {
+        alignSelf: 'center',
+        width: '100%',
+        maxWidth: 360,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderRadius: 16,
+        backgroundColor: 'rgba(11, 14, 20, 0.96)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
+    },
+    compressTitle: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    compressMessage: {
+        color: '#8B949E',
+        fontSize: 13,
+        marginTop: 4,
+    },
+    compressTrack: {
+        height: 4,
+        borderRadius: 999,
+        backgroundColor: '#21262D',
+        marginTop: 12,
+        overflow: 'hidden',
+    },
+    compressFill: {
+        height: '100%',
+        backgroundColor: '#FFFFFF',
+    },
+    compressCancel: {
+        marginTop: 12,
+        alignSelf: 'flex-end',
+        paddingVertical: 6,
+        paddingHorizontal: 4,
+    },
+    compressCancelText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
     },
 });

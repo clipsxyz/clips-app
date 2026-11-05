@@ -26,7 +26,7 @@
     "setup:ffmpeg-native": "node scripts/setup-ffmpeg-native.mjs",
     "sync:env": "node scripts/sync-firebase-env.mjs",
     "check:secrets": "node scripts/check-no-secrets-staged.mjs",
-    "prepare": "node scripts/install-git-hooks.mjs && node scripts/patch-react-native-fragment-props.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs && node scripts/patch-react-native-fragment-props.mjs && node scripts/patch-react-native-compressor-agp.mjs",
     "patch:rn-fragment": "node scripts/patch-react-native-fragment-props.mjs",
     "clean:cache": "node -e \"const fs = require('fs'); const path = require('path'); const rimraf = (dir) => { try { fs.rmSync(dir, { recursive: true, force: true }); console.log('Cleared:', dir); } catch(e) {} }; rimraf(path.join(process.cwd(), 'node_modules/.vite')); rimraf(path.join(process.cwd(), 'dist')); console.log('Cache cleared!');\""
   },
@@ -69,6 +69,7 @@
     "react-icons": "^4.12.0",
     "react-native": "^0.85.3",
     "react-native-audio-recorder-player": "^4.5.0",
+    "react-native-compressor": "^1.19.4",
     "react-native-contacts": "^8.0.10",
     "react-native-fbsdk-next": "^13.4.3",
     "react-native-gesture-handler": "^2.31.2",

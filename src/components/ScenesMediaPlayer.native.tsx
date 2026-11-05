@@ -23,6 +23,7 @@ import {
     scenesVideoSource,
 } from '../utils/scenesMediaNative';
 import { fitContainBox, intrinsicRatio } from '../utils/mediaAspectRatio';
+import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
 
 type Props = {
     post: Post;
@@ -221,7 +222,7 @@ export default function ScenesMediaPlayer({
     const playableSource = (raw: string) => {
         const src = scenesVideoSource(raw);
         if (typeof src === 'number') return src;
-        if (src && isPlayableVideoUri(src.uri)) return src;
+        if (src && isPlayableVideoUri(src.uri)) return withFeedVideoCache(src);
         return null;
     };
 

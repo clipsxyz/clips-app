@@ -56,6 +56,9 @@ react {
     autolinkLibrariesWithApp()
 }
 
+// react-native-compressor is a native library (CompressorPackage). The React
+// Gradle plugin links it from node_modules via autolinkLibrariesWithApp().
+
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
@@ -121,6 +124,10 @@ dependencies {
 
     implementation 'com.arthenica:smart-exception-java:0.2.1'
     implementation 'com.arthenica:smart-exception-common:0.2.1'
+
+    // Native compressor binary (CompressorPackage). Autolinking includes the
+    // same project; this keeps it on the app classpath for a clean build.
+    implementation project(':react-native-compressor')
 }
 
 apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")

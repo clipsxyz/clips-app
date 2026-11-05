@@ -9,6 +9,7 @@ import {
     type ViewStyle,
 } from 'react-native';
 import Video, { ViewType, type OnProgressData, type VideoRef } from 'react-native-video';
+import { withFeedVideoCache } from '../../utils/feedVideoSourceNative';
 
 type Props = {
     source: { uri: string };
@@ -50,6 +51,7 @@ export default function StorySafeVideo({
     // `{ uri }` on every render, so keying on the object reset `ready` each frame
     // (e.g. the 50ms progress tick) and left the poster cover covering the video.
     const sourceUri = source?.uri;
+    const playbackSource = React.useMemo(() => withFeedVideoCache(source), [sourceUri]);
 
     useEffect(() => {
         setFailed(false);
@@ -77,7 +79,7 @@ export default function StorySafeVideo({
         <View style={[style, styles.clip]} collapsable={false}>
             <Video
                 ref={videoRef}
-                source={source}
+                source={playbackSource}
                 style={StyleSheet.absoluteFill}
                 resizeMode={resizeMode}
                 muted={muted}

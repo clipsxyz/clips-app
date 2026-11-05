@@ -40,6 +40,7 @@ import {
 } from '../utils/stickerLayoutNative';
 import { publishMediaStory24 } from '../utils/publishStoryNative';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
+import { VideoCompressCancelled } from '../utils/compressVideoForUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -490,6 +491,10 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                         mediaType,
                         videoCoverTime,
                         destination: 'stories',
+                        onCompressProgress: (fraction) => {
+                            const pct = Math.round(fraction * 100);
+                            overlay.progress(`Optimizing video ${pct}%`, 'Optimizing video…', fraction);
+                        },
                     });
                     remoteUrl = prepared.mediaUrl || mediaUrl;
                     remoteType = prepared.mediaType || mediaType;
@@ -513,6 +518,10 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                 });
                 overlay.success('Your story is now live.');
             } catch (err: any) {
+                if (err instanceof VideoCompressCancelled) {
+                    overlay.dismiss();
+                    return;
+                }
                 overlay.error(err?.message || 'Story upload failed. Please try again.');
             }
         })();

@@ -22,12 +22,35 @@ export async function loadFfmpeg(): Promise<FfmpegModule> {
     return ffmpegModulePromise;
 }
 
+/**
+ * Filesystem path for ffmpeg-kit. It does not open `file://` or `content://` strings;
+ * Android must be a plain absolute path such as `/data/user/0/.../clip.mp4`.
+ */
 export function toFfmpegPath(uri: string): string {
-    const trimmed = uri.trim();
-    if (trimmed.startsWith('file://')) {
-        return decodeURIComponent(trimmed.replace('file://', ''));
+    let trimmed = String(uri || '').trim();
+    if (/^file:\/\/file:\/\//i.test(trimmed)) {
+        trimmed = trimmed.replace(/^file:\/\//i, '');
+    }
+    if (/^file:\/\//i.test(trimmed)) {
+        const rest = trimmed.replace(/^file:\/\//i, '');
+        try {
+            trimmed = decodeURIComponent(rest);
+        } catch {
+            trimmed = rest;
+        }
     }
     return trimmed;
+}
+
+/** App-private storage ffmpeg-kit can read and write on Android. Gallery folders are not. */
+export function isAppWritableVideoPath(path: string): boolean {
+    const plain = toFfmpegPath(path);
+    return (
+        plain.includes('/cache/') ||
+        plain.includes('/files/') ||
+        plain.startsWith('/data/user/') ||
+        plain.startsWith('/data/data/')
+    );
 }
 
 export function toFileUri(path: string): string {
@@ -116,6 +139,10 @@ export async function executeFfmpeg(command: string): Promise<void> {
             allLogs ||
             output ||
             (returnCode != null ? `returnCode=${String(returnCode)}` : 'unknown failure');
-        throw new Error(`FFmpeg failed to trim video: ${detail}`);
+        console.error('[FFmpeg] trim failed', { command, detail });
+        const error = new Error('FFmpeg failed to trim video');
+        (error as Error & { detail?: string; command?: string }).detail = detail;
+        (error as Error & { command?: string }).command = command;
+        throw error;
     }
 }

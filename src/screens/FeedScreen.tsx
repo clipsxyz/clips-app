@@ -382,6 +382,7 @@ function PillTabs({
     onSearchLocation,
     onHeaderPlacePick,
     onClearCustom,
+    feedScope = null,
 }: {
     active: Tab;
     onChange: (t: Tab) => void;
@@ -406,6 +407,8 @@ function PillTabs({
         filterType: 'location' | 'venue' | 'landmark'
     ) => void;
     onClearCustom?: () => void;
+    /** Feed the screen is actually showing. Personal and business accounts use the same list. */
+    feedScope?: 'following' | 'local' | 'regional' | 'national' | null;
 }) {
     const { user } = useAuth();
     const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
@@ -562,17 +565,26 @@ function PillTabs({
     );
     const activeLabel = customLocationLabel || customLocation || (active === userLocal ? 'Nearby' : active);
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
-    const activeFeedKey = customLocation
-        ? null
-        : active === 'Following'
+    const activeFeedKey =
+        feedScope === 'following'
             ? 'following'
-            : active === userLocal
+            : feedScope === 'local'
                 ? 'nearby'
-                : active === userRegional
+                : feedScope === 'regional'
                     ? 'regional'
-                    : active === userNational
+                    : feedScope === 'national'
                         ? 'national'
-                        : null;
+                        : customLocation
+                            ? null
+                            : active === 'Following'
+                                ? 'following'
+                                : active === userLocal
+                                    ? 'nearby'
+                                    : active === userRegional
+                                        ? 'regional'
+                                        : active === userNational
+                                            ? 'national'
+                                            : null;
 
     const menuItems = [
         {
@@ -1024,8 +1036,11 @@ function PillTabs({
                                                     </TouchableOpacity>
                                                 ) : null}
                                                 {menuItems.map((item) => {
-                                                    const selected = item.key === activeFeedKey;
-                                                    const rowColor = selected ? '#FFFFFF' : 'rgba(255,255,255,0.6)';
+                                                    const sameLabel =
+                                                        item.key !== 'discover' &&
+                                                        item.label.trim().toLowerCase() === activeLabel.trim().toLowerCase();
+                                                    const selected = item.key === activeFeedKey || (activeFeedKey == null && sameLabel);
+                                                    const rowColor = selected ? UCL_TEXT_ACTIVE : 'rgba(255,255,255,0.6)';
                                                     return (
                                                     <TouchableOpacity
                                                         key={item.key}
@@ -5477,6 +5492,7 @@ onVisitProfile={() =>
                 header={
                     <PillTabs
                         active={showFollowingFeed && !customLocation ? 'Following' : active}
+                        feedScope={customLocation ? null : headerFeedScope}
                         onChange={handleTabChange}
                         customLocation={customLocation}
                         customLocationLabel={customLocationLabel}
@@ -6716,7 +6732,9 @@ feedSwitchPillBorder: {
         borderRadius: ox(14),
     },
     feedSwitchMenuItemActive: {
-        backgroundColor: 'rgba(255,255,255,0.08)',
+        backgroundColor: 'rgba(0, 242, 255, 0.16)',
+        borderWidth: 1,
+        borderColor: 'rgba(0, 242, 255, 0.9)',
     },
     errorContainer: {
         padding: ox(16),

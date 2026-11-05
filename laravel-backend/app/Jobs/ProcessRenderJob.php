@@ -548,7 +548,7 @@ class ProcessRenderJob implements ShouldQueue
         // Video codec settings (H.264 for compatibility)
         $cmd .= ' -c:v libx264';
         $cmd .= ' -preset medium';
-        $cmd .= ' -crf 23'; // Quality setting (lower = better quality, larger file)
+        $cmd .= ' -crf 20'; // Lower CRF keeps 1080p detail; do not add a downscale filter here.
         $cmd .= ' -movflags +faststart'; // Optimize for web streaming
 
         // Enforce max duration
@@ -678,7 +678,7 @@ class ProcessRenderJob implements ShouldQueue
                     $concatCmd .= ' -c:a copy';
                 }
 
-                $concatCmd .= ' -c:v libx264 -preset medium -crf 23';
+                $concatCmd .= ' -c:v libx264 -preset medium -crf 20';
                 $concatCmd .= ' -movflags +faststart';
                 $concatCmd .= ' -t ' . $maxDuration;
                 $concatCmd .= ' ' . escapeshellarg($outputPath);
@@ -856,7 +856,7 @@ class ProcessRenderJob implements ShouldQueue
             $cmd .= ' -c:a copy';
         }
 
-        $cmd .= ' -c:v libx264 -preset medium -crf 23';
+        $cmd .= ' -c:v libx264 -preset medium -crf 20';
         $cmd .= ' -movflags +faststart';
         $cmd .= ' -t ' . min($totalDuration, $maxDuration);
         $cmd .= ' ' . escapeshellarg($outputPath);

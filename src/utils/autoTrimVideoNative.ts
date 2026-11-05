@@ -8,6 +8,12 @@ import {
 import { resolveLocalMediaUriForFfmpeg } from './resolveLocalMediaUriForFfmpegNative';
 import { normalizeNativeUploadUri } from './uploadFileNative';
 import { statLocalFileBytes } from './localFileNative';
+import {
+    buildInstagramDeliveryEncodeArgs,
+    buildInstagramDeliveryVideoFilterChain,
+    escapeFfmpegFilterCommas,
+    INSTAGRAM_UPLOAD_DELIVERY,
+} from './instagramVideoDeliveryNative';
 
 /** Stories 24 clip cap — keep the first 15 seconds (0:00 → 0:15). */
 export const MAX_STORIES_VIDEO_DURATION_SEC = 15;
@@ -15,14 +21,14 @@ export const MAX_STORIES_VIDEO_DURATION_SEC = 15;
 /** Newsfeed clip cap — keep the first 90 seconds (0:00 → 1:30). */
 export const MAX_FEED_VIDEO_DURATION_SEC = 90;
 
-/** Long-edge scale for 4K/gallery sources during hard-trim (max 720p). */
-export const HARD_TRIM_MAX_EDGE_PX = 720;
+/** Long-edge cap during hard-trim. Matches the 1080p upload delivery profile. */
+export const HARD_TRIM_MAX_EDGE_PX = INSTAGRAM_UPLOAD_DELIVERY.maxLongEdgePx;
 
-/** Aggressive hard-trim encode — target ~2–3MB / 15s and ~10MB / 90s. */
-export const HARD_TRIM_VIDEO_BITRATE = '1200k';
-export const HARD_TRIM_VIDEO_MAXRATE = '1500k';
-export const HARD_TRIM_VIDEO_BUFSIZE = '2000k';
-export const HARD_TRIM_AUDIO_BITRATE = '96k';
+/** Kept for callers that still pass a bitrate hint. Encode uses CRF, not this cap. */
+export const HARD_TRIM_VIDEO_BITRATE = '8000k';
+export const HARD_TRIM_VIDEO_MAXRATE = INSTAGRAM_UPLOAD_DELIVERY.videoMaxrate;
+export const HARD_TRIM_VIDEO_BUFSIZE = INSTAGRAM_UPLOAD_DELIVERY.videoBufsize;
+export const HARD_TRIM_AUDIO_BITRATE = INSTAGRAM_UPLOAD_DELIVERY.audioBitrate;
 
 export type VideoUploadDestination = 'feed' | 'stories';
 
@@ -34,7 +40,7 @@ export function maxVideoDurationForDestination(destination: VideoUploadDestinati
 
 /**
  * Soft telemetry / legacy alias only — client never blocks upload on byte size.
- * Trimmed 15s/90s + 720p / 1200k output is expected to stay well under Laravel limits.
+ * Trimmed 15s/90s + 1080p CRF 20 output is expected to stay under Laravel's 256M upload cap.
  */
 export const MAX_UPLOAD_VIDEO_BYTES = 150 * 1024 * 1024;
 export const CLIENT_POST_TRIM_MAX_UPLOAD_BYTES = MAX_UPLOAD_VIDEO_BYTES;
@@ -85,7 +91,7 @@ export type HardVideoWindowOptions = {
 };
 
 /**
- * Always hard-crop local video to [startTime, endTime] with scale + ultrafast H.264.
+ * Always hard-crop local video to [startTime, endTime] at 1080p / CRF 20.
  * Stories: 0→15s. Feed: 0→90s. Never returns the original URI — throws if FFmpeg fails.
  */
 export async function hardTrimVideoWindowForUpload(
@@ -108,7 +114,6 @@ export async function hardTrimVideoWindowForUpload(
         maxSeconds: clipSeconds,
         maxWidth: HARD_TRIM_MAX_EDGE_PX,
         audioBitrate: HARD_TRIM_AUDIO_BITRATE,
-        videoBitrate: HARD_TRIM_VIDEO_BITRATE,
         suffix: `hardtrim${clipSeconds}`,
     });
 
@@ -132,9 +137,7 @@ export async function hardTrimVideoWindowForUpload(
 
 /**
  * Extract [start, start+N] while re-encoding (never `-c copy`).
- * Aggressive compress:
- * `-ss 0 -i <in> -t <15|90> -vf "scale='min(720\,iw)':-2" -c:v libx264 -b:v 1200k -maxrate 1500k -bufsize 2000k -preset ultrafast -c:a aac -b:a 96k -y <out>`
- * On FFmpeg failure throws — never returns the original URI.
+ * 1080p long-edge, CRF 20, veryfast H.264. On FFmpeg failure throws — never returns the original URI.
  */
 export async function compressTrimVideoToMaxSeconds(
     inputUri: string,
@@ -143,10 +146,7 @@ export async function compressTrimVideoToMaxSeconds(
     const opts: CompressTrimOptions =
         typeof options === 'number' ? { maxSeconds: options } : options;
     const maxSeconds = opts.maxSeconds ?? MAX_FEED_VIDEO_DURATION_SEC;
-    const maxEdge = opts.maxWidth ?? HARD_TRIM_MAX_EDGE_PX;
-    const audioBitrate = opts.audioBitrate ?? HARD_TRIM_AUDIO_BITRATE;
-    const videoBitrate = opts.videoBitrate ?? HARD_TRIM_VIDEO_BITRATE;
-    const suffix = opts.suffix ?? `trim${maxSeconds}b1200`;
+    const suffix = opts.suffix ?? `trim${maxSeconds}hd`;
 
     if (typeof executeFfmpeg !== 'function') {
         throw new Error('FFmpeg is not available. Rebuild the app with ffmpeg-kit linked.');
@@ -154,37 +154,41 @@ export async function compressTrimVideoToMaxSeconds(
 
     const resolved = await resolveLocalMediaUriForFfmpeg(inputUri);
     const inputPath = toFfmpegPath(resolved);
-    const outputPath = makeSiblingOutputPath(resolved, suffix, 'mp4');
+    // Gallery folders are not writable. Android output always goes in the app cache.
+    const outputPath =
+        Platform.OS === 'android'
+            ? `/data/user/0/com.clipsapp/cache/gazetteer-${suffix}-${Date.now()}.mp4`
+            : makeSiblingOutputPath(resolved, suffix, 'mp4');
     const startSec = Math.max(0, Number(opts.startTimeSec) || 0);
     const t = Math.max(1, Math.floor(maxSeconds));
 
-    // Cap long edge at 720 (4K → 720p); escaped comma form matches FFmpegKit arg parsing.
-    const vf = `scale='min(${maxEdge}\\,iw)':-2`;
+    // Long edge 1080 (4K → 1080p). Escaped commas match FFmpegKit argument parsing.
+    const vf = escapeFfmpegFilterCommas(buildInstagramDeliveryVideoFilterChain());
 
     const command = [
         `-ss ${startSec}`,
         `-i "${inputPath}"`,
         `-t ${t}`,
         `-vf "${vf}"`,
-        '-c:v libx264',
-        `-b:v ${videoBitrate}`,
-        `-maxrate ${HARD_TRIM_VIDEO_MAXRATE}`,
-        `-bufsize ${HARD_TRIM_VIDEO_BUFSIZE}`,
-        '-preset ultrafast',
-        '-c:a aac',
-        `-b:a ${audioBitrate}`,
+        ...buildInstagramDeliveryEncodeArgs(),
         '-y',
         `"${outputPath}"`,
     ].join(' ');
+
+    console.log('[FFmpeg] trim paths', { inputPath, outputPath });
+    console.log('[FFmpeg] command', command);
 
     try {
         await executeFfmpeg(command);
     } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        if (/^FFmpeg failed to trim video:/i.test(detail)) {
-            throw err instanceof Error ? err : new Error(detail);
+        console.error('[FFmpeg] trim command failed', { inputPath, outputPath, detail });
+        if (err instanceof Error && err.message.startsWith('FFmpeg failed to trim video')) {
+            throw err;
         }
-        throw new Error(`FFmpeg failed to trim video: ${detail}`);
+        const wrapped = new Error('FFmpeg failed to trim video');
+        (wrapped as Error & { detail?: string }).detail = detail;
+        throw wrapped;
     }
 
     const outUri = toFileUri(outputPath);

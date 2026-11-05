@@ -34,6 +34,7 @@ export type PrepareCarouselOptions = {
     videoCoverTime?: number;
     /** Bakes filter on first image when provided. */
     captureVideoPoster?: () => Promise<string>;
+    onCompressProgress?: (fraction: number) => void;
 };
 
 export type PrepareCarouselResult = {
@@ -55,6 +56,7 @@ export async function prepareCarouselMediaForPostNative(
         videoFilterInfo,
         videoCoverTime: legacyCoverTime = 0,
         captureVideoPoster,
+        onCompressProgress,
     } = options;
     const uploaded: UploadedCarouselItem[] = [];
     let videoPosterUrl: string | undefined;
@@ -86,6 +88,7 @@ export async function prepareCarouselMediaForPostNative(
                     : undefined,
             videoCoverTime: slideCoverTime,
             destination: 'feed',
+            onCompressProgress: item.type === 'video' ? onCompressProgress : undefined,
         });
 
         if (!prep.mediaUrl) {

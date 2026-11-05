@@ -7,11 +7,13 @@ import {
 import { prepareMediaForPostNative } from './prepareMediaForPostNative';
 import {
     completePendingFeedUpload,
+    dismissPendingFeedUpload,
     failPendingFeedUpload,
     getPendingFeedUpload,
     type PendingFeedUploadJob,
 } from './pendingFeedUploadNative';
 import { getUploadOverlayForJob } from './uploadOverlayNative';
+import { VideoCompressCancelled } from './compressVideoForUploadNative';
 
 function isLocalDeviceMediaUrl(url?: string | null): boolean {
     if (!url) return false;
@@ -90,10 +92,15 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
                 job.localMediaItems.some((i) => i.type === 'video')
                     ? job.filterForExport
                     : null;
+            const overlay = getUploadOverlayForJob(job.tempId);
             const prepared = await prepareCarouselMediaForPostNative(job.localMediaItems, {
                 filterInfo: job.filterForExport,
                 videoFilterInfo: videoFilter,
                 videoCoverTime: job.videoCoverTime,
+                onCompressProgress: (fraction) => {
+                    const pct = Math.round(fraction * 100);
+                    overlay?.progress(`Optimizing video ${pct}%`, 'Optimizing video…', fraction);
+                },
             });
             if (prepared.items.length === 0) {
                 throw new Error('Carousel upload returned no items.');
@@ -174,12 +181,16 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             destination: 'feed',
             onStage: (stage) => {
                 if (stage === 'compress') {
-                    overlay?.progress('This may take a moment.', 'Posting your clip…');
+                    overlay?.progress('Optimizing video…', 'Optimizing video…', 0);
                 } else if (stage === 'poster') {
                     overlay?.progress('Almost there…', 'Posting your clip…');
                 } else {
                     overlay?.progress('Sharing to your feed…', 'Posting your clip…');
                 }
+            },
+            onCompressProgress: (fraction) => {
+                const pct = Math.round(fraction * 100);
+                overlay?.progress(`Optimizing video ${pct}%`, 'Optimizing video…', fraction);
             },
         });
         if (preparedMedia.filterExportFailed && job.filterForExport) {
@@ -253,6 +264,10 @@ function messageForUploadError(err: unknown): string {
     ) {
         return 'Could not reach the upload server. Check Wi‑Fi / adb reverse and that Laravel is running on port 8000.';
     }
+    if (/FFmpeg failed to trim video/i.test(raw)) {
+        console.error('[FeedUpload] FFmpeg trim error', err);
+        return 'Could not optimize this video. Please try another clip.';
+    }
     if (raw) return raw;
     return 'Failed to create post. Please try again.';
 }
@@ -282,6 +297,11 @@ export function startBackgroundFeedUpload(tempId: string): void {
     if (!job || job.status !== 'uploading') return;
 
     void executePendingFeedUpload(job).catch((err: unknown) => {
+        if (err instanceof VideoCompressCancelled) {
+            dismissPendingFeedUpload(tempId);
+            getUploadOverlayForJob(tempId)?.dismiss();
+            return;
+        }
         reportBackgroundUploadFailure(tempId, err);
     });
 }

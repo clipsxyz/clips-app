@@ -1456,7 +1456,7 @@ const FeedPostMedia = React.memo(
                                 source={{ uri: slidePosterUri, cache: 'force-cache' }}
                                 style={StyleSheet.absoluteFill}
                                 resizeMode={slideResizeMode}
-                                resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                                resizeMethod={Platform.OS === 'android' ? 'scale' : undefined}
                                 fadeDuration={0}
                                 onLoad={() => {
                                     paintedPosterUrisRef.current.add(slidePosterUri);
