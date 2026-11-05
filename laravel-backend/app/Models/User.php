@@ -31,6 +31,7 @@ class User extends Authenticatable
         'email',
         'phone_number',
         'facebook_id',
+        'firebase_uid',
         'password',
         'display_name',
         'handle',

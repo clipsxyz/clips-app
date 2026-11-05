@@ -36,8 +36,10 @@ import {
 } from '../utils/effectiveTextPostStyleNative';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar.native';
+import FeedCaptionText from './FeedCaptionText.native';
 import { useAuth } from '../context/Auth';
 import { ox } from '../constants/nativeOpticalScale';
+import { getPostDisplayCaption } from '../utils/feedPostMeta';
 
 /**
  * Fast fade-rise into fullscreen. Short travel so the open does not feel sticky.
@@ -172,6 +174,7 @@ export default function ImageFullscreenModal({
     );
     const textBody = (post?.text || post?.caption || '').trim();
     const isTextOnly = slides.length === 0 && Boolean(textBody);
+    const displayCaption = post && !isTextOnly ? getPostDisplayCaption(post) : '';
     const hasVideoSlide = slides.some((s) => s.kind === 'video');
 
     // Autoplay with sound is hostile, and the app already has a global feed mute concept, so
@@ -597,6 +600,11 @@ export default function ImageFullscreenModal({
                 style={[styles.chromeFooter, { paddingBottom: footerPadBottom }]}
                 pointerEvents="box-none"
             >
+                {displayCaption.length > 0 ? (
+                    <View style={styles.captionBlock}>
+                        <FeedCaptionText caption={displayCaption} />
+                    </View>
+                ) : null}
                 <View style={styles.engagementRow}>
                     <Pressable
                         style={styles.engItem}
@@ -845,6 +853,11 @@ const styles = StyleSheet.create({
         zIndex: 30,
         elevation: 30,
         backgroundColor: 'rgba(0,0,0,0.92)',
+    },
+    captionBlock: {
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 8,
     },
     iconBtn: {
         position: 'absolute',

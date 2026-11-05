@@ -111,7 +111,11 @@ export async function fetchWithApiFallback(
 
 function isAuthLoginPath(path: string): boolean {
     const normalized = path.split('?')[0] || '';
-    return normalized.includes('/auth/login') || normalized.includes('/auth/register');
+    return (
+        normalized.includes('/auth/login') ||
+        normalized.includes('/auth/register') ||
+        normalized.includes('/auth/verify')
+    );
 }
 
 export async function authorizedJsonHeaders(

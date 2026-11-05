@@ -46,7 +46,22 @@ return [
 
     'firebase' => [
         'project_id' => env('FIREBASE_PROJECT_ID'),
-        'credentials' => env('FIREBASE_CREDENTIALS', 'storage/app/firebase-auth.json'),
+        // Absolute path so Kreait\Firebase\Factory::withServiceAccount() can open the
+        // service-account JSON regardless of the process working directory.
+        'credentials' => (static function (): string {
+            $configured = env('FIREBASE_CREDENTIALS', 'storage/app/firebase-auth.json');
+            $configured = is_string($configured) ? trim($configured) : '';
+            if ($configured === '') {
+                return storage_path('app/firebase-auth.json');
+            }
+            $isAbsolute = str_starts_with($configured, DIRECTORY_SEPARATOR)
+                || (bool) preg_match('#^[A-Za-z]:\\\\#', $configured);
+            if ($isAbsolute) {
+                return $configured;
+            }
+
+            return base_path($configured);
+        })(),
     ],
 
     'stripe' => [

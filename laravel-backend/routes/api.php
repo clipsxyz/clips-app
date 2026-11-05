@@ -145,6 +145,8 @@ Route::prefix('auth')->group(function () {
     Route::post('/password/reset-local', [AuthController::class, 'resetPasswordLocal']);
     Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
     Route::post('/password/reset', [AuthController::class, 'resetPassword']);
+    Route::post('/firebase', [AuthController::class, 'firebase'])->middleware('throttle:20,1');
+    Route::post('/verify', [AuthController::class, 'verifyFirebasePhone'])->middleware('throttle:20,1');
 });
 
 // Public music routes (no auth required)
@@ -247,6 +249,8 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/phone/verify-code', [AuthController::class, 'verifyPhoneCode']);
         Route::post('/logout', [AuthController::class, 'logout']);
     });
+
+    Route::put('/user/phone', [AuthController::class, 'updateUserPhone']);
 
     // Link preview (composer) routes. `/v1/parse-link` is the legacy path the RN client
     // still calls for Instagram links; both return the same normalized client payload.

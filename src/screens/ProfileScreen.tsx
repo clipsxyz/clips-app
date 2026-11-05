@@ -9,6 +9,7 @@ import {
     FlatList,
     ActivityIndicator,
     Modal,
+    KeyboardAvoidingView,
     ScrollView,
     TextInput,
     Share,
@@ -43,6 +44,8 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -59,7 +62,12 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones, fetchFollowers, fetchFollowing, removeFollower } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, syncFirebasePhoneVerification, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones, fetchFollowers, fetchFollowing, removeFollower } from '../api/client';
+import {
+    firebasePhoneErrorMessage,
+    startFirebasePhoneSignIn,
+    type FirebasePhoneConfirmation,
+} from '../services/firebasePhoneAuth.native';
 import { followOrRequest } from '../utils/followOrRequest';
 import {
     buildSuggestedConnections,
@@ -88,6 +96,7 @@ import {
     type NotificationPreferences,
 } from '../services/notifications';
 import { getRuntimeEnv, isLaravelApiEnabled } from '../config/runtimeEnv';
+import { persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from '../api/apiBaseUrl';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -103,7 +112,8 @@ type ProfileAlertConfig = {
 };
 
 const ProfileScreen: React.FC = ({ navigation }: any) => {
-    const { height: windowHeight } = useWindowDimensions();
+    const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const { user, logout, login } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
@@ -165,6 +175,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [phoneInput, setPhoneInput] = useState('');
     const [otpInput, setOtpInput] = useState('');
     const [pendingPhoneNumber, setPendingPhoneNumber] = useState('');
+    const phoneConfirmationRef = useRef<FirebasePhoneConfirmation | null>(null);
     const [inviteSyncing, setInviteSyncing] = useState(false);
     const [inviteMatchedFriends, setInviteMatchedFriends] = useState<FacebookMatchedFriend[]>([]);
     const [contactsSyncing, setContactsSyncing] = useState(false);
@@ -319,6 +330,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         setPhoneInput('');
         setOtpInput('');
         setPendingPhoneNumber('');
+        phoneConfirmationRef.current = null;
     }, []);
 
     const loadData = async (opts?: { silent?: boolean }) => {
@@ -714,23 +726,32 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         const fullPhone = `${phoneCountryCode}${digits}`;
         setSecurityBusy(true);
         try {
-            const res = await sendPhoneVerificationCode(fullPhone);
+            if (!isLaravelApiEnabled()) {
+                const res = await sendPhoneVerificationCode(fullPhone);
+                phoneConfirmationRef.current = null;
+                setPendingPhoneNumber(fullPhone);
+                setSecurityStep('code');
+                setOtpInput('');
+                if (res.delivery === 'mock' && res.debug_code) {
+                    showProfileAlert({ title: 'Demo code', message: `Use PIN ${res.debug_code}`, icon: 'info' });
+                }
+                return;
+            }
+
+            const confirmation = await startFirebasePhoneSignIn(fullPhone);
+            phoneConfirmationRef.current = confirmation;
             setPendingPhoneNumber(fullPhone);
             setSecurityStep('code');
             setOtpInput('');
-            if (res.delivery === 'mock' && res.debug_code) {
-                showProfileAlert({ title: 'Demo code', message: `Use PIN ${res.debug_code}`, icon: 'info' });
-            } else {
-                showProfileAlert({
-                    title: 'Code sent',
-                    message: `A verification code was sent to ${fullPhone}.`,
-                    icon: 'success',
-                });
-            }
+            showProfileAlert({
+                title: 'Code sent',
+                message: `A verification code was sent to ${fullPhone}.`,
+                icon: 'success',
+            });
         } catch (error: any) {
             showProfileAlert({
                 title: 'Send failed',
-                message: error?.message || 'Could not send verification code.',
+                message: firebasePhoneErrorMessage(error),
                 icon: 'alert',
             });
         } finally {
@@ -747,13 +768,25 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
         setSecurityBusy(true);
         try {
-            await verifyPhoneVerificationCode(pendingPhoneNumber, code);
+            if (!isLaravelApiEnabled() || !phoneConfirmationRef.current) {
+                await verifyPhoneVerificationCode(pendingPhoneNumber, code);
+            } else {
+                await phoneConfirmationRef.current.confirm(code);
+                const exchanged = await syncFirebasePhoneVerification(pendingPhoneNumber);
+                const mapped = mapLaravelUserToAppFields(exchanged.user || {});
+                const returnedId = typeof mapped.id === 'string' ? mapped.id : '';
+                if (user?.id && returnedId && returnedId !== user.id) {
+                    throw new Error('This phone is linked to a different account.');
+                }
+                await persistAuthToken(exchanged.token);
+            }
+            phoneConfirmationRef.current = null;
             setSecurityModalOpen(false);
             showProfileAlert({ title: 'Verified', message: 'Phone verification complete.', icon: 'success' });
         } catch (error: any) {
             showProfileAlert({
                 title: 'Verification failed',
-                message: error?.message || 'Incorrect code. Try again.',
+                message: firebasePhoneErrorMessage(error),
                 icon: 'alert',
             });
         } finally {
@@ -1296,91 +1329,104 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
             <Modal
                 visible={securityModalOpen}
-                animationType="fade"
+                animationType="slide"
                 transparent={true}
+                statusBarTranslucent
                 onRequestClose={closeSecurityModal}
             >
-                <View style={styles.securityOverlay}>
-                    <View style={styles.securityCard}>
-                        <View style={styles.securityCardHeader}>
-                            <View style={{ flex: 1 }} />
-                            <TouchableOpacity onPress={closeSecurityModal} style={styles.securityCloseButton}>
-                                <Icon name="close" size={ox(22)} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        </View>
-                        {securityStep === 'phone' ? (
-                            <>
-                                <Text style={styles.securityTitle}>Add phone</Text>
-                                <View style={styles.securityWhatsAppBadge}>
-                                    <Icon name="logo-whatsapp" size={ox(14)} color="#DCFCE7" />
-                                    <Text style={styles.securityWhatsAppBadgeText}>We will text your verification code on WhatsApp</Text>
-                                </View>
-                                <Text style={styles.securityBody}>
-                                    Add your phone number for extra security and easier account recovery.
-                                </Text>
-                                <View style={styles.securityPhoneRow}>
+                <KeyboardAvoidingView
+                    style={styles.securitySheetOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
+                    <Pressable style={styles.securitySheetBackdrop} onPress={closeSecurityModal} />
+                    <View
+                        style={[
+                            styles.securitySheet,
+                            {
+                                width: Math.min(windowWidth - 32, 400),
+                                paddingBottom: Math.max(insets.bottom, 16),
+                            },
+                        ]}
+                    >
+                        <PassportSheetCanvas tone="ucl" contentStyle={styles.securitySheetInner}>
+                            <View style={styles.securityHandleWrap}>
+                                <View style={styles.securityHandle} />
+                            </View>
+                            <Text style={styles.securityGazetteerLabel}>Gazetteer says</Text>
+                            <View style={styles.securityIconWrap}>
+                                <Icon name="chatbox-ellipses-outline" size={ox(44)} color="#FFFFFF" />
+                            </View>
+                            {securityStep === 'phone' ? (
+                                <>
+                                    <Text style={styles.securitySheetTitle}>Add phone</Text>
+                                    <Text style={styles.securitySheetMessage}>
+                                        We'll text you a verification code. Add your number for extra security and easier account recovery.
+                                    </Text>
+                                    <View style={styles.securityPhoneRow}>
+                                        <TextInput
+                                            value={phoneCountryCode}
+                                            onChangeText={setPhoneCountryCode}
+                                            placeholder="+353"
+                                            placeholderTextColor="#9CA3AF"
+                                            keyboardType="phone-pad"
+                                            style={styles.securityCountryInput}
+                                        />
+                                        <TextInput
+                                            value={phoneInput}
+                                            onChangeText={setPhoneInput}
+                                            placeholder="Phone number"
+                                            placeholderTextColor="#9CA3AF"
+                                            keyboardType="phone-pad"
+                                            style={styles.securityPhoneInput}
+                                        />
+                                    </View>
+                                    <TouchableOpacity
+                                        style={[styles.securitySheetConfirm, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                        onPress={handleSendSecurityCode}
+                                        disabled={securityBusy}
+                                    >
+                                        <Text style={styles.securitySheetConfirmText}>{securityBusy ? 'Sending...' : 'Continue'}</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.securitySheetCancel}
+                                        onPress={closeSecurityModal}
+                                        disabled={securityBusy}
+                                    >
+                                        <Text style={styles.securitySheetCancelText}>Not now</Text>
+                                    </TouchableOpacity>
+                                </>
+                            ) : (
+                                <>
+                                    <Text style={styles.securitySheetTitle}>Enter 6-digit code</Text>
+                                    <Text style={styles.securitySheetMessage}>Your code was sent to {pendingPhoneNumber}</Text>
                                     <TextInput
-                                        value={phoneCountryCode}
-                                        onChangeText={setPhoneCountryCode}
-                                        placeholder="+353"
+                                        value={otpInput}
+                                        onChangeText={setOtpInput}
+                                        placeholder="000000"
                                         placeholderTextColor="#9CA3AF"
-                                        style={styles.securityCountryInput}
+                                        keyboardType="number-pad"
+                                        maxLength={6}
+                                        style={styles.securityCodeInput}
                                     />
-                                    <TextInput
-                                        value={phoneInput}
-                                        onChangeText={setPhoneInput}
-                                        placeholder="Phone number"
-                                        placeholderTextColor="#9CA3AF"
-                                        keyboardType="phone-pad"
-                                        style={styles.securityPhoneInput}
-                                    />
-                                </View>
-                                <TouchableOpacity
-                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
-                                    onPress={handleSendSecurityCode}
-                                    disabled={securityBusy}
-                                >
-                                    <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Sending...' : 'Continue'}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.securitySecondaryButton}
-                                    onPress={closeSecurityModal}
-                                    disabled={securityBusy}
-                                >
-                                    <Text style={styles.securitySecondaryButtonText}>Not now</Text>
-                                </TouchableOpacity>
-                            </>
-                        ) : (
-                            <>
-                                <Text style={styles.securityTitle}>Enter 6-digit code</Text>
-                                <Text style={styles.securityBody}>Your WhatsApp code was sent to {pendingPhoneNumber}</Text>
-                                <TextInput
-                                    value={otpInput}
-                                    onChangeText={setOtpInput}
-                                    placeholder="000000"
-                                    placeholderTextColor="#9CA3AF"
-                                    keyboardType="number-pad"
-                                    maxLength={6}
-                                    style={styles.securityCodeInput}
-                                />
-                                <TouchableOpacity
-                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
-                                    onPress={handleVerifySecurityCode}
-                                    disabled={securityBusy}
-                                >
-                                    <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Verifying...' : 'Verify'}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.securitySecondaryButton}
-                                    onPress={closeSecurityModal}
-                                    disabled={securityBusy}
-                                >
-                                    <Text style={styles.securitySecondaryButtonText}>Cancel</Text>
-                                </TouchableOpacity>
-                            </>
-                        )}
+                                    <TouchableOpacity
+                                        style={[styles.securitySheetConfirm, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                        onPress={handleVerifySecurityCode}
+                                        disabled={securityBusy}
+                                    >
+                                        <Text style={styles.securitySheetConfirmText}>{securityBusy ? 'Verifying...' : 'Verify'}</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.securitySheetCancel}
+                                        onPress={closeSecurityModal}
+                                        disabled={securityBusy}
+                                    >
+                                        <Text style={styles.securitySheetCancelText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </PassportSheetCanvas>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             <Modal
@@ -1756,6 +1802,22 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     }}
                                 >
                                     <Text style={styles.smallActionButtonText}>Playback settings</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Phone number</Text>
+                                <Text style={styles.toggleDescription}>
+                                    Text a code to a new number and update your account
+                                </Text>
+                                <TouchableOpacity
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
+                                    onPress={() => {
+                                        setSettingsOpen(false);
+                                        navigation.navigate('ChangePhoneNumber');
+                                    }}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Change phone number</Text>
                                 </TouchableOpacity>
                             </View>
 
@@ -2919,23 +2981,90 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         lineHeight: ox(20),
         marginBottom: ox(12),
     },
-    securityWhatsAppBadge: {
-        flexDirection: 'row',
+    securitySheetOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
         alignItems: 'center',
-        columnGap: ox(8),
-        backgroundColor: '#052E16',
-        borderWidth: 1,
-        borderColor: '#166534',
-        borderRadius: ox(10),
-        paddingHorizontal: ox(10),
-        paddingVertical: ox(8),
-        marginBottom: ox(10),
     },
-    securityWhatsAppBadgeText: {
-        color: '#BBF7D0',
+    securitySheetBackdrop: {
+        ...StyleSheet.absoluteFill,
+        backgroundColor: 'rgba(0,0,0,0.72)',
+    },
+    securitySheet: {
+        borderTopLeftRadius: ox(24),
+        borderTopRightRadius: ox(24),
+        overflow: 'hidden',
+        backgroundColor: UCL_CANVAS_NAVY,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.08)',
+    },
+    securitySheetInner: {
+        paddingHorizontal: ox(20),
+        paddingTop: ox(4),
+    },
+    securityHandleWrap: {
+        alignItems: 'center',
+        paddingBottom: ox(8),
+    },
+    securityHandle: {
+        width: ox(40),
+        height: ox(4),
+        borderRadius: ox(2),
+        backgroundColor: 'rgba(255,255,255,0.3)',
+    },
+    securityGazetteerLabel: {
         fontSize: ox(12),
         fontWeight: '600',
-        flex: 1,
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        color: '#FFFFFF',
+        textAlign: 'center',
+        marginBottom: ox(12),
+    },
+    securityIconWrap: {
+        alignItems: 'center',
+        marginBottom: ox(12),
+    },
+    securitySheetTitle: {
+        fontSize: ox(18),
+        fontWeight: '600',
+        color: '#FFFFFF',
+        textAlign: 'center',
+        marginBottom: ox(8),
+    },
+    securitySheetMessage: {
+        fontSize: ox(15),
+        color: '#E2E8F0',
+        textAlign: 'center',
+        lineHeight: ox(22),
+        marginBottom: ox(16),
+    },
+    securitySheetConfirm: {
+        borderRadius: ox(999),
+        backgroundColor: '#FFFFFF',
+        paddingVertical: ox(14),
+        alignItems: 'center',
+        marginBottom: ox(8),
+    },
+    securitySheetConfirmText: {
+        fontSize: ox(15),
+        fontWeight: '700',
+        color: UCL_CANVAS_NAVY,
+    },
+    securitySheetCancel: {
+        borderRadius: ox(999),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        paddingVertical: ox(14),
+        alignItems: 'center',
+        marginBottom: ox(8),
+    },
+    securitySheetCancelText: {
+        fontSize: ox(15),
+        fontWeight: '600',
+        color: '#FFFFFF',
     },
     securityPhoneRow: {
         flexDirection: 'row',
@@ -2969,20 +3098,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         marginBottom: ox(12),
         ...glassSearch,
     },
-    securityPrimaryButton: {
-        backgroundColor: '#d91b5c',
-        borderRadius: ox(999),
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: ox(12),
-    },
     securityPrimaryButtonDisabled: {
         opacity: 0.6,
-    },
-    securityPrimaryButtonText: {
-        color: '#FFFFFF',
-        fontSize: ox(15),
-        fontWeight: '700',
     },
     securitySecondaryButton: {
         marginTop: ox(10),

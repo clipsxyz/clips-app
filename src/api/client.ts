@@ -47,6 +47,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/v1/parse-link',
     '/health',
     '/feed-content-preferences',
+    '/user/phone',
 ]);
 
 /** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
@@ -425,6 +426,60 @@ export async function sendPhoneVerificationCode(phone: string): Promise<PhoneSen
         }
         throw err;
     }
+}
+
+export async function syncFirebasePhoneVerification(phone: string): Promise<{
+    user: Record<string, unknown>;
+    token: string;
+    plainTextToken: string;
+    phone_number?: string;
+    phone_verified_at?: string;
+}> {
+    const authModule = await import('@react-native-firebase/auth');
+    const currentUser = authModule.default().currentUser;
+    if (!currentUser) {
+        throw new Error('Phone verification did not return a Firebase user.');
+    }
+    const idToken = await currentUser.getIdToken(true);
+    const sessionHeader = await getAuthorizationHeader();
+    const sessionToken = String(sessionHeader.Authorization || '').replace(/^Bearer\s+/i, '').trim();
+    const headers: Record<string, string> = {
+        Authorization: `Bearer ${idToken}`,
+    };
+    if (sessionToken) {
+        headers['X-Session-Token'] = sessionToken;
+    }
+
+    const data = await apiRequest('/auth/verify', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ phone, phone_number: phone }),
+    });
+    const token = String(data?.token || data?.plainTextToken || '').trim();
+    if (!token) {
+        throw new Error('Phone verified, but no API token was returned.');
+    }
+    return {
+        user: data?.user && typeof data.user === 'object' ? data.user : {},
+        token,
+        plainTextToken: token,
+        phone_number: typeof data?.phone_number === 'string' ? data.phone_number : undefined,
+        phone_verified_at: typeof data?.phone_verified_at === 'string' ? data.phone_verified_at : undefined,
+    };
+}
+
+export async function updateAccountPhone(
+    phone: string,
+    idToken: string,
+): Promise<{ phone_number?: string; phone_verified_at?: string }> {
+    const data = await apiRequest('/user/phone', {
+        method: 'PUT',
+        body: JSON.stringify({ phone, phone_number: phone, idToken }),
+    });
+    return {
+        phone_number: typeof data?.phone_number === 'string' ? data.phone_number : phone,
+        phone_verified_at: typeof data?.phone_verified_at === 'string' ? data.phone_verified_at : undefined,
+    };
 }
 
 export async function verifyPhoneVerificationCode(phone: string, code: string): Promise<{ ok: boolean; phone_number?: string; phone_verified_at?: string }> {

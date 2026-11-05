@@ -4,15 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\FirebaseIdTokenVerifier;
 use App\Services\InteractionPushService;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -639,6 +642,172 @@ class AuthController extends Controller
     }
 
     /**
+     * Store a phone number that Firebase has already updated on the signed-in user.
+     * The Sanctum bearer identifies the account. The Firebase ID token must carry the same number.
+     */
+    public function updateUserPhone(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'phone' => ['required_without:phone_number', 'nullable', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+            'phone_number' => ['required_without:phone', 'nullable', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+            'idToken' => 'required|string|min:20',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        if (! Schema::hasColumn('users', 'firebase_uid')) {
+            return response()->json(['error' => 'Phone sign-in is not available yet.'], 503);
+        }
+
+        try {
+            $verified = app(FirebaseIdTokenVerifier::class)->verify((string) $request->input('idToken'));
+        } catch (\Throwable $e) {
+            Log::info('Firebase phone token rejected', ['message' => $e->getMessage()]);
+
+            return response()->json(['error' => 'Invalid Firebase token'], 401);
+        }
+
+        $phone = (string) ($request->input('phone') ?: $request->input('phone_number'));
+        if ($verified['phone_number'] !== $phone) {
+            return response()->json(['error' => 'Phone number does not match the verified Firebase account.'], 422);
+        }
+
+        $linkedUid = trim((string) ($user->firebase_uid ?? ''));
+        if ($linkedUid !== '' && $linkedUid !== $verified['firebase_uid']) {
+            return response()->json(['error' => 'This Firebase account does not match your Gazetteer account.'], 409);
+        }
+
+        $uid = $verified['firebase_uid'];
+        $saved = DB::transaction(fn () => $this->linkFirebasePhone($user, $uid, $phone));
+        $fresh = $saved->fresh() ?? $saved;
+
+        return response()->json([
+            'ok' => true,
+            'phone_number' => $fresh->phone_number,
+            'phone_verified_at' => optional($fresh->phone_verified_at)->toISOString(),
+        ]);
+    }
+
+    /**
+     * Exchange a Firebase phone-auth ID token for a Sanctum session.
+     * An existing bearer token links the verified phone to that account.
+     * Without one, the phone finds or creates the user.
+     */
+    public function firebase(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'idToken' => 'required|string|min:20',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        if (! Schema::hasColumn('users', 'firebase_uid')) {
+            return response()->json(['error' => 'Phone sign-in is not available yet.'], 503);
+        }
+
+        try {
+            $verified = app(FirebaseIdTokenVerifier::class)->verify((string) $request->input('idToken'));
+        } catch (\Throwable $e) {
+            Log::info('Firebase phone token rejected', ['message' => $e->getMessage()]);
+
+            return response()->json(['error' => 'Invalid Firebase token'], 401);
+        }
+
+        $uid = $verified['firebase_uid'];
+        $phone = $verified['phone_number'];
+        $current = $this->userFromBearer($request);
+
+        try {
+            $user = DB::transaction(function () use ($uid, $phone, $current) {
+                return $current instanceof User
+                    ? $this->linkFirebasePhone($current, $uid, $phone)
+                    : $this->findOrCreateFirebasePhoneUser($uid, $phone);
+            });
+        } catch (HttpResponseException $e) {
+            throw $e;
+        }
+
+        $user->forceFill(['last_active_at' => now()])->saveQuietly();
+        $token = $user->createToken('auth-token')->plainTextToken;
+        $fresh = $user->fresh() ?? $user;
+
+        return response()->json([
+            'user' => $fresh->toApiArray(),
+            'token' => $token,
+            'plainTextToken' => $token,
+            'phone_number' => $fresh->phone_number,
+            'phone_verified_at' => optional($fresh->phone_verified_at)->toISOString(),
+        ]);
+    }
+
+    /**
+     * Sync a verified Firebase phone user.
+     * Authorization: Bearer <Firebase ID token>
+     * Body: { phone }
+     * An existing app session in X-Session-Token links the phone onto that account.
+     */
+    public function verifyFirebasePhone(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'phone' => ['required_without:phone_number', 'nullable', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+            'phone_number' => ['required_without:phone', 'nullable', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        if (! Schema::hasColumn('users', 'firebase_uid')) {
+            return response()->json(['error' => 'Phone sign-in is not available yet.'], 503);
+        }
+
+        $idToken = $request->bearerToken();
+        if (! is_string($idToken) || strlen($idToken) < 20) {
+            return response()->json(['error' => 'Missing Firebase token'], 401);
+        }
+
+        try {
+            $verified = app(FirebaseIdTokenVerifier::class)->verify($idToken);
+        } catch (\Throwable $e) {
+            Log::info('Firebase phone token rejected', ['message' => $e->getMessage()]);
+
+            return response()->json(['error' => 'Invalid Firebase token'], 401);
+        }
+
+        $phone = (string) ($request->input('phone') ?: $request->input('phone_number'));
+        if ($verified['phone_number'] !== $phone) {
+            return response()->json(['error' => 'Phone number does not match the verified Firebase account.'], 422);
+        }
+
+        $uid = $verified['firebase_uid'];
+        $current = $this->userFromSessionHeader($request);
+
+        $user = DB::transaction(function () use ($uid, $phone, $current) {
+            return $current instanceof User
+                ? $this->linkFirebasePhone($current, $uid, $phone)
+                : $this->findOrCreateFirebasePhoneUser($uid, $phone);
+        });
+
+        $user->forceFill(['last_active_at' => now()])->saveQuietly();
+        $token = $user->createToken('auth-token')->plainTextToken;
+        $fresh = $user->fresh() ?? $user;
+
+        return response()->json([
+            'user' => $fresh->toApiArray(),
+            'token' => $token,
+            'plainTextToken' => $token,
+            'phone_number' => $fresh->phone_number,
+            'phone_verified_at' => optional($fresh->phone_verified_at)->toISOString(),
+        ]);
+    }
+
+    /**
      * Authenticated password change (current password required).
      */
     public function changePassword(Request $request): JsonResponse
@@ -1105,5 +1274,111 @@ class AuthController extends Controller
         }
 
         return response()->json(['message' => 'Successfully logged out']);
+    }
+
+    private function userFromBearer(Request $request): ?User
+    {
+        return $this->userFromPlainToken($request->bearerToken());
+    }
+
+    private function userFromSessionHeader(Request $request): ?User
+    {
+        return $this->userFromPlainToken($request->header('X-Session-Token'));
+    }
+
+    private function userFromPlainToken(mixed $plain): ?User
+    {
+        if (! is_string($plain) || $plain === '') {
+            return null;
+        }
+
+        $accessToken = PersonalAccessToken::findToken($plain);
+        $owner = $accessToken?->tokenable;
+
+        return $owner instanceof User ? $owner : null;
+    }
+
+    private function linkFirebasePhone(User $user, string $uid, string $phone): User
+    {
+        $byUid = User::withTrashed()->where('firebase_uid', $uid)->first();
+        if ($byUid && $byUid->id !== $user->id) {
+            $this->rejectPhoneLink('This phone is already linked to another account.');
+        }
+
+        $byPhone = User::withTrashed()->where('phone_number', $phone)->first();
+        if ($byPhone && $byPhone->id !== $user->id) {
+            $this->rejectPhoneLink('This phone number is already in use.');
+        }
+
+        $user->firebase_uid = $uid;
+        $user->phone_number = $phone;
+        $user->phone_verified_at = now();
+        $user->save();
+
+        return $user;
+    }
+
+    private function findOrCreateFirebasePhoneUser(string $uid, string $phone): User
+    {
+        $byUid = User::withTrashed()->where('firebase_uid', $uid)->first();
+        $byPhone = User::withTrashed()->where('phone_number', $phone)->first();
+
+        if ($byUid && $byPhone && $byUid->id !== $byPhone->id) {
+            $this->rejectPhoneLink('This phone number is linked to a different account.');
+        }
+
+        $user = $byUid ?? $byPhone;
+        if ($user) {
+            if ($user->trashed()) {
+                $user->restore();
+            }
+            $user->firebase_uid = $uid;
+            $user->phone_number = $phone;
+            $user->phone_verified_at = now();
+            $user->save();
+
+            return $user;
+        }
+
+        $user = User::create([
+            'username' => $this->uniqueUserValue('username', 'ph'.substr(preg_replace('/\D+/', '', $phone) ?: 'user', -8), 50),
+            'email' => 'firebase.'.substr(hash('sha256', $uid), 0, 24).'@users.clips.invalid',
+            'password' => Str::random(40),
+            'display_name' => $phone,
+            'handle' => $this->uniquePhoneHandle($phone),
+            'phone_number' => $phone,
+            'firebase_uid' => $uid,
+        ]);
+        $user->forceFill(['phone_verified_at' => now()])->save();
+
+        return $user;
+    }
+
+    private function uniquePhoneHandle(string $phone): string
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?: 'user';
+        $base = 'phone'.substr($digits, -8);
+
+        return $this->uniqueUserValue('handle', $base.'@phone', 100);
+    }
+
+    private function uniqueUserValue(string $column, string $seed, int $maxLength): string
+    {
+        $seed = substr($seed, 0, $maxLength);
+        for ($i = 0; $i < 30; $i++) {
+            $suffix = $i === 0 ? '' : (string) $i;
+            $candidate = substr($seed, 0, max(1, $maxLength - strlen($suffix))).$suffix;
+            $taken = User::withTrashed()->where($column, $candidate)->exists();
+            if (! $taken) {
+                return $candidate;
+            }
+        }
+
+        return substr($seed, 0, max(1, $maxLength - 6)).substr(bin2hex(random_bytes(3)), 0, 6);
+    }
+
+    private function rejectPhoneLink(string $message): never
+    {
+        throw new HttpResponseException(response()->json(['error' => $message], 409));
     }
 }

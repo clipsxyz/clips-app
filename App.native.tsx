@@ -49,6 +49,7 @@ import MessagesScreen from './src/screens/MessagesScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
 import VideoPlaybackSettingsScreen from './src/screens/VideoPlaybackSettingsScreen';
+import ChangePhoneNumberScreen from './src/screens/ChangePhoneNumberScreen';
 import PaymentScreen from './src/screens/PaymentScreen';
 import PaymentSuccessScreen from './src/screens/PaymentSuccessScreen';
 import SplashScreen from './src/screens/SplashScreen';
@@ -475,6 +476,11 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="VideoPlaybackSettings"
             component={VideoPlaybackSettingsScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="ChangePhoneNumber"
+            component={ChangePhoneNumberScreen}
             options={{ presentation: 'modal' }}
           />
           <Stack.Screen

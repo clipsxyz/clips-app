@@ -852,43 +852,29 @@ export default function ProfilePage() {
   };
 
   const handleSecurityPhoneVerify = async () => {
+    const smsIcon = `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
     const phoneStep = await Swal.fire({
-      title: 'Add phone',
-      html: `
-        <div style="display:flex; flex-direction:column; gap:10px; text-align:left; margin-top:8px; width:100%; max-width:100%; box-sizing:border-box;">
-          <div style="display:flex; align-items:center; gap:8px; background:#052e16; border:1px solid #166534; color:#bbf7d0; border-radius:10px; padding:8px 10px;">
-            <svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-              <circle cx="16" cy="16" r="16" fill="#25D366"></circle>
-              <path d="M22.6 18.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2s-.8 1-.9 1.2c-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.4-1.7-1.6-2s0-.4.1-.5c.1-.1.3-.3.4-.5.1-.1.2-.3.3-.4.1-.2 0-.3 0-.5s-.7-1.7-1-2.3c-.3-.7-.5-.6-.7-.6h-.6c-.2 0-.5.1-.7.3-.2.2-1 1-1 2.4s1 2.8 1.1 3c.1.2 2 3 4.9 4.2.7.3 1.2.4 1.6.6.7.2 1.4.2 1.9.1.6-.1 1.9-.8 2.2-1.6.3-.8.3-1.5.2-1.6-.1-.1-.3-.2-.6-.4z" fill="#ffffff"></path>
-            </svg>
-            <span style="font-size:12px; font-weight:600;">We will text your verification code on WhatsApp</span>
-          </div>
-          <p style="margin:0; color:#a1a1aa; font-size:13px;">
-            Add your phone number for extra security, easier account recovery, and quicker logins.
-          </p>
-          <div style="display:flex; gap:8px; width:100%; max-width:100%; box-sizing:border-box;">
-            <select id="phone-country-code" style="flex:0 0 96px; width:96px; min-width:96px; max-width:96px; border-radius:10px; border:1px solid #3f3f46; background:#18181b; color:#fff; padding:10px 8px; box-sizing:border-box;">
+      ...bottomSheet({
+        title: 'Add phone',
+        icon: smsIcon,
+        confirmButtonText: 'Continue',
+        cancelButtonText: 'Not now',
+        showCancelButton: true,
+        html: `
+          <p class="swal-bottom-sheet-message" style="margin-bottom:16px;">We'll text you a verification code. Add your number for extra security and easier account recovery.</p>
+          <div style="display:flex; gap:8px; width:100%; max-width:100%; box-sizing:border-box; text-align:left;">
+            <select id="phone-country-code" style="flex:0 0 96px; width:96px; min-width:96px; max-width:96px; border-radius:10px; border:1px solid rgba(255,255,255,0.18); background:rgba(6,13,22,0.72); color:#fff; padding:10px 8px; box-sizing:border-box;">
               <option value="+353">IE +353</option>
               <option value="+44">UK +44</option>
               <option value="+1">US +1</option>
               <option value="+33">FR +33</option>
               <option value="+55">BR +55</option>
             </select>
-            <input id="phone-number-input" type="tel" placeholder="Phone number" style="flex:1 1 auto; min-width:0; width:100%; max-width:100%; border-radius:10px; border:1px solid #3f3f46; background:#18181b; color:#fff; padding:10px; box-sizing:border-box;" />
+            <input id="phone-number-input" type="tel" placeholder="Phone number" style="flex:1 1 auto; min-width:0; width:100%; max-width:100%; border-radius:10px; border:1px solid rgba(255,255,255,0.18); background:rgba(6,13,22,0.72); color:#fff; padding:10px; box-sizing:border-box;" />
           </div>
-        </div>
-      `,
-      showCancelButton: true,
-      confirmButtonText: 'Continue',
-      cancelButtonText: 'Not now',
-      background: '#111111',
-      color: '#ffffff',
+        `,
+      }),
       focusConfirm: false,
-      customClass: {
-        popup: 'swal-bottom-sheet-popup',
-        confirmButton: 'swal-bottom-sheet-confirm',
-        cancelButton: 'swal-bottom-sheet-cancel',
-      },
       preConfirm: () => {
         const countryEl = document.getElementById('phone-country-code') as HTMLSelectElement | null;
         const phoneEl = document.getElementById('phone-number-input') as HTMLInputElement | null;
@@ -913,7 +899,7 @@ export default function ProfilePage() {
 
     const otpStep = await Swal.fire({
       title: 'Enter 6-digit code',
-      text: `Your WhatsApp code was sent to ${phoneNumber}`,
+      text: `Your code was sent to ${phoneNumber}`,
       input: 'text',
       inputPlaceholder: '000000',
       inputAttributes: {
