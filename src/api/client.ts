@@ -1000,7 +1000,7 @@ export async function fetchCommentsPage(
     repliesLimit: number = 5,
 ) {
     const params = new URLSearchParams({
-        paged: 'true',
+        paged: '1',
         limit: String(limit),
         repliesLimit: String(repliesLimit),
     });

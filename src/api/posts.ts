@@ -298,13 +298,48 @@ function rememberPostedComment(postId: string, comment: Comment): void {
   );
 }
 
+function rememberPostedReply(postId: string, parentId: string, reply: Comment): void {
+  const key = resolveCommentsPostId(String(postId || reply.postId || ''));
+  if (!key || !parentId || !reply?.id) return;
+  const prev = postedCommentsByPost.get(key) || [];
+  const parent = prev.find((row) => String(row.id) === String(parentId));
+  if (!parent) return;
+  const replies = [
+    ...(parent.replies || []).filter((row) => String(row.id) !== String(reply.id)),
+    reply,
+  ];
+  const nextParent: Comment = {
+    ...parent,
+    replies,
+    replyCount: Math.max(parent.replyCount || 0, replies.length),
+  };
+  postedCommentsByPost.set(
+    key,
+    prev.map((row) => (String(row.id) === String(parentId) ? nextParent : row)),
+  );
+}
+
 function mergePostedComments(postId: string, items: Comment[]): Comment[] {
   const key = resolveCommentsPostId(String(postId || ''));
   const extra = (postedCommentsByPost.get(key) || []).filter((row) => !row.parentId);
   if (!extra.length) return items;
   const seen = new Set(items.map((row) => String(row.id)));
+  const rememberedById = new Map(extra.map((row) => [String(row.id), row]));
+  const merged = items.map((row) => {
+    const remembered = rememberedById.get(String(row.id));
+    if (!remembered?.replies?.length) return row;
+    const replySeen = new Set((row.replies || []).map((reply) => String(reply.id)));
+    const missingReplies = remembered.replies.filter((reply) => !replySeen.has(String(reply.id)));
+    if (!missingReplies.length) return row;
+    const replies = [...(row.replies || []), ...missingReplies];
+    return {
+      ...row,
+      replies,
+      replyCount: Math.max(row.replyCount || 0, replies.length),
+    };
+  });
   const missing = extra.filter((row) => !seen.has(String(row.id)));
-  return missing.length ? [...missing, ...items] : items;
+  return missing.length ? [...missing, ...merged] : merged;
 }
 
 function listTopLevelCommentsForPost(postId: string): Comment[] {
@@ -3183,7 +3218,11 @@ export async function fetchCommentsPage(
     const threadId = resolvedPostId;
     try {
       const response = await apiClient.fetchCommentsPage(threadId, cursor, limit, userId, repliesLimit);
-      const itemsRaw = Array.isArray(response?.items) ? response.items : [];
+      const itemsRaw = Array.isArray(response?.items)
+        ? response.items
+        : Array.isArray(response)
+          ? response
+          : [];
       const commentsCount = Number(response?.commentsCount);
       const knownCount = Number.isFinite(commentsCount) ? commentsCount : undefined;
       if (itemsRaw.length === 0 && (knownCount ?? 0) > 0) {
@@ -3540,18 +3579,23 @@ export async function addReply(postId: string, parentId: string, userHandle: str
     const savedPostId = String(response?.post_id || response?.postId || resolvedPostId);
     bumpCachedCommentCount(savedPostId, 1);
     const moderation = evaluateCommentModeration(response?.text || response?.text_content || text);
-    return {
+    const savedReply: Comment = {
       id: response.id,
       postId: savedPostId,
       userHandle: response.user_handle || response.userHandle || userHandle,
       text: response.text || response.text_content || text,
       userLiked: false,
-      createdAt: new Date(response.created_at || response.createdAt || Date.now()).getTime(),
+      createdAt: (() => {
+        const val = new Date(response.created_at || response.createdAt || Date.now()).getTime();
+        return Number.isFinite(val) ? val : Date.now();
+      })(),
       likes: Number(response.likes_count || response.likes || 0) || 0,
       parentId: response.parent_id || response.parentId || parentId,
       moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
       moderationReason: moderation.matched[0],
     };
+    rememberPostedReply(savedPostId, String(savedReply.parentId || parentId), savedReply);
+    return savedReply;
   }
 
   await delay(300);

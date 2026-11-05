@@ -200,26 +200,22 @@ function CommentItem({
     isReplyingTo?: boolean;
 }) {
     const { user } = useAuth();
-    const [liked, setLiked] = useState(comment.userLiked);
-    const [likes, setLikes] = useState(comment.likes ?? 0);
     const [busy, setBusy] = useState(false);
-    const [showReplies, setShowReplies] = useState(false);
-
-    useEffect(() => {
-        setLiked(comment.userLiked);
-        setLikes(comment.likes ?? 0);
-    }, [comment.userLiked, comment.likes]);
 
     const normalizedViewer = viewerHandle.trim().toLowerCase();
     const isCommentAuthor =
         String(comment.userHandle || '').trim().toLowerCase() === normalizedViewer;
     const isHiddenForViewer = comment.moderationState === 'hidden_by_filter' && !isCommentAuthor;
-    const replyCount = comment.replyCount || 0;
-    const hasReplies = replyCount > 0;
     const visibleReplies = (comment.replies || []).filter((reply) => {
         if (reply.moderationState !== 'hidden_by_filter') return true;
         return String(reply.userHandle || '').trim().toLowerCase() === normalizedViewer;
     });
+    const replyCount = Math.max(comment.replyCount || 0, visibleReplies.length);
+    const hasReplies = replyCount > 0;
+    const [showReplies, setShowReplies] = useState(hasReplies);
+    useEffect(() => {
+        if (hasReplies) setShowReplies(true);
+    }, [replyCount, hasReplies]);
 
     const avatarSrc =
         comment.userHandle === user?.handle
@@ -286,28 +282,18 @@ function CommentItem({
                     <TouchableOpacity
                         disabled={busy || isHiddenForViewer}
                         style={styles.commentLikeRow}
-                        onPress={async () => {
+                        onPress={() => {
                             if (busy) return;
                             setBusy(true);
-                            const nextLiked = !liked;
-                            setLiked(nextLiked);
-                            setLikes((prev) => prev + (nextLiked ? 1 : -1));
-                            try {
-                                await onLikeComment(comment.id);
-                            } catch {
-                                setLiked(comment.userLiked);
-                                setLikes(comment.likes ?? 0);
-                            } finally {
-                                setBusy(false);
-                            }
+                            void onLikeComment(comment.id).finally(() => setBusy(false));
                         }}
                     >
                         <FeedLikeThumbsIcon
                             size={16}
-                            filled={liked}
-                            color={liked ? COMMENT_LIKE_ACTIVE : P.muted}
+                            filled={Boolean(comment.userLiked)}
+                            color={comment.userLiked ? COMMENT_LIKE_ACTIVE : P.muted}
                         />
-                        <Text style={styles.commentLikeCount}>{likes}</Text>
+                        <Text style={styles.commentLikeCount}>{comment.likes ?? 0}</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -740,52 +726,102 @@ export default function PostCommentsSheet({
     };
 
     const handleLikeComment = async (commentId: string) => {
-        const original = comments.find((c) => c.id === commentId);
+        let previous: Comment | undefined;
         setComments((prev) =>
             prev.map((comment) => {
-                if (comment.id !== commentId) return comment;
+                if (String(comment.id) !== String(commentId)) return comment;
+                previous = comment;
                 const nextLiked = !comment.userLiked;
                 return {
                     ...comment,
                     userLiked: nextLiked,
-                    likes: (comment.likes || 0) + (nextLiked ? 1 : -1),
+                    likes: Math.max(0, (comment.likes || 0) + (nextLiked ? 1 : -1)),
                 };
             }),
         );
+        if (!previous) return;
         try {
-            const updated = await toggleCommentLike(commentId, original);
-            setComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
+            const updated = await toggleCommentLike(commentId, previous);
+            setComments((prev) =>
+                prev.map((comment) =>
+                    String(comment.id) !== String(commentId)
+                        ? comment
+                        : { ...comment, userLiked: updated.userLiked, likes: updated.likes },
+                ),
+            );
         } catch (err) {
             console.error('Failed to like comment:', err);
-            if (original) {
-                setComments((prev) => prev.map((c) => (c.id === commentId ? original : c)));
-            }
+            const revert = previous;
+            setComments((prev) =>
+                prev.map((comment) =>
+                    String(comment.id) !== String(commentId)
+                        ? comment
+                        : { ...comment, userLiked: revert.userLiked, likes: revert.likes },
+                ),
+            );
         }
     };
 
     const handleLikeReply = async (parentCommentId: string, replyId: string) => {
-        const originalParent = comments.find((c) => c.id === parentCommentId);
+        let previousReply: Comment | undefined;
         setComments((prev) =>
             prev.map((comment) => {
-                if (comment.id !== parentCommentId || !comment.replies) return comment;
+                if (String(comment.id) !== String(parentCommentId) || !comment.replies) return comment;
                 return {
                     ...comment,
-                    replies: comment.replies.map((r) => {
-                        if (r.id !== replyId) return r;
-                        const nextLiked = !r.userLiked;
-                        return { ...r, userLiked: nextLiked, likes: (r.likes || 0) + (nextLiked ? 1 : -1) };
+                    replies: comment.replies.map((reply) => {
+                        if (String(reply.id) !== String(replyId)) return reply;
+                        previousReply = reply;
+                        const nextLiked = !reply.userLiked;
+                        return {
+                            ...reply,
+                            userLiked: nextLiked,
+                            likes: Math.max(0, (reply.likes || 0) + (nextLiked ? 1 : -1)),
+                        };
                     }),
                 };
             }),
         );
+        const parent = commentsRef.current.find((comment) => String(comment.id) === String(parentCommentId));
+        if (!parent || !previousReply) return;
         try {
-            const updatedParent = await toggleReplyLike(parentCommentId, replyId, originalParent);
-            setComments((prev) => prev.map((c) => (c.id === parentCommentId ? updatedParent : c)));
+            const updatedParent = await toggleReplyLike(parentCommentId, replyId, {
+                ...parent,
+                replies: parent.replies?.map((reply) =>
+                    String(reply.id) === String(replyId) ? previousReply! : reply,
+                ),
+            });
+            const updatedReply = updatedParent.replies?.find((reply) => String(reply.id) === String(replyId));
+            if (!updatedReply) return;
+            setComments((prev) =>
+                prev.map((comment) => {
+                    if (String(comment.id) !== String(parentCommentId) || !comment.replies) return comment;
+                    return {
+                        ...comment,
+                        replies: comment.replies.map((reply) =>
+                            String(reply.id) === String(replyId)
+                                ? { ...reply, userLiked: updatedReply.userLiked, likes: updatedReply.likes }
+                                : reply,
+                        ),
+                    };
+                }),
+            );
         } catch (err) {
             console.error('Failed to like reply:', err);
-            if (originalParent) {
-                setComments((prev) => prev.map((c) => (c.id === parentCommentId ? originalParent : c)));
-            }
+            const revert = previousReply;
+            setComments((prev) =>
+                prev.map((comment) => {
+                    if (String(comment.id) !== String(parentCommentId) || !comment.replies) return comment;
+                    return {
+                        ...comment,
+                        replies: comment.replies.map((reply) =>
+                            String(reply.id) === String(replyId)
+                                ? { ...reply, userLiked: revert.userLiked, likes: revert.likes }
+                                : reply,
+                        ),
+                    };
+                }),
+            );
         }
     };
 

@@ -27,14 +27,21 @@ class CommentController extends Controller
             'cursor' => 'nullable|string',
             'limit' => 'nullable|integer|min:1|max:100',
             'repliesLimit' => 'nullable|integer|min:1|max:25',
-            'paged' => 'nullable|boolean',
+            // Query strings arrive as "true"/"1". Laravel's boolean rule rejects "true",
+            // which used to 400 the whole thread and leave the app with only the comment
+            // posted in this session.
+            'paged' => 'nullable',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $userId = $request->get('userId');
+        $requestedViewer = $request->get('userId');
+        $authId = Auth::id();
+        $userId = (is_string($requestedViewer) && Str::isUuid($requestedViewer))
+            ? $requestedViewer
+            : (is_string($authId) ? $authId : null);
         $hasViewer = !empty($userId);
         $limit = max(1, min((int) $request->get('limit', 30), 100));
         $repliesLimit = max(1, min((int) $request->get('repliesLimit', 5), 25));
