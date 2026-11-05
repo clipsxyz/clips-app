@@ -43,9 +43,11 @@ import StoryViewerHeader from '../components/stories/StoryViewerHeader.native';
 import StoryTextOverlay from '../components/stories/StoryTextOverlay.native';
 import {
     gazetteerHeader,
+    UCL_TEXT_ACTIVE,
     UEFA_PASSPORT_GRADIENT,
     UEFA_PASSPORT_GRADIENT_LOCATIONS,
 } from '../theme/gazetteerAmbientNative';
+import { storyLinkHostname, storyLinkNewsName } from '../utils/storyLinkBrand';
 import { useAuth } from '../context/Auth';
 import { 
     clearActiveStoryProbes,
@@ -208,6 +210,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [showInlineReplyComposer, setShowInlineReplyComposer] = useState(false);
     const [isSendingReply, setIsSendingReply] = useState(false);
     const [showStoryShareModal, setShowStoryShareModal] = useState(false);
+    const [pendingStoryLink, setPendingStoryLink] = useState<string | null>(null);
     const [showInsightsSheet, setShowInsightsSheet] = useState(false);
     const [insightsStoryId, setInsightsStoryId] = useState<string | null>(null);
     const [replyText, setReplyText] = useState('');
@@ -813,27 +816,25 @@ export default function StoriesScreen({ route, navigation }: any) {
         finalizeCloseNavigation();
     };
 
-    const openStoryLink = async (rawUrl?: string) => {
-        if (!rawUrl) return;
-        const withProtocol = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
-        Alert.alert(
-            'Visit link?',
-            'You are about to open this link in your browser.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Visit link',
-                    onPress: async () => {
-                        try {
-                            await Linking.openURL(withProtocol);
-                        } catch (error) {
-                            console.error('Failed to open story link:', error);
-                        }
-                    },
-                },
-            ],
-            { cancelable: true }
-        );
+    const openStoryLink = (rawUrl?: string) => {
+        const raw = String(rawUrl || '').trim();
+        if (!raw) return;
+        setPendingStoryLink(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    };
+
+    const dismissStoryLinkPrompt = () => {
+        setPendingStoryLink(null);
+    };
+
+    const confirmStoryLink = async () => {
+        const url = pendingStoryLink;
+        setPendingStoryLink(null);
+        if (!url) return;
+        try {
+            await Linking.openURL(url);
+        } catch (error) {
+            console.error('Failed to open story link:', error);
+        }
     };
 
     const pauseForHold = () => {
@@ -1683,6 +1684,62 @@ export default function StoriesScreen({ route, navigation }: any) {
             )}
 
             <Modal
+                visible={pendingStoryLink != null}
+                transparent
+                animationType="fade"
+                statusBarTranslucent
+                onRequestClose={dismissStoryLinkPrompt}
+            >
+                <View style={styles.linkPromptBackdrop}>
+                    <Pressable
+                        style={StyleSheet.absoluteFill}
+                        onPress={dismissStoryLinkPrompt}
+                        accessibilityRole="button"
+                        accessibilityLabel="Dismiss"
+                    />
+                    <View style={styles.linkPromptCard}>
+                        <Text style={styles.linkPromptTitle}>Open External Link</Text>
+                        <Text style={styles.linkPromptHost} numberOfLines={2}>
+                            {pendingStoryLink
+                                ? storyLinkNewsName(pendingStoryLink) ||
+                                  storyLinkHostname(pendingStoryLink) ||
+                                  'this site'
+                                : ''}
+                        </Text>
+                        {pendingStoryLink &&
+                        storyLinkNewsName(pendingStoryLink) &&
+                        storyLinkHostname(pendingStoryLink) ? (
+                            <Text style={styles.linkPromptDomain} numberOfLines={1}>
+                                {storyLinkHostname(pendingStoryLink)}
+                            </Text>
+                        ) : null}
+                        <Text style={styles.linkPromptBody}>
+                            You are about to leave Gazetteer to view this content in your browser.
+                        </Text>
+                        <View style={styles.linkPromptActions}>
+                            <TouchableOpacity
+                                style={styles.linkPromptCancel}
+                                onPress={dismissStoryLinkPrompt}
+                                accessibilityRole="button"
+                                accessibilityLabel="Cancel"
+                            >
+                                <Text style={styles.linkPromptCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.linkPromptVisit}
+                                onPress={() => void confirmStoryLink()}
+                                accessibilityRole="button"
+                                accessibilityLabel="Visit Site"
+                            >
+                                <Icon name="open-outline" size={ox(16)} color="#041016" />
+                                <Text style={styles.linkPromptVisitText}>Visit Site</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
                 visible={showSharedPostModal}
                 transparent
                 animationType="fade"
@@ -2361,6 +2418,92 @@ const styles = StyleSheet.create({
     sharedModalSubStrong: {
         color: '#F3F4F6',
         fontWeight: '600',
+    },
+    linkPromptBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(2, 6, 23, 0.55)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: ox(28),
+    },
+    linkPromptCard: {
+        width: '100%',
+        maxWidth: ox(340),
+        backgroundColor: 'rgba(30, 41, 59, 0.94)',
+        borderRadius: ox(20),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        paddingHorizontal: ox(20),
+        paddingTop: ox(22),
+        paddingBottom: ox(16),
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 14 },
+        shadowOpacity: 0.45,
+        shadowRadius: 24,
+        elevation: 18,
+    },
+    linkPromptTitle: {
+        color: '#FFFFFF',
+        fontSize: ox(18),
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    linkPromptHost: {
+        marginTop: ox(10),
+        color: UCL_TEXT_ACTIVE,
+        fontSize: ox(16),
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    linkPromptDomain: {
+        marginTop: ox(2),
+        color: 'rgba(255,255,255,0.55)',
+        fontSize: ox(13),
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    linkPromptBody: {
+        marginTop: ox(10),
+        color: 'rgba(255,255,255,0.72)',
+        fontSize: ox(14),
+        lineHeight: ox(20),
+        textAlign: 'center',
+    },
+    linkPromptActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(10),
+        marginTop: ox(18),
+    },
+    linkPromptCancel: {
+        flex: 1,
+        minHeight: ox(46),
+        borderRadius: ox(12),
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
+    },
+    linkPromptCancelText: {
+        color: 'rgba(255,255,255,0.82)',
+        fontSize: ox(15),
+        fontWeight: '600',
+    },
+    linkPromptVisit: {
+        flex: 1.35,
+        minHeight: ox(46),
+        borderRadius: ox(12),
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: ox(6),
+        backgroundColor: UCL_TEXT_ACTIVE,
+    },
+    linkPromptVisitText: {
+        color: '#041016',
+        fontSize: ox(15),
+        fontWeight: '800',
     },
     sharedPostBackdrop: {
         flex: 1,

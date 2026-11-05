@@ -560,8 +560,25 @@ function PillTabs({
     );
     const activeLabel = customLocationLabel || customLocation || (active === userLocal ? 'Nearby' : active);
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
+    const activeFeedKey = customLocation
+        ? null
+        : active === 'Following'
+            ? 'following'
+            : active === userLocal
+                ? 'nearby'
+                : active === userRegional
+                    ? 'regional'
+                    : active === userNational
+                        ? 'national'
+                        : null;
 
     const menuItems = [
+        {
+            key: 'following',
+            label: 'Following',
+            icon: 'person-add-outline',
+            onPress: () => onChange('Following'),
+        },
         {
             key: 'nearby',
             label: 'Nearby',
@@ -585,12 +602,6 @@ function PillTabs({
             label: 'Discover',
             icon: 'compass-outline',
             onPress: onOpenDiscover,
-        },
-        {
-            key: 'following',
-            label: 'Following',
-            icon: 'person-add-outline',
-            onPress: () => onChange('Following'),
         },
     ];
 
@@ -914,7 +925,7 @@ function PillTabs({
                                             <Text style={styles.feedSwitchSheetGazetteer}>Gazetteer says</Text>
                                             <Text style={styles.feedSwitchSheetTitle}>Switch feed</Text>
                                             <Text style={styles.feedSwitchSheetSub}>
-                                                Nearby, city, country, Discover, or Following
+                                                Following, Nearby, city, country, or Discover
                                             </Text>
                                             <View style={styles.feedSwitchSearchWrap}>
                                                 <Icon name="search-outline" size={ox(18)} color={UCL_TEXT_PRIMARY} style={styles.feedSwitchListIcon} />
@@ -1010,19 +1021,42 @@ function PillTabs({
                                                         <Text style={styles.feedSwitchMenuText}>Back to home feed</Text>
                                                     </TouchableOpacity>
                                                 ) : null}
-                                                {menuItems.map((item) => (
+                                                {menuItems.map((item) => {
+                                                    const selected = item.key === activeFeedKey;
+                                                    const rowColor = selected ? '#FFFFFF' : 'rgba(255,255,255,0.6)';
+                                                    return (
                                                     <TouchableOpacity
                                                         key={item.key}
-                                                        style={styles.feedSwitchMenuItem}
+                                                        style={[
+                                                            styles.feedSwitchMenuItem,
+                                                            selected && styles.feedSwitchMenuItemActive,
+                                                        ]}
                                                         onPress={() => {
                                                             item.onPress();
                                                             setMenuOpen(false);
                                                         }}
+                                                        accessibilityRole="button"
+                                                        accessibilityState={{ selected }}
                                                     >
-                                                        <Icon name={item.icon} size={ox(22)} color={UCL_TEXT_PRIMARY} style={styles.feedSwitchListIcon} />
-                                                        <Text style={styles.feedSwitchMenuText}>{item.label}</Text>
+                                                        <Icon name={item.icon} size={ox(22)} color={rowColor} style={styles.feedSwitchListIcon} />
+                                                        <Text
+                                                            style={[
+                                                                styles.feedSwitchMenuText,
+                                                                selected
+                                                                    ? styles.feedSwitchMenuTextActive
+                                                                    : styles.feedSwitchMenuTextMuted,
+                                                            ]}
+                                                        >
+                                                            {item.label}
+                                                        </Text>
+                                                        <View style={styles.feedSwitchMenuCheck}>
+                                                            {selected ? (
+                                                                <Icon name="checkmark-circle" size={ox(22)} color={UCL_TEXT_ACTIVE} />
+                                                            ) : null}
+                                                        </View>
                                                     </TouchableOpacity>
-                                                ))}
+                                                    );
+                                                })}
                                             </ScrollView>
                                         </>
                                     );
@@ -6600,6 +6634,20 @@ feedSwitchPillBorder: {
         color: UCL_TEXT_PRIMARY,
         fontWeight: '600',
     },
+    feedSwitchMenuTextActive: {
+        color: '#FFFFFF',
+        fontWeight: '700',
+    },
+    feedSwitchMenuTextMuted: {
+        color: 'rgba(255,255,255,0.6)',
+        fontWeight: '500',
+    },
+    feedSwitchMenuCheck: {
+        width: ox(22),
+        height: ox(22),
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     feedSwitchSheetScroll: {
         maxHeight: 360,
     },
@@ -6619,9 +6667,14 @@ feedSwitchPillBorder: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(16),
-        paddingHorizontal: ox(20),
+        marginHorizontal: ox(12),
+        paddingHorizontal: ox(12),
         paddingVertical: ox(16),
         minHeight: ox(52),
+        borderRadius: ox(14),
+    },
+    feedSwitchMenuItemActive: {
+        backgroundColor: 'rgba(255,255,255,0.08)',
     },
     errorContainer: {
         padding: ox(16),

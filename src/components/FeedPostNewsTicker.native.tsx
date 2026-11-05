@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 import type { Post } from '../types';
@@ -12,16 +11,35 @@ import {
     type NewsTickerSegmentKind,
 } from '../utils/feedPostNewsTicker';
 
-const TICKER_HEIGHT = 34;
-const ICON_SIZE = 12;
-const ICON_TEXT_GAP = 8;
+const TICKER_HEIGHT = 32;
+const ICON_SIZE = 10;
 
 type Props = {
     post: Post;
     carouselIndex?: number;
 };
 
-function SegmentIcon({ kind }: { kind: NewsTickerSegmentKind }): React.ReactElement | null {
+function segmentKicker(kind: NewsTickerSegmentKind): string {
+    switch (kind) {
+        case 'location':
+            return 'Place';
+        case 'venue':
+            return 'Venue';
+        case 'landmark':
+            return 'Landmark';
+        case 'tagged':
+            return 'Tagged';
+        case 'views':
+            return 'Views';
+        case 'timestamp':
+            return 'Posted';
+        case 'author':
+        default:
+            return 'Author';
+    }
+}
+
+function SegmentIcon({ kind }: { kind: NewsTickerSegmentKind }): React.ReactElement {
     switch (kind) {
         case 'location':
             return <Ionicons name="location-sharp" size={ICON_SIZE} color="#FFFFFF" />;
@@ -37,25 +55,29 @@ function SegmentIcon({ kind }: { kind: NewsTickerSegmentKind }): React.ReactElem
             return <Ionicons name="time-outline" size={ICON_SIZE} color="#FFFFFF" />;
         case 'author':
         default:
-            return null;
+            return <Ionicons name="person-circle-outline" size={ICON_SIZE} color="#FFFFFF" />;
     }
 }
 
 function renderSegments(segments: NewsTickerSegment[], passKey: string): React.ReactNode {
-    return segments.map((segment, idx) => {
-        const icon = <SegmentIcon kind={segment.kind} />;
-        return (
-            <React.Fragment key={`${passKey}-${segment.kind}-${idx}`}>
-                {idx > 0 ? <Text style={styles.gap}>{TICKER_SEGMENT_GAP}</Text> : null}
-                <View style={styles.segment}>
-                    {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
-                    <Text style={styles.tickerText} numberOfLines={1}>
+    return segments.map((segment, idx) => (
+        <React.Fragment key={`${passKey}-${segment.kind}-${idx}`}>
+            {idx > 0 ? <Text style={styles.gap}>{TICKER_SEGMENT_GAP}</Text> : null}
+            <View style={styles.segment}>
+                <View style={styles.iconWell}>
+                    <SegmentIcon kind={segment.kind} />
+                </View>
+                <View style={styles.textCol}>
+                    <Text style={styles.kicker} numberOfLines={1}>
+                        {segmentKicker(segment.kind)}
+                    </Text>
+                    <Text style={styles.title} numberOfLines={1}>
                         {segment.text}
                     </Text>
                 </View>
-            </React.Fragment>
-        );
-    });
+            </View>
+        </React.Fragment>
+    ));
 }
 
 export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
@@ -88,12 +110,6 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
 
     return (
         <View style={styles.scrim}>
-            <LinearGradient
-                colors={['rgba(15, 15, 18, 0.92)', 'rgba(15, 15, 18, 0.72)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={StyleSheet.absoluteFill}
-            />
             <Animated.View
                 style={[
                     styles.animatedTrack,
@@ -122,19 +138,19 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
 
 const styles = StyleSheet.create({
     scrim: {
+        alignSelf: 'stretch',
+        width: '100%',
         height: TICKER_HEIGHT,
-        minHeight: TICKER_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.12)',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
         overflow: 'hidden',
         position: 'relative',
         zIndex: 0,
     },
     animatedTrack: {
         position: 'absolute',
-        left: 0,
+        left: 12,
         flexDirection: 'row',
         flexWrap: 'nowrap',
         alignItems: 'center',
@@ -152,22 +168,43 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         flexWrap: 'nowrap',
         flexShrink: 0,
+        paddingLeft: 6,
+        paddingRight: 8,
     },
-    iconWrap: {
-        marginRight: ICON_TEXT_GAP,
+    iconWell: {
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        marginRight: 6,
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.14)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255, 255, 255, 0.28)',
+        overflow: 'hidden',
     },
-    tickerText: {
+    textCol: {
+        flexShrink: 0,
+        justifyContent: 'center',
+    },
+    kicker: {
+        color: 'rgba(255, 255, 255, 0.72)',
+        fontSize: 7,
+        lineHeight: 8,
+        fontWeight: '700',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+    },
+    title: {
         color: '#FFFFFF',
-        fontSize: 12,
-        fontWeight: '600',
-        letterSpacing: 0.3,
+        fontSize: 10,
+        lineHeight: 12,
+        fontWeight: '700',
         flexShrink: 0,
     },
     gap: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: 10,
         fontWeight: '600',
         letterSpacing: 0.3,
         flexShrink: 0,
