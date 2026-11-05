@@ -121,7 +121,26 @@ function findBestPlaceMatch(
   return null;
 }
 
+/** Native content preferences write this so the feed can hide places without localStorage. */
+let nativeDislikedPlaces: Set<string> | null = null;
+
+export function setNativeDislikedPlaces(places: string[]): void {
+  const disliked = new Set<string>();
+  for (const place of places) {
+    const normalized = norm(String(place || ''));
+    if (normalized) disliked.add(normalized);
+  }
+  nativeDislikedPlaces = disliked;
+}
+
+export function isPlaceDisliked(place: string): boolean {
+  return placeAffinityScore(place, readPlaceFeedbackSets()) <= -6;
+}
+
 function readPlaceFeedbackSets(): PlaceFeedbackSets {
+  if (nativeDislikedPlaces) {
+    return { liked: new Set<string>(), disliked: nativeDislikedPlaces };
+  }
   const liked = new Set<string>();
   const disliked = new Set<string>();
   try {

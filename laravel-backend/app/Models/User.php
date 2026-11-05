@@ -45,6 +45,8 @@ class User extends Authenticatable
         'location_national',
         'is_verified',
         'is_private',
+        'allow_comments',
+        'comment_audience',
         'followers_count',
         'following_count',
         'posts_count',
@@ -65,6 +67,7 @@ class User extends Authenticatable
         'password' => 'hashed',
         'is_verified' => 'boolean',
         'is_private' => 'boolean',
+        'allow_comments' => 'boolean',
         'email_digest_enabled' => 'boolean',
         'followers_count' => 'integer',
         'following_count' => 'integer',
@@ -230,8 +233,8 @@ class User extends Authenticatable
             return true;
         }
 
-        // If profile is private, only followers can view
-        return $this->followers()->where('follower_id', $viewer->id)->exists();
+        // If profile is private, only accepted followers can view
+        return $this->followers()->where('users.id', $viewer->id)->exists();
     }
 
     public function canSendMessage(User $sender)
@@ -246,8 +249,8 @@ class User extends Authenticatable
             return true;
         }
 
-        // If profile is private, only followers can message
-        return $this->followers()->where('follower_id', $sender->id)->exists();
+        // If profile is private, only accepted followers can message
+        return $this->followers()->where('users.id', $sender->id)->exists();
     }
 
     /**

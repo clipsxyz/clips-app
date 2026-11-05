@@ -4,6 +4,7 @@ import {
     View,
     Text,
     TouchableOpacity,
+    Pressable,
     StyleSheet,
     useWindowDimensions,
 } from 'react-native';
@@ -25,6 +26,8 @@ type Props = {
     cancelButtonText?: string;
     showCancelButton?: boolean;
     confirmDestructive?: boolean;
+    /** Centered dark card. Passport settings use this; other screens keep the bottom sheet. */
+    variant?: 'sheet' | 'card';
     onConfirm: () => void;
     onDismiss: () => void;
 };
@@ -43,6 +46,7 @@ export default function GazetteerAlertSheet({
     cancelButtonText = 'Cancel',
     showCancelButton = false,
     confirmDestructive = false,
+    variant = 'sheet',
     onConfirm,
     onDismiss,
 }: Props) {
@@ -58,6 +62,46 @@ export default function GazetteerAlertSheet({
         icon === 'success' ? 'checkmark-circle' : icon === 'info' ? 'information-circle' : 'alert-circle';
 
     if (!visible) return null;
+
+    if (variant === 'card') {
+        const cardIcon = icon === 'success' ? 'checkmark' : icon === 'info' ? 'information' : 'alert';
+        const danger = confirmDestructive || icon === 'alert';
+        return (
+            <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onDismiss}>
+                <View style={styles.cardBackdrop}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
+                    <View style={styles.card}>
+                        {showIcon ? (
+                            <View
+                                style={[
+                                    styles.cardIconWrap,
+                                    { backgroundColor: danger ? 'rgba(229, 57, 53, 0.16)' : 'rgba(244, 114, 182, 0.16)' },
+                                ]}
+                            >
+                                <Icon name={cardIcon} size={22} color={danger ? '#FF8A80' : '#F472B6'} />
+                            </View>
+                        ) : null}
+                        <Text style={styles.cardTitle}>{title}</Text>
+                        {message ? <Text style={styles.cardSubtitle}>{message}</Text> : null}
+                        <Pressable
+                            style={[styles.cardConfirm, confirmDestructive && styles.cardConfirmDanger]}
+                            onPress={onConfirm}
+                            accessibilityRole="button"
+                        >
+                            <Text style={[styles.cardConfirmText, confirmDestructive && styles.cardConfirmDangerText]}>
+                                {confirmButtonText}
+                            </Text>
+                        </Pressable>
+                        {showCancelButton ? (
+                            <Pressable style={styles.cardCancel} onPress={onDismiss} accessibilityRole="button">
+                                <Text style={styles.cardCancelText}>{cancelButtonText}</Text>
+                            </Pressable>
+                        ) : null}
+                    </View>
+                </View>
+            </Modal>
+        );
+    }
 
     return (
         <Modal
@@ -212,5 +256,77 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '600',
         color: '#FFFFFF',
+    },
+    cardBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.75)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+    },
+    card: {
+        width: '100%',
+        maxWidth: 360,
+        borderRadius: 18,
+        backgroundColor: '#161B22',
+        borderWidth: 1,
+        borderColor: '#2A2F3D',
+        paddingHorizontal: 20,
+        paddingTop: 22,
+        paddingBottom: 16,
+        alignItems: 'center',
+    },
+    cardIconWrap: {
+        width: 52,
+        height: 52,
+        borderRadius: 26,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 14,
+    },
+    cardTitle: {
+        color: '#FFFFFF',
+        fontSize: 19,
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    cardSubtitle: {
+        marginTop: 8,
+        color: '#8B949E',
+        fontSize: 14,
+        lineHeight: 20,
+        textAlign: 'center',
+    },
+    cardConfirm: {
+        marginTop: 18,
+        width: '100%',
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
+        paddingVertical: 13,
+        alignItems: 'center',
+    },
+    cardConfirmDanger: {
+        backgroundColor: '#E53935',
+    },
+    cardConfirmText: {
+        color: '#0B0E14',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    cardConfirmDangerText: {
+        color: '#FFFFFF',
+    },
+    cardCancel: {
+        marginTop: 8,
+        width: '100%',
+        borderRadius: 12,
+        backgroundColor: '#21262D',
+        paddingVertical: 13,
+        alignItems: 'center',
+    },
+    cardCancelText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '600',
     },
 });

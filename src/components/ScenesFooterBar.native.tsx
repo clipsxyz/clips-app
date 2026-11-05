@@ -6,6 +6,7 @@ type Props = {
     bottomInset: number;
     isOwnPost: boolean;
     onAddComment: () => void;
+    commentPrompt?: string;
     onDirectMessage: () => void;
     onMore: () => void;
 };
@@ -15,6 +16,7 @@ export default function ScenesFooterBar({
     bottomInset,
     isOwnPost,
     onAddComment,
+    commentPrompt = 'Add a comment…',
     onDirectMessage,
     onMore,
 }: Props) {
@@ -25,7 +27,7 @@ export default function ScenesFooterBar({
                 onPress={onAddComment}
                 accessibilityLabel="Add comment"
             >
-                <Text style={styles.commentPillText}>Add a comment…</Text>
+                <Text style={styles.commentPillText}>{commentPrompt}</Text>
             </Pressable>
             <Pressable
                 style={[styles.iconChip, isOwnPost && styles.iconChipDisabled]}

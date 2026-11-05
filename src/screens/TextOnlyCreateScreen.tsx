@@ -26,7 +26,7 @@ import Avatar from '../components/Avatar.native';
 import VerifiedBadge from '../components/VerifiedBadge.native';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
-import { saveDraft } from '../api/drafts.native';
+import { deleteDraft, saveDraft } from '../api/drafts.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import {
   failedToSaveSheet,
@@ -110,9 +110,21 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
     [selectedTemplateId],
   );
 
+  const draftResumeKey = route.params?.draftResumeKey as string | undefined;
   useEffect(() => {
+    if (!route.params?.fromDraft && !draftResumeKey) return;
     if (route.params?.text != null) setText(String(route.params.text));
-  }, [route.params?.text]);
+    if (route.params?.location != null) setLocationText(String(route.params.location));
+    if (route.params?.venue != null) setVenueText(String(route.params.venue));
+    if (route.params?.landmark != null) setLandmarkText(String(route.params.landmark));
+    if (Array.isArray(route.params?.taggedUsers)) {
+      setTaggedUsers(route.params.taggedUsers.map((handle: string) => String(handle).replace(/^@+/, '')));
+    }
+    if (route.params?.textTemplateId || route.params?.templateId) {
+      setSelectedTemplateId(route.params.textTemplateId || route.params.templateId || null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftResumeKey]);
 
   useEffect(() => {
     const appears = setTimeout(() => setShowTemplateCue(true), 500);
@@ -305,6 +317,12 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
       textThumbLabel: activeTemplate?.name?.charAt(0).toUpperCase() || 'Aa',
     });
     hapticLight();
+    const resumedDraftId = typeof route.params?.draftId === 'string' ? route.params.draftId : '';
+    if (resumedDraftId) {
+      void deleteDraft(resumedDraftId).catch((err) => {
+        console.warn('Could not remove posted draft', err);
+      });
+    }
     finishToFeed();
     startBackgroundFeedUpload(tempId);
     setIsSubmitting(false);

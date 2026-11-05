@@ -251,6 +251,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     });
 
     Route::put('/user/phone', [AuthController::class, 'updateUserPhone']);
+    Route::put('/user/settings', [AuthController::class, 'updateUserSettings']);
 
     // Link preview (composer) routes. `/v1/parse-link` is the legacy path the RN client
     // still calls for Instagram links; both return the same normalized client payload.

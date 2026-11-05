@@ -339,6 +339,8 @@ import {
 import { loadSuggestedPlacesPrefs } from '../utils/suggestedPlacesPrefsNative';
 import {
     findPlaceMatchedPosts,
+    isPlaceDisliked,
+    setNativeDislikedPlaces,
     suggestedPlacesBundleKey,
     type PlaceMatchedPost,
 } from '../utils/suggestedPlaces';
@@ -2113,6 +2115,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [serverPlaceSuggestions, setServerPlaceSuggestions] = useState<PlaceMatchedPost[] | undefined>(
         undefined,
     );
+    const [placeFeedbackRevision, setPlaceFeedbackRevision] = useState(0);
     const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
     const [interestsSaving, setInterestsSaving] = React.useState(false);
     const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
@@ -2270,6 +2273,34 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setBusinessStripEligible(stripEligible);
         });
     }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            let active = true;
+            void (async () => {
+                const [rawPlaces, hidden, liked] = await Promise.all([
+                    AsyncStorage.getItem('clips:suggestedPlacesDislikedPlaces'),
+                    loadHiddenBusinesses(),
+                    loadLikedBusinesses(),
+                ]);
+                if (!active) return;
+                let places: string[] = [];
+                try {
+                    const parsed = rawPlaces ? JSON.parse(rawPlaces) : [];
+                    places = Array.isArray(parsed) ? parsed.map((place) => String(place)) : [];
+                } catch {
+                    places = [];
+                }
+                setNativeDislikedPlaces(places);
+                setHiddenBusinesses(hidden);
+                setLikedBusinesses(liked);
+                setPlaceFeedbackRevision((revision) => revision + 1);
+            })();
+            return () => {
+                active = false;
+            };
+        }, []),
+    );
 
     useFocusEffect(
         useCallback(() => {
@@ -4052,6 +4083,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         return feedItems;
     }, [flatPosts, ads]);
 
+    const visibleServerPlaceSuggestions = React.useMemo(
+        () => serverPlaceSuggestions?.filter((row) => !isPlaceDisliked(row.matchedPlace)),
+        [serverPlaceSuggestions, placeFeedbackRevision],
+    );
+
     const previewSuggestedCards =
         !customLocation &&
         !showFollowingFeed &&
@@ -4068,7 +4104,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 suggestedCardsV2Enabled: true,
                 previewSuggestedCards,
                 suggestedPlacesPrefs,
-                serverPlaceSuggestions,
+                serverPlaceSuggestions: visibleServerPlaceSuggestions,
                 businessStripEligible,
                 businessLastShown,
                 hiddenBusinesses,
@@ -4082,7 +4118,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             customLocation,
             previewSuggestedCards,
             suggestedPlacesPrefs,
-            serverPlaceSuggestions,
+            visibleServerPlaceSuggestions,
             businessStripEligible,
             businessLastShown,
             hiddenBusinesses,
@@ -4259,7 +4295,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 reason: 'home_area' as const,
                 confidence: 'medium' as const,
             }));
-    }, [flatStream, user, suggestedPlacesPrefs.includePosterLocale]);
+    }, [flatStream, user, suggestedPlacesPrefs.includePosterLocale, placeFeedbackRevision]);
 
     const flatForRender = React.useMemo((): FeedListRow[] => {
         const out: FeedListRow[] = [];

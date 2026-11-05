@@ -44,6 +44,38 @@ class UserController extends Controller
     }
 
     /**
+     * Locked payload for a private account the viewer does not follow.
+     */
+    private function privateProfileDenied(User $user, ?User $viewer): ?JsonResponse
+    {
+        if (! $user->is_private) {
+            return null;
+        }
+        if ($viewer instanceof User && $user->canViewProfile($viewer)) {
+            return null;
+        }
+
+        $pending = $viewer instanceof User
+            ? DB::table('user_follows')
+                ->where('follower_id', $viewer->id)
+                ->where('following_id', $user->id)
+                ->where('status', 'pending')
+                ->exists()
+            : false;
+
+        return response()->json([
+            'error' => 'Profile is private',
+            'is_private' => true,
+            'can_view' => false,
+            'requires_follow' => true,
+            'has_pending_request' => $pending,
+            'handle' => $user->handle,
+            'display_name' => $user->display_name,
+            'avatar_url' => $user->avatar_url,
+        ], 403);
+    }
+
+    /**
      * Get user profile + first page of posts.
      * Identifier may be handle (case-insensitive, optional @) or user UUID.
      */
@@ -55,13 +87,8 @@ class UserController extends Controller
         }
 
         $viewer = Auth::user() ?: $this->resolveViewer($request);
-        if ($viewer && !$user->canViewProfile($viewer)) {
-            return response()->json([
-                'error' => 'Profile is private',
-                'is_private' => true,
-                'can_view' => false,
-                'requires_follow' => true,
-            ], 403);
+        if ($denied = $this->privateProfileDenied($user, $viewer instanceof User ? $viewer : null)) {
+            return $denied;
         }
 
         $page = $this->paginateProfilePosts($request, $user, $viewer instanceof User ? $viewer : null);
@@ -133,13 +160,8 @@ class UserController extends Controller
         }
 
         $viewer = Auth::user() ?: $this->resolveViewer($request);
-        if ($viewer instanceof User && !$user->canViewProfile($viewer)) {
-            return response()->json([
-                'error' => 'Profile is private',
-                'is_private' => true,
-                'can_view' => false,
-                'requires_follow' => true,
-            ], 403);
+        if ($denied = $this->privateProfileDenied($user, $viewer instanceof User ? $viewer : null)) {
+            return $denied;
         }
 
         return response()->json($this->paginateProfilePosts(

@@ -321,6 +321,21 @@ class PostController extends Controller
 
         $postData = Post::applyEngagementCounts($postData, $attrs);
 
+        $author = $post->relationLoaded('user') ? $post->user : null;
+        $authorAttrs = $author ? $author->getAttributes() : [];
+        if (array_key_exists('allow_comments', $authorAttrs) || array_key_exists('comment_audience', $authorAttrs)) {
+            $allow = array_key_exists('allow_comments', $authorAttrs) ? (bool) $authorAttrs['allow_comments'] : true;
+            $audience = (string) ($authorAttrs['comment_audience'] ?? 'everyone');
+            if (! in_array($audience, ['everyone', 'followers', 'nobody'], true)) {
+                $audience = 'everyone';
+            }
+            if (! $allow) {
+                $audience = 'nobody';
+            }
+            $postData['allow_comments'] = $allow && $audience !== 'nobody';
+            $postData['comment_audience'] = $audience;
+        }
+
         return $postData;
     }
 
@@ -385,7 +400,7 @@ class PostController extends Controller
         // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
         // Location feeds: only original posts from that location.
         $query = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national', 'taggedUsers:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($filter === 'Following' && $userId) {
@@ -516,7 +531,7 @@ class PostController extends Controller
         $userId = $request->get('userId');
         $hasViewer = ! empty($userId);
 
-        $query = Post::with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national', 'taggedUsers:id,handle,display_name,avatar_url'])
+        $query = Post::with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($hasViewer) {
@@ -557,7 +572,7 @@ class PostController extends Controller
         }
 
         $post = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national'])
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience'])
             ->withCount(Post::engagementWithCounts())
             ->where('public_share_token', $token)
             ->first();
@@ -1207,7 +1222,7 @@ class PostController extends Controller
             }
         }
 
-        $post->load(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national', 'taggedUsers:id,handle,display_name,avatar_url']);
+        $post->load(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url']);
         $post->loadCount(Post::engagementWithCounts());
         Post::bumpFeedCache();
         $postData = self::toApiArray($post, $user instanceof User ? $user : null);

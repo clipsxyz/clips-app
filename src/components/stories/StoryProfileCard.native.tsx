@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 type Props = {
     isFollowing: boolean;
@@ -20,6 +21,8 @@ export default function StoryProfileCard({
     onToggleFollow,
     onClose,
 }: Props) {
+    const followLabel = isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow';
+
     return (
         <View style={styles.wrap}>
             <TouchableOpacity style={styles.row} onPress={onViewProfile}>
@@ -30,9 +33,12 @@ export default function StoryProfileCard({
                     {followLoading ? (
                         <ActivityIndicator color="#67e8f9" size="small" />
                     ) : (
-                        <Text style={styles.followText}>
-                            {isFollowing ? 'Unfollow' : isRequested ? 'Requested' : 'Follow'}
-                        </Text>
+                        <View style={styles.followRow}>
+                            {isFollowing ? (
+                                <Icon name="checkmark" size={16} color="#67e8f9" />
+                            ) : null}
+                            <Text style={styles.followText}>{followLabel}</Text>
+                        </View>
                     )}
                 </TouchableOpacity>
             ) : null}
@@ -57,6 +63,11 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     rowText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+    followRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
     followText: { color: '#67e8f9', fontSize: 14, fontWeight: '600' },
     closeText: { color: 'rgba(255,255,255,0.75)', fontSize: 14 },
 });

@@ -5,9 +5,10 @@ const GLOBAL_VIDEO_MUTED_KEY = 'clips:globalVideoMuted';
 type Listener = (muted: boolean) => void;
 const listeners = new Set<Listener>();
 
-/** In-process mute. Always starts muted; never rehydrate an unmuted value from disk. */
+/** In-process mute. Starts muted until the saved playback setting is read. */
 let sessionMuted = true;
-let sessionBootstrapped = false;
+let userChoseMute = false;
+let hydratePromise: Promise<void> | null = null;
 
 function persistMuted(muted: boolean): void {
     void AsyncStorage.setItem(GLOBAL_VIDEO_MUTED_KEY, muted ? '1' : '0').catch(() => {
@@ -30,28 +31,43 @@ function notify(muted: boolean): void {
 }
 
 /**
- * Cold start / Metro refresh: force muted before any feed, story, or notification video.
- * Ignores a previously saved unmuted value. No-ops after the first call this process.
+ * First read this process uses the saved playback setting. Missing value stays muted.
+ * A toggle made before the read finishes is kept.
  */
+function hydrateMutedFromStorage(): Promise<void> {
+    if (!hydratePromise) {
+        hydratePromise = (async () => {
+            try {
+                const raw = await AsyncStorage.getItem(GLOBAL_VIDEO_MUTED_KEY);
+                if (userChoseMute) return;
+                if (raw === '0') sessionMuted = false;
+                else if (raw === '1') sessionMuted = true;
+            } catch {
+                /* keep the muted default */
+            }
+        })();
+    }
+    return hydratePromise;
+}
+
+/** Start this process with the saved mute setting. Missing value stays muted. */
 export function resetGlobalVideoMutedForNewSession(): void {
-    if (sessionBootstrapped) return;
-    sessionBootstrapped = true;
-    sessionMuted = true;
-    persistMuted(true);
-    notify(true);
+    void hydrateMutedFromStorage().then(() => {
+        notify(sessionMuted);
+    });
 }
 
 export function getGlobalVideoMutedNativeSync(): boolean {
-    resetGlobalVideoMutedForNewSession();
     return sessionMuted;
 }
 
 export async function getGlobalVideoMutedNative(): Promise<boolean> {
-    return getGlobalVideoMutedNativeSync();
+    await hydrateMutedFromStorage();
+    return sessionMuted;
 }
 
 export async function setGlobalVideoMutedNative(muted: boolean): Promise<void> {
-    sessionBootstrapped = true;
+    userChoseMute = true;
     sessionMuted = muted;
     persistMuted(muted);
     notify(muted);

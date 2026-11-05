@@ -5,9 +5,13 @@ export type CommentModerationResult = {
   matched: string[];
 };
 
+export type CommentAudience = 'everyone' | 'followers' | 'nobody';
+
 export type CommentModerationPreferences = {
   strictMode: boolean;
   customHiddenWords: string[];
+  allowComments: boolean;
+  commentAudience: CommentAudience;
 };
 
 const PREFS_KEY = 'clips_comment_moderation_prefs_v1';
@@ -15,7 +19,15 @@ const PREFS_KEY = 'clips_comment_moderation_prefs_v1';
 const DEFAULT_PREFS: CommentModerationPreferences = {
   strictMode: false,
   customHiddenWords: [],
+  allowComments: true,
+  commentAudience: 'everyone',
 };
+
+function normalizeAudience(value: unknown, allowComments: boolean): CommentAudience {
+  if (!allowComments) return 'nobody';
+  if (value === 'followers' || value === 'nobody' || value === 'everyone') return value;
+  return 'everyone';
+}
 
 let inMemoryPrefs: CommentModerationPreferences = { ...DEFAULT_PREFS };
 
@@ -38,6 +50,7 @@ export function getCommentModerationPreferences(): CommentModerationPreferences 
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
     const parsed = JSON.parse(raw);
+    const allowComments = parsed?.allowComments === undefined ? true : Boolean(parsed.allowComments);
     return {
       strictMode: Boolean(parsed?.strictMode),
       customHiddenWords: Array.isArray(parsed?.customHiddenWords)
@@ -45,6 +58,8 @@ export function getCommentModerationPreferences(): CommentModerationPreferences 
             .map((w: unknown) => String(w || '').trim().toLowerCase())
             .filter((w: string) => w.length > 0)
         : [],
+      allowComments,
+      commentAudience: normalizeAudience(parsed?.commentAudience, allowComments),
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -52,6 +67,7 @@ export function getCommentModerationPreferences(): CommentModerationPreferences 
 }
 
 export function setCommentModerationPreferences(next: CommentModerationPreferences): void {
+  const allowComments = next?.allowComments === undefined ? true : Boolean(next.allowComments);
   const normalized: CommentModerationPreferences = {
     strictMode: Boolean(next?.strictMode),
     customHiddenWords: Array.from(
@@ -61,6 +77,8 @@ export function setCommentModerationPreferences(next: CommentModerationPreferenc
           .filter((w) => w.length > 0)
       )
     ),
+    allowComments,
+    commentAudience: normalizeAudience(next?.commentAudience, allowComments),
   };
   inMemoryPrefs = { ...normalized };
   if (typeof localStorage !== 'undefined') {
@@ -93,5 +111,59 @@ export function evaluateCommentModeration(
   }
 
   return { level: 'none', matched: [] };
+}
+
+export function applyRemoteCommentControls(user: {
+  allow_comments?: boolean;
+  comment_audience?: string;
+} | null | undefined): void {
+  if (!user || (user.allow_comments === undefined && user.comment_audience === undefined)) return;
+  const allow = user.allow_comments !== false && user.comment_audience !== 'nobody';
+  const audience = normalizeAudience(user.comment_audience, allow);
+  const current = getCommentModerationPreferences();
+  setCommentModerationPreferences({
+    ...current,
+    allowComments: allow,
+    commentAudience: audience,
+  });
+}
+
+export function resolveCommentComposerAccess(
+  post: {
+    userHandle?: string;
+    user_id?: string;
+    userId?: string;
+    isFollowing?: boolean;
+    allowComments?: boolean;
+    allow_comments?: boolean;
+    commentAudience?: string;
+    comment_audience?: string;
+  } | null | undefined,
+  viewer?: { id?: string; handle?: string } | null,
+): { canComment: boolean; message: string } {
+  if (!post) return { canComment: true, message: '' };
+
+  const viewerHandle = String(viewer?.handle || '').replace(/^@/, '').trim().toLowerCase();
+  const authorHandle = String(post.userHandle || '').replace(/^@/, '').trim().toLowerCase();
+  const isAuthor = Boolean(
+    (viewerHandle && authorHandle && viewerHandle === authorHandle) ||
+      (viewer?.id && (post.user_id || post.userId) && viewer.id === (post.user_id || post.userId)),
+  );
+
+  let allow = post.allowComments ?? post.allow_comments;
+  let audience = String(post.commentAudience || post.comment_audience || 'everyone');
+  if (isAuthor) {
+    const prefs = getCommentModerationPreferences();
+    allow = prefs.allowComments;
+    audience = prefs.commentAudience;
+  }
+
+  if (allow === false || audience === 'nobody') {
+    return { canComment: false, message: 'Comments are turned off' };
+  }
+  if (audience === 'followers' && !isAuthor && !post.isFollowing) {
+    return { canComment: false, message: 'Only followers can comment' };
+  }
+  return { canComment: true, message: '' };
 }
 

@@ -42,6 +42,7 @@ import {
     canViewProfile,
     hasPendingFollowRequest,
     canSendMessage,
+    setProfilePrivacy,
 } from '../api/privacy';
 import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts } from '../api/mockFollowGraph';
 import { isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
@@ -234,7 +235,12 @@ const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
                       setHasPendingRequest(hasPending);
                   }
 
-                if (!canViewProfileState && profilePrivate && decodedHandle !== user.handle) {
+                if (
+                    !isLaravelApiEnabled() &&
+                    !canViewProfileState &&
+                    profilePrivate &&
+                    decodedHandle !== user.handle
+                ) {
                     setLoading(false);
                     return;
                 }
@@ -264,6 +270,11 @@ if (isLaravelApiEnabled()) {
                       if (typeof profileData?.has_pending_request === 'boolean') {
                           setHasPendingRequest(profileData.has_pending_request);
                       }
+                      if (typeof profileData?.is_private === 'boolean') {
+                          setProfileIsPrivate(profileData.is_private);
+                          setProfilePrivacy(decodedHandle, profileData.is_private);
+                          setCanView(profileData.can_view !== false);
+                      }
                       userPosts = mapLaravelProfilePosts(profileData?.posts);
                 } catch (error: any) {
                     console.error('[ViewProfile] profile fetch error', {
@@ -274,8 +285,23 @@ if (isLaravelApiEnabled()) {
                         mockMode: isMockMode(),
                     });
                     if (error?.status === 403 && !cancelled()) {
+                        const body = error?.response;
                         setCanView(false);
                         setProfileIsPrivate(true);
+                        setProfilePrivacy(decodedHandle, true);
+                        if (typeof body?.has_pending_request === 'boolean') {
+                            setHasPendingRequest(body.has_pending_request);
+                        }
+                        if (body?.handle || body?.display_name) {
+                            setProfileUser((prev: any) => ({
+                                ...(prev || {}),
+                                handle: body.handle || decodedHandle,
+                                name: body.display_name || prev?.name || decodedHandle.split('@')[0],
+                                avatarUrl: body.avatar_url || prev?.avatarUrl,
+                            }));
+                        }
+                        setLoading(false);
+                        return;
                     }
                 }
             } else {
@@ -1160,7 +1186,8 @@ const result = await followOrRequest({
                                 if (!user?.handle || !handle) return;
                                 const decoded = decodeURIComponent(handle);
                                 const followedUsers = await getFollowedUsers(user.id);
-                                if (!canSendMessage(user.handle, decoded, followedUsers)) {
+                                const follows = isFollowing ? [...followedUsers, decoded] : followedUsers;
+                                if (!canSendMessage(user.handle, decoded, follows)) {
                                     Alert.alert('Cannot Message', 'You must follow this user to send a message.');
                                     return;
                                 }

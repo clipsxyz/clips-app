@@ -9,6 +9,7 @@ import {
     throwIfHttpError,
 } from './httpClient';
 import { isMockMode } from './apiMode';
+import { applyRemoteCommentControls } from '../utils/commentModeration';
 
 function throwMockConnectionRefused(): never {
     // Mock mode / allowlist miss is not a downed server. Never poison the session
@@ -48,6 +49,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/health',
     '/feed-content-preferences',
     '/user/phone',
+    '/user/settings',
 ]);
 
 /** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
@@ -353,7 +355,9 @@ export async function loginUser(email: string, password: string): Promise<{
 }
 
 export async function getCurrentUser() {
-    return apiRequest('/auth/me');
+    const me = await apiRequest('/auth/me');
+    applyRemoteCommentControls(me);
+    return me;
 }
 
 export type FacebookMatchedFriend = {
@@ -670,6 +674,24 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
             typeof apiUser.following_count === 'number' ? (apiUser.following_count as number) : undefined,
         facebook_id: apiUser.facebook_id as string | undefined,
         accountType,
+    };
+}
+
+export async function updateUserCommentSettings(settings: {
+    allow_comments: boolean;
+    comment_audience: 'everyone' | 'followers' | 'nobody';
+}): Promise<{ allow_comments: boolean; comment_audience: 'everyone' | 'followers' | 'nobody' }> {
+    const data = await apiRequest('/user/settings', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+    });
+    const audience = data?.comment_audience;
+    return {
+        allow_comments: data?.allow_comments !== false,
+        comment_audience:
+            audience === 'followers' || audience === 'nobody' || audience === 'everyone'
+                ? audience
+                : 'everyone',
     };
 }
 

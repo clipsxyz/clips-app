@@ -133,11 +133,10 @@ export function isProfilePrivate(handle: string): boolean {
   return settings[key] === true || settings[handle] === true;
 }
 
-/** For profile UI: use API when known; otherwise privacy storage (instant after toggle / hydrate). OR keeps optimistic private until API catches up. */
+/** Account privacy from the server when we have it. Local storage is only the fallback. */
 export function getEffectiveProfilePrivate(handle: string | undefined | null, apiIsPrivate?: boolean): boolean {
-  const local = handle ? isProfilePrivate(handle) : false;
-  if (typeof apiIsPrivate === 'boolean') return apiIsPrivate || local;
-  return local;
+  if (typeof apiIsPrivate === 'boolean') return apiIsPrivate;
+  return handle ? isProfilePrivate(handle) : false;
 }
 
 // Set profile privacy

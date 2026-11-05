@@ -28,6 +28,7 @@ import type { Post } from '../types';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { getScenesMediaSlides } from '../utils/scenesMediaNative';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
+import { resolveCommentComposerAccess } from '../utils/commentModeration';
 import { buildPostMetadataItems } from '../utils/feedPostMeta';
 import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
@@ -857,6 +858,10 @@ export default function ScenesViewer({
         !!viewerHandle &&
         viewerHandle.replace(/^@/, '').trim().toLowerCase() ===
             activePost.userHandle.replace(/^@/, '').trim().toLowerCase();
+    const commentAccess = resolveCommentComposerAccess(activePost, {
+        id: viewerUserId,
+        handle: viewerHandle,
+    });
     const canReclip = Boolean(viewerHandle && !isOwn && !activePost.userReclipped);
     const authorAvatarSrc = isOwn
         ? viewerAvatarUrl || getAvatarForHandle(profileHandle) || getAvatarForHandle(viewerHandle)
@@ -1127,9 +1132,11 @@ export default function ScenesViewer({
                 ) : null}
                 <Pressable onPress={openComments} style={styles.commentsLink}>
                     <Text style={styles.commentsLinkText}>
-                        {activePost.stats.comments > 0
-                            ? `View all ${activePost.stats.comments} comments`
-                            : 'Add a comment…'}
+                        {!commentAccess.canComment
+                            ? commentAccess.message
+                            : activePost.stats.comments > 0
+                              ? `View all ${activePost.stats.comments} comments`
+                              : 'Add a comment…'}
                     </Text>
                 </Pressable>
             </LinearGradient>
@@ -1140,6 +1147,7 @@ export default function ScenesViewer({
                     bottomInset={insets.bottom}
                     isOwnPost={isOwn}
                     onAddComment={openComments}
+                    commentPrompt={commentAccess.canComment ? 'Add a comment…' : commentAccess.message}
                     onDirectMessage={() => void handleDirectMessage()}
                     onMore={() => setOverflowVisible(true)}
                 />

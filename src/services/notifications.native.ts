@@ -182,8 +182,9 @@ export function isNotificationTypeEnabled(
   switch (channel) {
     case 'dm':
     case 'sticker':
-    case 'reply':
       return !!prefs.directMessages;
+    case 'reply':
+      return !!prefs.replies;
     case 'group_chat':
       return !!prefs.groupChats;
     case 'like':

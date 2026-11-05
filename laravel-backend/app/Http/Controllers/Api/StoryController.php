@@ -83,8 +83,9 @@ class StoryController extends Controller
             ->limit($limit)
             ->get();
 
-        $items = $stories->map(function ($story) use ($hasViewer) {
-            return $this->presentStory($story, $hasViewer);
+        $followingIds = $this->viewerFollowingIdSet($viewer instanceof User ? $viewer : null, $userId);
+        $items = $stories->map(function ($story) use ($hasViewer, $followingIds) {
+            return $this->presentStory($story, $hasViewer, false, $followingIds);
         })->values();
 
         $lastStory = $stories->last();
@@ -132,8 +133,9 @@ class StoryController extends Controller
         // Newest stories first so groupBy preserves newest-author-first order.
         $stories = $query->orderBy('created_at', 'desc')->orderBy('id', 'desc')->get();
 
+        $followingIds = $this->viewerFollowingIdSet($viewer instanceof User ? $viewer : null, $userId);
         // Group by user
-        $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($hasViewer) {
+        $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($hasViewer, $followingIds) {
             $user = $userStories->first()->user;
             // Newest first within each user (viewer opens on latest slide).
             $ordered = $userStories->sortByDesc('created_at')->values();
@@ -143,9 +145,10 @@ class StoryController extends Controller
                 'user_handle' => $user?->handle,
                 'user_name' => $user?->display_name,
                 'avatar_url' => $user?->avatar_url,
+                'is_following' => isset($followingIds[(string) $userGroupId]),
                 'latest_created_at' => $latestAt ? Carbon::parse($latestAt)->toISOString() : null,
-                'stories' => $ordered->map(function ($story) use ($hasViewer) {
-                    return $this->presentStory($story, $hasViewer);
+                'stories' => $ordered->map(function ($story) use ($hasViewer, $followingIds) {
+                    return $this->presentStory($story, $hasViewer, false, $followingIds);
                 })->values(),
             ];
         });
@@ -220,8 +223,11 @@ class StoryController extends Controller
 
         $stories = $query->get();
 
-        $transformedStories = $stories->map(function ($story) use ($hasViewer, $isOwner) {
-            return $this->presentStory($story, $hasViewer, $isOwner);
+        $followingIds = $isOwner
+            ? []
+            : ($follows ? [(string) $user->id => true] : []);
+        $transformedStories = $stories->map(function ($story) use ($hasViewer, $isOwner, $followingIds) {
+            return $this->presentStory($story, $hasViewer, $isOwner, $followingIds);
         });
 
         return response()->json($transformedStories);
@@ -653,7 +659,25 @@ class StoryController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function presentStory(Story $story, bool $hasViewer, bool $includeViewers = false): array
+    /**
+     * @return array<string, true>
+     */
+    private function viewerFollowingIdSet(?User $viewer, mixed $userIdParam): array
+    {
+        $viewerId = $viewer instanceof User ? (string) $viewer->id : (string) ($userIdParam ?? '');
+        if ($viewerId === '') {
+            return [];
+        }
+
+        $ids = app(StoryService::class)->acceptedFollowingIds($viewerId);
+
+        return array_fill_keys($ids, true);
+    }
+
+    /**
+     * @param  array<string, true>  $followingIds
+     */
+    private function presentStory(Story $story, bool $hasViewer, bool $includeViewers = false, array $followingIds = []): array
     {
         $this->ensureStoryPublicMedia($story);
 
@@ -664,6 +688,8 @@ class StoryController extends Controller
         if (empty($storyData['user_handle']) && $story->relationLoaded('user')) {
             $storyData['user_handle'] = $story->user?->handle;
         }
+        $authorId = (string) $story->user_id;
+        $storyData['is_following'] = $authorId !== '' && isset($followingIds[$authorId]);
 
         if ($hasViewer) {
             $attrs = $story->getAttributes();

@@ -15,7 +15,7 @@ import * as ImagePicker from 'react-native-image-picker';
 import Video, { type VideoRef } from 'react-native-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
-import { saveDraft } from '../api/drafts.native';
+import { deleteDraft, saveDraft } from '../api/drafts.native';
 import { getKnownUserHandles } from '../api/users';
 import GalleryPreviewComposerPanel, {
     type GalleryPickerTab,
@@ -131,13 +131,21 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     const [carouselActiveIndex, setCarouselActiveIndex] = useState(0);
     const [cardTab, setCardTab] = useState<GalleryPickerTab>('caption');
     const [caption, setCaption] = useState(passedCaption);
-    const [location, setLocation] = useState('');
-    const [venue, setVenue] = useState('');
-    const [landmark, setLandmark] = useState('');
-    const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
+    const [location, setLocation] = useState(String(route.params?.draftLocation || ''));
+    const [venue, setVenue] = useState(String(route.params?.draftVenue || ''));
+    const [landmark, setLandmark] = useState(String(route.params?.draftLandmark || ''));
+    const [taggedUsers, setTaggedUsers] = useState<string[]>(
+        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers : [],
+    );
     const [showTagUserModal, setShowTagUserModal] = useState(false);
-    const [imageFilterName, setImageFilterName] = useState<InstantFilterName>('None');
-    const [stickers, setStickers] = useState<StickerOverlay[]>([]);
+    const [imageFilterName, setImageFilterName] = useState<InstantFilterName>(
+        route.params?.draftFilterActive && route.params.draftFilterActive !== 'None'
+            ? route.params.draftFilterActive
+            : 'None',
+    );
+    const [stickers, setStickers] = useState<StickerOverlay[]>(
+        Array.isArray(route.params?.draftStickers) ? route.params.draftStickers : [],
+    );
     const [showStickerPicker, setShowStickerPicker] = useState(false);
     const [showTextStickerModal, setShowTextStickerModal] = useState(false);
     const [selectedStickerOverlay, setSelectedStickerOverlay] = useState<string | null>(null);
@@ -173,6 +181,26 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             .filter((h) => h.toLowerCase().includes(q))
             .slice(0, 6);
     }, [mentionHandles, mentionQuery]);
+
+    const draftResumeKey = route.params?.draftResumeKey as string | undefined;
+    const resumedDraftId = typeof route.params?.draftId === 'string' ? route.params.draftId : '';
+    useEffect(() => {
+        if (!draftResumeKey) return;
+        setCarouselItems(initialItems);
+        setCarouselActiveIndex(0);
+        setCaption(String(route.params?.draftCaption || ''));
+        setLocation(String(route.params?.draftLocation || ''));
+        setVenue(String(route.params?.draftVenue || ''));
+        setLandmark(String(route.params?.draftLandmark || ''));
+        setTaggedUsers(
+            Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers : [],
+        );
+        setStickers(Array.isArray(route.params?.draftStickers) ? route.params.draftStickers : []);
+        const filter = route.params?.draftFilterActive as InstantFilterName | undefined;
+        setImageFilterName(filter && filter !== 'None' ? filter : 'None');
+        setCardTab(initialItems.length > 1 ? 'carousel' : 'caption');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draftResumeKey]);
 
     useEffect(() => {
         if (previewType !== 'video' || !previewUri) return;
@@ -433,6 +461,11 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         });
         hapticLight();
         setIsUploading(false);
+        if (resumedDraftId) {
+            void deleteDraft(resumedDraftId).catch((err) => {
+                console.warn('Could not remove posted draft', err);
+            });
+        }
         resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
         startBackgroundFeedUpload(tempId);
     };

@@ -314,7 +314,9 @@ function App(): React.JSX.Element {
   }, []);
 
   React.useEffect(() => {
-    resetGlobalVideoMutedForNewSession();
+    if (typeof resetGlobalVideoMutedForNewSession === 'function') {
+      resetGlobalVideoMutedForNewSession();
+    }
     void hydrateAuthTokenFromStorage();
   }, []);
 

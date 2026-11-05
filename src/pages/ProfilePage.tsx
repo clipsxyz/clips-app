@@ -3343,7 +3343,7 @@ export default function ProfilePage() {
                     <h3 className="text-lg font-semibold text-gray-900">Comment Filters</h3>
                     <button
                       onClick={() => {
-                        const resetPrefs = { strictMode: false, customHiddenWords: [] };
+                        const resetPrefs = { ...commentModerationPrefs, strictMode: false, customHiddenWords: [] };
                         setCommentModerationPrefs(resetPrefs);
                         setCommentModerationPreferences(resetPrefs);
                         setCommentWordDraft('');

@@ -642,6 +642,45 @@ class AuthController extends Controller
     }
 
     /**
+     * Save who can comment on this account's posts.
+     */
+    public function updateUserSettings(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        if (! Schema::hasColumn('users', 'allow_comments') || ! Schema::hasColumn('users', 'comment_audience')) {
+            return response()->json(['error' => 'Comment settings are not available yet.'], 503);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'allow_comments' => 'required|boolean',
+            'comment_audience' => 'required|string|in:everyone,followers,nobody',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $allow = $request->boolean('allow_comments');
+        $audience = (string) $request->input('comment_audience');
+        if (! $allow || $audience === 'nobody') {
+            $allow = false;
+            $audience = 'nobody';
+        }
+
+        $user->allow_comments = $allow;
+        $user->comment_audience = $audience;
+        $user->save();
+
+        return response()->json([
+            'allow_comments' => (bool) $user->allow_comments,
+            'comment_audience' => (string) $user->comment_audience,
+        ]);
+    }
+
+    /**
      * Store a phone number that Firebase has already updated on the signed-in user.
      * The Sanctum bearer identifies the account. The Firebase ID token must carry the same number.
      */

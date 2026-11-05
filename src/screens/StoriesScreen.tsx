@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+
+function storyHandlesMatch(a?: string | null, b?: string | null): boolean {
+    const left = String(a || '').replace(/^@/, '').trim().toLowerCase();
+    const right = String(b || '').replace(/^@/, '').trim().toLowerCase();
+    return left.length > 0 && left === right;
+}
 import {
     View,
     Text,
@@ -82,9 +88,10 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost } from '../api/posts';
+import { getFollowedUsers, getPostById, getState, getFollowState, hasExplicitFollowState, setFollowState, getAccountTypeForHandle, toggleLike, reclipPost } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { followOrRequest } from '../utils/followOrRequest';
+import { emitFollowStatusChanged, useFollowState } from '../hooks/useFollowState';
 import { hasPendingFollowRequest } from '../api/privacy';
 import { getCollectionsForPost } from '../api/collections';
 import type { Post, Story, StoryGroup } from '../types';
@@ -311,10 +318,34 @@ export default function StoriesScreen({ route, navigation }: any) {
     const currentStory = currentGroup?.stories[currentStoryIndex];
     const isViewingOwnStory = Boolean(
         user?.id &&
-            currentStory &&
             currentGroup &&
-            (currentStory.userId === user.id || currentGroup.userHandle === user.handle),
+            (String(currentGroup.userId || currentStory?.userId || '') === String(user.id) ||
+                storyHandlesMatch(currentGroup.userHandle, user.handle)),
     );
+    const payloadFollowing =
+        !isViewingOwnStory &&
+        (currentGroup?.isFollowing === true ||
+            currentGroup?.stories?.some((story) => story.isFollowing === true) === true);
+    const localFollows = user?.id ? getState(user.id).follows || {} : {};
+    const explicitLocalFollow = hasExplicitFollowState(localFollows, currentGroup?.userHandle);
+    const localFollowing = getFollowState(localFollows, currentGroup?.userHandle);
+    const pendingFollowRequest = Boolean(
+        !isViewingOwnStory &&
+            user?.handle &&
+            currentGroup?.userHandle &&
+            !localFollowing &&
+            hasPendingFollowRequest(user.handle, currentGroup.userHandle),
+    );
+    const liveFollow = useFollowState({
+        userId: currentGroup?.userId,
+        handle: currentGroup?.userHandle,
+        isFollowing: isViewingOwnStory
+            ? false
+            : explicitLocalFollow
+              ? localFollowing
+              : payloadFollowing || localFollowing,
+        hasPendingRequest: pendingFollowRequest,
+    });
 
     useEffect(() => {
         if (!viewingStories || !currentStory?.sharedFromPost || !user?.id) {
@@ -354,28 +385,26 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [viewingStories, currentStory?.sharedFromPost, currentStory?.id, user?.id]);
 
     useEffect(() => {
-        if (!viewingStories || !currentGroup?.userHandle || !user?.id) {
+        if (!viewingStories || !currentGroup?.userHandle || !user?.id || isViewingOwnStory) {
             setIsFollowingStoryUser(false);
             setStoryFollowRequested(false);
             return;
         }
-        if (currentGroup.userHandle === user.handle) {
-            setIsFollowingStoryUser(false);
-            setStoryFollowRequested(false);
-            return;
+        if (!explicitLocalFollow && payloadFollowing) {
+            setFollowState(user.id, currentGroup.userHandle, true);
         }
-        if (user?.id) {
-            const cached = getFollowState(getState(user.id).follows || {}, currentGroup.userHandle);
-            setIsFollowingStoryUser(cached);
-            setStoryFollowRequested(
-                Boolean(
-                    user.handle &&
-                        !cached &&
-                        hasPendingFollowRequest(user.handle, currentGroup.userHandle),
-                ),
-            );
-        }
-    }, [viewingStories, currentGroup?.userHandle, user?.id, user?.handle]);
+        setIsFollowingStoryUser(liveFollow.isFollowing);
+        setStoryFollowRequested(liveFollow.hasPendingRequest);
+    }, [
+        viewingStories,
+        currentGroup?.userHandle,
+        user?.id,
+        isViewingOwnStory,
+        explicitLocalFollow,
+        payloadFollowing,
+        liveFollow.isFollowing,
+        liveFollow.hasPendingRequest,
+    ]);
 
     useEffect(() => {
         pausedRef.current = paused;
@@ -879,16 +908,26 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [isMuted]);
 
     const handleStoryFollowQuickToggle = async () => {
-        if (!currentGroup?.userHandle || !user?.id || !user?.handle || isFollowLoading) return;
+        if (!currentGroup?.userHandle || !user?.id || !user?.handle || isFollowLoading || isViewingOwnStory) return;
         const handle = currentGroup.userHandle;
-        const wasRequested = storyFollowRequested;
-        const nextFollowing = isFollowingStoryUser ? false : wasRequested ? false : true;
+        const wasFollowing = liveFollow.isFollowing;
+        const wasRequested = liveFollow.hasPendingRequest;
+        const nextFollowing = wasFollowing ? false : wasRequested ? false : true;
         setIsFollowLoading(true);
-        setShowStoryProfileCard(false);
+        setIsFollowingStoryUser(nextFollowing);
+        setStoryFollowRequested(false);
+        setFollowState(String(user.id), handle, nextFollowing);
+        emitFollowStatusChanged({
+            userId: currentGroup.userId,
+            handle,
+            isFollowing: nextFollowing,
+            hasPendingRequest: false,
+        });
         try {
             const result = await followOrRequest({
                 userId: String(user.id),
                 targetHandle: handle,
+                targetUserId: currentGroup.userId,
                 viewerHandle: user.handle,
                 nextFollowing,
             });
@@ -901,9 +940,15 @@ export default function StoriesScreen({ route, navigation }: any) {
                 );
             }
         } catch {
-            // Keep prior local follow on hard failure
-            setIsFollowingStoryUser(isFollowingStoryUser);
-            setStoryFollowRequested(storyFollowRequested);
+            setFollowState(String(user.id), handle, wasFollowing);
+            setIsFollowingStoryUser(wasFollowing);
+            setStoryFollowRequested(wasRequested);
+            emitFollowStatusChanged({
+                userId: currentGroup.userId,
+                handle,
+                isFollowing: wasFollowing,
+                hasPendingRequest: wasRequested,
+            });
         } finally {
             setIsFollowLoading(false);
         }
@@ -1473,8 +1518,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                         }
                         showFollowBadge={
                             !!currentGroup.userHandle &&
-                            !!user?.handle &&
-                            currentGroup.userHandle !== user.handle &&
+                            !isViewingOwnStory &&
                             !isFollowingStoryUser &&
                             !storyFollowRequested
                         }
@@ -1491,13 +1535,13 @@ export default function StoriesScreen({ route, navigation }: any) {
                         onClose={closeStories}
                     />
                     </View>
-                    {showStoryProfileCard && currentGroup.userHandle !== user?.handle ? (
+                    {showStoryProfileCard ? (
                         <View style={styles.profileCardHost} pointerEvents="box-none">
                             <StoryProfileCard
                                 isFollowing={isFollowingStoryUser}
                                 isRequested={storyFollowRequested}
                                 followLoading={isFollowLoading}
-                                isOwnStory={false}
+                                isOwnStory={isViewingOwnStory}
                                 onViewProfile={() => {
                                     setShowStoryProfileCard(false);
                                     closeStories();

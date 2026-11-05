@@ -1,24 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { BottomSheetScrollView, BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
+import { apiRequest, updateUserCommentSettings } from '../api/client';
 import {
     approveHiddenComment,
     deleteHiddenComment,
     fetchHiddenCommentsForOwner,
     type HiddenCommentReviewItem,
 } from '../api/posts';
+import GazetteerBottomSheetModal from './GazetteerBottomSheetModal.native';
 import {
+    applyRemoteCommentControls,
     getCommentModerationPreferences,
     setCommentModerationPreferences,
+    type CommentAudience,
     type CommentModerationPreferences,
 } from '../utils/commentModeration';
 
@@ -84,9 +81,28 @@ export default function CommentSafetyModal({ visible, onClose, ownerHandle, onOp
         return hiddenCommentQueue;
     }, [hiddenCommentQueue, hiddenQueueFilter]);
 
+    const persistPrefs = useCallback((next: CommentModerationPreferences) => {
+        setCommentModerationPrefs(next);
+        setCommentModerationPreferences(next);
+    }, []);
+
     useEffect(() => {
         if (!visible) return;
         setCommentModerationPrefs(getCommentModerationPreferences());
+        let cancelled = false;
+        void (async () => {
+            try {
+                const me = await apiRequest('/auth/me');
+                if (cancelled || !me || typeof me !== 'object') return;
+                applyRemoteCommentControls(me);
+                if (!cancelled) setCommentModerationPrefs(getCommentModerationPreferences());
+            } catch {
+                // Keep the settings already stored on this phone.
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
     }, [visible]);
 
     useEffect(() => {
@@ -109,10 +125,31 @@ export default function CommentSafetyModal({ visible, onClose, ownerHandle, onOp
         };
     }, [visible, ownerHandle]);
 
-    const persistPrefs = useCallback((next: CommentModerationPreferences) => {
-        setCommentModerationPrefs(next);
-        setCommentModerationPreferences(next);
-    }, []);
+    const saveCommentControls = useCallback(
+        async (allowComments: boolean, commentAudience: CommentAudience) => {
+            const audience: CommentAudience = allowComments && commentAudience !== 'nobody' ? commentAudience : 'nobody';
+            const next: CommentModerationPreferences = {
+                ...commentModerationPrefs,
+                allowComments: audience !== 'nobody',
+                commentAudience: audience,
+            };
+            persistPrefs(next);
+            try {
+                await updateUserCommentSettings({
+                    allow_comments: next.allowComments,
+                    comment_audience: next.commentAudience,
+                });
+            } catch (error) {
+                console.warn('Comment settings were not saved on the server', error);
+                showAlert({
+                    title: 'Saved on this phone',
+                    message: 'Comment controls are on for your posts here. The server did not update.',
+                    icon: 'alert',
+                });
+            }
+        },
+        [commentModerationPrefs, persistPrefs, showAlert],
+    );
 
     const addHiddenWord = useCallback(() => {
         const incoming = String(commentWordDraft || '').trim().toLowerCase();
@@ -126,7 +163,11 @@ export default function CommentSafetyModal({ visible, onClose, ownerHandle, onOp
     }, [commentModerationPrefs, commentWordDraft, persistPrefs]);
 
     const handleReset = useCallback(() => {
-        const resetPrefs = { strictMode: false, customHiddenWords: [] };
+        const resetPrefs = {
+            ...commentModerationPrefs,
+            strictMode: false,
+            customHiddenWords: [] as string[],
+        };
         persistPrefs(resetPrefs);
         setCommentWordDraft('');
         showAlert({
@@ -134,7 +175,7 @@ export default function CommentSafetyModal({ visible, onClose, ownerHandle, onOp
             message: 'Strict mode and hidden words were reset.',
             icon: 'success',
         });
-    }, [persistPrefs, showAlert]);
+    }, [commentModerationPrefs, persistPrefs, showAlert]);
 
     const handleApproveAll = useCallback(() => {
         if (filteredHiddenQueue.length === 0) return;
@@ -183,22 +224,80 @@ export default function CommentSafetyModal({ visible, onClose, ownerHandle, onOp
         [showAlert]
     );
 
-    return (
-        <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-            <View style={styles.overlay}>
-                <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close Comment Safety" />
-                <View style={styles.sheet}>
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Comment Safety</Text>
-                        <TouchableOpacity onPress={onClose} style={styles.closeButton} accessibilityLabel="Close">
-                            <Icon name="close" size={24} color="#4B5563" />
-                        </TouchableOpacity>
-                    </View>
+    const audiences: Array<{ id: CommentAudience; label: string }> = [
+        { id: 'everyone', label: 'Everyone' },
+        { id: 'followers', label: 'Followers only' },
+        { id: 'nobody', label: 'Nobody (Turn off comments)' },
+    ];
 
-                    <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
-                        <View style={styles.section}>
-                            <View style={styles.sectionHeader}>
-                                <Text style={styles.sectionTitle}>Comment Filters</Text>
+    return (
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            snapPoints={['88%']}
+            horizontalInset={0}
+            backgroundStyle={styles.sheetBackground}
+            handleIndicatorStyle={styles.handle}
+        >
+            <BottomSheetScrollView contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
+                <LinearGradient
+                    colors={['rgba(244,114,182,0)', 'rgba(244,114,182,0.7)', 'rgba(244,114,182,0)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.accentLine}
+                />
+                <View style={styles.header}>
+                    <Text style={styles.title}>Comment Safety</Text>
+                    <Pressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close comment safety">
+                        <Icon name="close" size={22} color="#FFFFFF" />
+                    </Pressable>
+                </View>
+
+                <View style={styles.card}>
+                    <Text style={styles.sectionTitle}>Comment Controls</Text>
+                    <ModerationToggle
+                        label="Allow comments on posts"
+                        description="Turn this off to stop new comments on your posts"
+                        enabled={commentModerationPrefs.allowComments}
+                        onChange={(enabled) => {
+                            void saveCommentControls(
+                                enabled,
+                                enabled
+                                    ? commentModerationPrefs.commentAudience === 'nobody'
+                                        ? 'everyone'
+                                        : commentModerationPrefs.commentAudience
+                                    : 'nobody',
+                            );
+                        }}
+                    />
+                    <View style={styles.audienceList}>
+                        {audiences.map((option) => {
+                            const selected = commentModerationPrefs.commentAudience === option.id;
+                            return (
+                                <Pressable
+                                    key={option.id}
+                                    style={[styles.audienceRow, selected && styles.audienceRowSelected]}
+                                    onPress={() => {
+                                        void saveCommentControls(option.id !== 'nobody', option.id);
+                                    }}
+                                    accessibilityRole="radio"
+                                    accessibilityState={{ selected }}
+                                >
+                                    <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+                                        {selected ? <View style={styles.radioInner} /> : null}
+                                    </View>
+                                    <Text style={[styles.audienceLabel, selected && styles.audienceLabelSelected]}>
+                                        {option.label}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+                </View>
+
+                <View style={styles.card}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Comment Filters</Text>
                                 <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
                                     <Text style={styles.resetButtonText}>Reset</Text>
                                 </TouchableOpacity>
@@ -215,7 +314,7 @@ export default function CommentSafetyModal({ visible, onClose, ownerHandle, onOp
 
                             <Text style={styles.inputLabel}>Hidden words and phrases</Text>
                             <View style={styles.wordInputRow}>
-                                <TextInput
+                                <BottomSheetTextInput
                                     style={styles.wordInput}
                                     value={commentWordDraft}
                                     onChangeText={setCommentWordDraft}
@@ -329,40 +428,40 @@ export default function CommentSafetyModal({ visible, onClose, ownerHandle, onOp
                                 </View>
                             )}
                         </View>
-                    </ScrollView>
-                </View>
-            </View>
-        </Modal>
+            </BottomSheetScrollView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'center',
-        padding: 16,
+    sheetBackground: {
+        backgroundColor: '#0B0E14',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        borderColor: 'rgba(244,114,182,0.28)',
     },
-    sheet: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        maxHeight: '80%',
-        overflow: 'hidden',
+    handle: {
+        backgroundColor: 'rgba(255,255,255,0.32)',
+        width: 42,
+    },
+    accentLine: {
+        height: 2,
+        marginHorizontal: 20,
+        marginBottom: 8,
+        borderRadius: 2,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 24,
-        paddingVertical: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#E5E7EB',
-        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 4,
+        paddingBottom: 8,
     },
     title: {
-        fontSize: 20,
+        fontSize: 22,
         fontWeight: '700',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     closeButton: {
         padding: 8,
@@ -372,10 +471,16 @@ const styles = StyleSheet.create({
         maxHeight: '100%',
     },
     bodyContent: {
-        padding: 24,
-        gap: 24,
+        paddingHorizontal: 16,
+        paddingBottom: 36,
+        gap: 14,
     },
-    section: {
+    card: {
+        backgroundColor: '#161B22',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
+        padding: 14,
         gap: 12,
     },
     sectionHeader: {
@@ -384,12 +489,14 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
     },
     sectionTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#111827',
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#8B949E',
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
     },
     resetButton: {
-        backgroundColor: '#374151',
+        backgroundColor: '#21262D',
         borderRadius: 8,
         paddingHorizontal: 12,
         paddingVertical: 6,
@@ -412,18 +519,18 @@ const styles = StyleSheet.create({
     toggleLabel: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     toggleDescription: {
         marginTop: 2,
         fontSize: 12,
-        color: '#6B7280',
+        color: '#8B949E',
     },
     toggleTrack: {
         width: 44,
         height: 24,
         borderRadius: 12,
-        backgroundColor: '#E5E7EB',
+        backgroundColor: '#30363D',
         justifyContent: 'center',
         paddingHorizontal: 2,
     },
@@ -442,7 +549,7 @@ const styles = StyleSheet.create({
     inputLabel: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: '#8B949E',
     },
     wordInputRow: {
         flexDirection: 'row',
@@ -454,23 +561,23 @@ const styles = StyleSheet.create({
         minWidth: 0,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#2A2F3D',
+        backgroundColor: '#0B0E14',
         paddingHorizontal: 12,
         paddingVertical: 10,
-        color: '#111827',
+        color: '#FFFFFF',
         fontSize: 14,
     },
     addWordButton: {
-        backgroundColor: '#111827',
+        backgroundColor: '#FFFFFF',
         borderRadius: 8,
         paddingHorizontal: 12,
         paddingVertical: 10,
     },
     addWordButtonText: {
-        color: '#FFFFFF',
+        color: '#0B0E14',
         fontSize: 14,
-        fontWeight: '600',
+        fontWeight: '700',
     },
     wordChipWrap: {
         flexDirection: 'row',
@@ -480,24 +587,24 @@ const styles = StyleSheet.create({
     wordChip: {
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#F9FAFB',
+        borderColor: '#2A2F3D',
+        backgroundColor: '#0B0E14',
         paddingHorizontal: 10,
         paddingVertical: 4,
     },
     wordChipText: {
         fontSize: 12,
-        color: '#374151',
+        color: '#FFFFFF',
     },
     emptyWordsText: {
         fontSize: 12,
-        color: '#6B7280',
+        color: '#8B949E',
     },
     reviewBox: {
-        borderRadius: 12,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#FDE68A',
-        backgroundColor: 'rgba(255, 251, 235, 0.4)',
+        borderColor: 'rgba(255,255,255,0.08)',
+        backgroundColor: '#161B22',
         padding: 12,
         gap: 8,
     },
@@ -511,7 +618,7 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     reviewHeaderActions: {
         flexDirection: 'row',
@@ -520,20 +627,20 @@ const styles = StyleSheet.create({
     },
     queueCountText: {
         fontSize: 12,
-        color: '#92400E',
+        color: '#8B949E',
     },
     approveAllButton: {
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#2A2F3D',
+        backgroundColor: '#21262D',
         paddingHorizontal: 8,
         paddingVertical: 4,
     },
     approveAllButtonText: {
         fontSize: 11,
         fontWeight: '600',
-        color: '#374151',
+        color: '#FFFFFF',
     },
     filterPillsRow: {
         flexDirection: 'row',
@@ -542,26 +649,26 @@ const styles = StyleSheet.create({
     filterPill: {
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#2A2F3D',
+        backgroundColor: '#0B0E14',
         paddingHorizontal: 10,
         paddingVertical: 4,
     },
     filterPillActive: {
-        backgroundColor: '#111827',
-        borderColor: '#111827',
+        backgroundColor: '#FFFFFF',
+        borderColor: '#FFFFFF',
     },
     filterPillText: {
         fontSize: 11,
         fontWeight: '600',
-        color: '#374151',
+        color: '#8B949E',
     },
     filterPillTextActive: {
-        color: '#FFFFFF',
+        color: '#0B0E14',
     },
     queueEmptyText: {
         fontSize: 12,
-        color: '#4B5563',
+        color: '#8B949E',
     },
     queueList: {
         maxHeight: 192,
@@ -570,8 +677,8 @@ const styles = StyleSheet.create({
     queueItem: {
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#FEF3C7',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#2A2F3D',
+        backgroundColor: '#0B0E14',
         padding: 10,
         gap: 8,
     },
@@ -581,16 +688,16 @@ const styles = StyleSheet.create({
     queueItemAuthor: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     queueItemText: {
         fontSize: 12,
-        color: '#374151',
+        color: '#C9D1D9',
     },
     queueItemReason: {
         marginTop: 2,
         fontSize: 11,
-        color: '#92400E',
+        color: '#F472B6',
     },
     queueActions: {
         flexDirection: 'row',
@@ -600,21 +707,65 @@ const styles = StyleSheet.create({
     queueActionBtn: {
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#2A2F3D',
+        backgroundColor: '#21262D',
         paddingHorizontal: 8,
         paddingVertical: 4,
     },
     queueActionBtnDanger: {
-        borderColor: '#FECACA',
-        backgroundColor: '#FEF2F2',
+        borderColor: 'rgba(229,57,53,0.45)',
+        backgroundColor: 'rgba(229,57,53,0.16)',
     },
     queueActionText: {
         fontSize: 11,
         fontWeight: '600',
-        color: '#374151',
+        color: '#FFFFFF',
     },
     queueActionTextDanger: {
-        color: '#B91C1C',
+        color: '#FF8A80',
+    },
+    audienceList: {
+        gap: 8,
+    },
+    audienceRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#2A2F3D',
+        backgroundColor: '#0B0E14',
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+    },
+    audienceRowSelected: {
+        borderColor: 'rgba(244,114,182,0.7)',
+    },
+    radioOuter: {
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        borderWidth: 2,
+        borderColor: '#8B949E',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    radioOuterSelected: {
+        borderColor: '#F472B6',
+    },
+    radioInner: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#F472B6',
+    },
+    audienceLabel: {
+        flex: 1,
+        color: '#C9D1D9',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    audienceLabelSelected: {
+        color: '#FFFFFF',
     },
 });

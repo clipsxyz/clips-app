@@ -41,5 +41,6 @@ describe('isMigratedApiRequestPath stories', () => {
         expect(isMigratedApiRequestPath('/feed-content-preferences/block')).toBe(true);
         expect(isMigratedApiRequestPath('/notifications/abc-123')).toBe(true);
         expect(isMigratedApiRequestPath('/user/phone')).toBe(true);
+        expect(isMigratedApiRequestPath('/user/settings')).toBe(true);
     });
 });

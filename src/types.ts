@@ -91,6 +91,10 @@ export type Post = {
   publicShareToken?: string;
   user_id?: string; // Backend field
   userHandle: string;
+  /** Author setting: whether new comments are accepted on this post. */
+  allowComments?: boolean;
+  /** Author setting: everyone, followers, or nobody. */
+  commentAudience?: 'everyone' | 'followers' | 'nobody';
   /** Author profile picture from API (`avatar_url` / nested `user.avatar_url`). */
   avatarUrl?: string;
   locationLabel: string;
@@ -288,6 +292,8 @@ export type Story = {
   /** Still frame for Stories 24 rail / hold screens (shared video posts). */
   videoPosterUrl?: string;
   audience?: 'public' | 'close_friends' | 'only_me';
+  /** Viewer already follows this story's author. */
+  isFollowing?: boolean;
 };
 
 export type StoryGroup = {
@@ -296,6 +302,8 @@ export type StoryGroup = {
   avatarUrl?: string;
   name: string;
   stories: Story[];
+  /** Viewer already follows this author. */
+  isFollowing?: boolean;
 };
 
 export type AdAccount = {

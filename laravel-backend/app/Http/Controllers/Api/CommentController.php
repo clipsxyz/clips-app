@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -173,6 +174,14 @@ class CommentController extends Controller
         }
 
         $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        $post = Post::findOrFail($postId);
+        $blocked = $this->commentBlockReason($post, $user);
+        if ($blocked !== null) {
+            return response()->json(['error' => $blocked], 403);
+        }
 
         $comment = DB::transaction(function () use ($request, $user, $postId) {
             $comment = Comment::create([
@@ -222,7 +231,17 @@ class CommentController extends Controller
         }
 
         $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
         $parentComment = Comment::findOrFail($parentId);
+        $post = Post::find($parentComment->post_id);
+        if ($post instanceof Post) {
+            $blocked = $this->commentBlockReason($post, $user);
+            if ($blocked !== null) {
+                return response()->json(['error' => $blocked], 403);
+            }
+        }
 
         $reply = DB::transaction(function () use ($request, $user, $parentComment) {
             $reply = Comment::create([
@@ -348,5 +367,31 @@ class CommentController extends Controller
     private function encodeCommentCursor(string $createdAt, string $id): string
     {
         return rtrim(strtr(base64_encode($createdAt . '|' . $id), '+/', '-_'), '=');
+    }
+
+    private function commentBlockReason(Post $post, User $viewer): ?string
+    {
+        if (! Schema::hasColumn('users', 'allow_comments')) {
+            return null;
+        }
+
+        $author = $post->relationLoaded('user') ? $post->user : User::find($post->user_id);
+        if (! $author instanceof User) {
+            return null;
+        }
+
+        $allow = (bool) ($author->allow_comments ?? true);
+        $audience = (string) ($author->comment_audience ?: 'everyone');
+        if (! $allow || $audience === 'nobody') {
+            return 'Comments are turned off for this post.';
+        }
+        if ($audience === 'followers' && $author->id !== $viewer->id) {
+            $follows = $author->followers()->where('users.id', $viewer->id)->exists();
+            if (! $follows) {
+                return 'Only followers can comment on this post.';
+            }
+        }
+
+        return null;
     }
 }

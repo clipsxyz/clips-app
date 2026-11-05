@@ -58,11 +58,11 @@ import {
     unsavePost,
 } from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
-import { buildFilterInfo, type InstantFilterName } from '../utils/instantFiltersNative';
+import DraftsSheet from '../components/DraftsSheet.native';
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, syncFirebasePhoneVerification, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones, fetchFollowers, fetchFollowing, removeFollower } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, syncFirebasePhoneVerification, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones, fetchFollowers, fetchFollowing, removeFollower } from '../api/client';
 import {
     firebasePhoneErrorMessage,
     startFirebasePhoneSignIn,
@@ -97,8 +97,10 @@ import {
 } from '../services/notifications';
 import { getRuntimeEnv, isLaravelApiEnabled } from '../config/runtimeEnv';
 import { persistAuthToken } from '../utils/authTokenBridge';
-import { getApiBaseUrl } from '../api/apiBaseUrl';
+import { getApiBaseUrl, resolvePublicMediaUrl } from '../api/apiBaseUrl';
+import { db } from '../utils/db';
 import { ox } from '../constants/nativeOpticalScale';
+import { formatProfileStatCount } from '../utils/effectivePlacesTraveled';
 
 type ProfileAlertConfig = {
     title: string;
@@ -107,6 +109,7 @@ type ProfileAlertConfig = {
     confirmButtonText?: string;
     cancelButtonText?: string;
     showCancelButton?: boolean;
+    confirmDestructive?: boolean;
     onConfirm?: () => void;
     onDismiss?: () => void;
 };
@@ -116,6 +119,25 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const insets = useSafeAreaInsets();
     const { user, logout, login } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
+    const [headerAvatarFailed, setHeaderAvatarFailed] = useState(false);
+    useEffect(() => {
+        setHeaderAvatarFailed(false);
+    }, [user?.avatarUrl]);
+    const combinedStats = useMemo(() => {
+        return posts.reduce(
+            (totals, post) => ({
+                views: totals.views + (post.stats?.views ?? 0),
+                likes: totals.likes + (post.stats?.likes ?? 0),
+            }),
+            { views: 0, likes: 0 },
+        );
+    }, [posts]);
+    const headerAvatarUri = useMemo(() => {
+        const fromPost = posts.find((post) => typeof post.avatarUrl === 'string' && post.avatarUrl.trim())?.avatarUrl;
+        const raw = String(user?.avatarUrl || fromPost || '').trim();
+        if (!raw) return '';
+        return resolvePublicMediaUrl(raw) || raw;
+    }, [user?.avatarUrl, posts]);
     const [collections, setCollections] = useState<Collection[]>([]);
     const [drafts, setDrafts] = useState<Draft[]>([]);
     const [loading, setLoading] = useState(true);
@@ -176,7 +198,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [otpInput, setOtpInput] = useState('');
     const [pendingPhoneNumber, setPendingPhoneNumber] = useState('');
     const phoneConfirmationRef = useRef<FirebasePhoneConfirmation | null>(null);
-    const [inviteSyncing, setInviteSyncing] = useState(false);
     const [inviteMatchedFriends, setInviteMatchedFriends] = useState<FacebookMatchedFriend[]>([]);
     const [contactsSyncing, setContactsSyncing] = useState(false);
     const [showTabsHint, setShowTabsHint] = useState(true);
@@ -379,6 +400,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     const counts = mapLaravelUserToAppFields(me as Record<string, unknown>);
                     if (typeof counts.followers_count === 'number') followers = counts.followers_count;
                     if (typeof counts.following_count === 'number') following = counts.following_count;
+                    const apiAvatar = typeof counts.avatarUrl === 'string' ? counts.avatarUrl.trim() : '';
+                    if (apiAvatar && apiAvatar !== user.avatarUrl) {
+                        login({ ...user, avatarUrl: apiAvatar });
+                    } else if (!user.avatarUrl && !apiAvatar && user.id) {
+                        const stored = await db.get<string>(`clips_app_avatar_${user.id}`);
+                        const storedAvatar = typeof stored === 'string' ? stored.trim() : '';
+                        if (storedAvatar) login({ ...user, avatarUrl: storedAvatar });
+                    }
                 } catch (err) {
                     console.error('Error loading audience counts:', err);
                     if (followingHandles.length > 0) following = followingHandles.length;
@@ -644,13 +673,93 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    const pendingDraftRef = useRef<Draft | null>(null);
+
+    const openResumedDraft = (draft: Draft) => {
+        if (draft.isTextOnly) {
+            navigation.navigate('TextOnlyCreate', {
+                text: draft.textBody || draft.caption || '',
+                fromDraft: true,
+                draftId: draft.id,
+                draftResumeKey: `${draft.id}-${Date.now()}`,
+                location: draft.location || '',
+                venue: draft.venue || '',
+                landmark: draft.landmark || '',
+                taggedUsers: draft.taggedUsers || [],
+                textTemplateId: draft.textTemplateId || undefined,
+            });
+            return;
+        }
+
+        const savedItems = (draft.mediaItems || []).filter((item) => (item.url || '').trim());
+        const slides =
+            savedItems.length > 0
+                ? savedItems.map((item, index) => {
+                      const type = item.type === 'video' ? 'video' : 'image';
+                      return {
+                          uri: item.url,
+                          type,
+                          durationSec: type === 'video' ? item.duration : undefined,
+                          videoCoverTime:
+                              type === 'video' ? (index === 0 ? draft.videoCoverTime ?? 0 : 0) : undefined,
+                      };
+                  })
+                : (draft.videoUrl || '').trim()
+                  ? [
+                        {
+                            uri: draft.videoUrl,
+                            type:
+                                draft.mediaType === 'image'
+                                    ? ('image' as const)
+                                    : ('video' as const),
+                            durationSec:
+                                draft.mediaType === 'image' ? undefined : draft.videoDuration || undefined,
+                            videoCoverTime:
+                                draft.mediaType === 'image' ? undefined : draft.videoCoverTime ?? 0,
+                        },
+                    ]
+                  : [];
+        const first = slides[0];
+
+        navigation.navigate('GalleryPreview', {
+            fromDraft: true,
+            draftId: draft.id,
+            draftResumeKey: `${draft.id}-${Date.now()}`,
+            carouselItems: slides,
+            mediaUrl: first?.uri,
+            mediaType: first?.type,
+            videoCoverTime: first?.type === 'video' ? first.videoCoverTime ?? 0 : undefined,
+            videoDuration: first?.type === 'video' ? first.durationSec : undefined,
+            draftCaption: draft.caption || draft.textBody || '',
+            draftLocation: draft.location || '',
+            draftVenue: draft.venue || '',
+            draftLandmark: draft.landmark || '',
+            draftTaggedUsers: draft.taggedUsers || [],
+            draftStickers: draft.stickers || [],
+            draftFilterActive: draft.filterBaked ? undefined : draft.filterActive,
+        });
+    };
+
+    const resumeDraft = (draft: Draft) => {
+        pendingDraftRef.current = draft;
+        setDraftsOpen(false);
+    };
+
+    const handleDraftsDismiss = () => {
+        setDraftsOpen(false);
+        const draft = pendingDraftRef.current;
+        pendingDraftRef.current = null;
+        if (draft) openResumedDraft(draft);
+    };
+
     const handleLogout = () => {
         showProfileAlert({
-            title: 'Logout',
-            message: 'Are you sure you want to logout?',
+            title: 'Log out?',
+            message: 'You will need to sign in again to use Gazetteer on this phone.',
             icon: 'alert',
             showCancelButton: true,
-            confirmButtonText: 'Logout',
+            confirmDestructive: true,
+            confirmButtonText: 'Log out',
             cancelButtonText: 'Cancel',
             onConfirm: () => {
                 setProfileAlert(null);
@@ -660,35 +769,45 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         });
     };
 
-    const applyPrivacyState = (newPrivacyState: boolean) => {
+    const applyPrivacyState = async (newPrivacyState: boolean) => {
         if (!user) return;
-
+        const previous = isPrivate;
         const updatedUser = { ...user, is_private: newPrivacyState };
         setIsPrivate(newPrivacyState);
         login(updatedUser as any);
 
         try {
-            if (user.handle) {
-                setProfilePrivacy(user.handle, newPrivacyState);
-            }
+            if (user.handle) setProfilePrivacy(user.handle, newPrivacyState);
         } catch (error) {
             console.warn('Failed to save privacy locally:', error);
         }
 
-        setProfileAlert({
-            title: newPrivacyState ? 'Profile Set to Private' : 'Profile Set to Public',
+        if (isLaravelApiEnabled()) {
+            try {
+                await updateAuthProfile({ is_private: newPrivacyState });
+            } catch (syncError) {
+                console.warn('Failed to sync privacy setting to backend:', syncError);
+                setIsPrivate(previous);
+                login({ ...user, is_private: previous } as any);
+                if (user.handle) setProfilePrivacy(user.handle, previous);
+                showProfileAlert({
+                    title: 'Could not update privacy',
+                    message: 'Your account stayed the way it was. Try again.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
+        }
+
+        showProfileAlert({
+            title: newPrivacyState ? 'Profile set to private' : 'Profile set to public',
             message: newPrivacyState
-                ? 'Your profile is now private. Only approved followers can view your profile and send you messages.'
-                : 'Your profile is now public. Anyone can view your profile and send you messages.',
+                ? 'Only approved followers can view your profile and send you messages.'
+                : 'Anyone can view your profile and send you messages.',
             icon: 'success',
             confirmButtonText: 'Done',
         });
-
-        if (isLaravelApiEnabled()) {
-            void updateAuthProfile({ is_private: newPrivacyState } as any).catch((syncError) => {
-                console.warn('Failed to sync privacy setting to backend, keeping local state:', syncError);
-            });
-        }
     };
 
     const handleTogglePrivacy = () => {
@@ -698,22 +817,23 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
         if (!newPrivacyState) {
             setProfileAlert({
-                title: 'Set Profile to Public?',
-                message: 'Your posts and stories will still be public on locations news feed.',
+                title: 'Set profile to public?',
+                message: 'Your posts and stories will still be public on the locations news feed.',
+                icon: 'alert',
                 showCancelButton: true,
-                confirmButtonText: 'Set to Public',
+                confirmButtonText: 'Set to public',
                 cancelButtonText: 'Cancel',
                 onConfirm: () => {
-                    applyPrivacyState(false);
-                    setIsTogglingPrivacy(false);
+                    setProfileAlert(null);
+                    setIsTogglingPrivacy(true);
+                    void applyPrivacyState(false).finally(() => setIsTogglingPrivacy(false));
                 },
             });
             return;
         }
 
         setIsTogglingPrivacy(true);
-        applyPrivacyState(true);
-        setIsTogglingPrivacy(false);
+        void applyPrivacyState(true).finally(() => setIsTogglingPrivacy(false));
     };
 
     const handleSendSecurityCode = async () => {
@@ -791,50 +911,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             });
         } finally {
             setSecurityBusy(false);
-        }
-    };
-
-    const handleSyncFacebookFriends = async () => {
-        if (inviteSyncing) return;
-        setInviteSyncing(true);
-        try {
-            const fb = await import('react-native-fbsdk-next');
-            const result = await fb.LoginManager.logInWithPermissions(['public_profile', 'user_friends']);
-            if (result.isCancelled) {
-                setInviteSyncing(false);
-                return;
-            }
-
-            const tokenData = await fb.AccessToken.getCurrentAccessToken();
-            const accessToken = tokenData?.accessToken?.toString();
-            if (!accessToken) {
-                showProfileAlert({
-                    title: 'Facebook login failed',
-                    message: 'No access token returned.',
-                    icon: 'alert',
-                });
-                setInviteSyncing(false);
-                return;
-            }
-
-            await linkFacebookAccount(accessToken);
-            const matches = await fetchFacebookFriendsMatches(accessToken);
-            setInviteMatchedFriends(matches.matched || []);
-            showProfileAlert({
-                title: 'Facebook synced',
-                message: matches.matched_count
-                    ? `Found ${matches.matched_count} friend${matches.matched_count === 1 ? '' : 's'}.`
-                    : (matches.message || 'No matched Facebook friends yet.'),
-                icon: 'success',
-            });
-        } catch (error: any) {
-            showProfileAlert({
-                title: 'Sync failed',
-                message: error?.message || 'Could not sync Facebook friends right now.',
-                icon: 'alert',
-            });
-        } finally {
-            setInviteSyncing(false);
         }
     };
 
@@ -1022,7 +1098,23 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 style={styles.passportCanvas}
             >
             <View style={styles.header}>
-                <View style={styles.headerSideSlot} />
+                <TouchableOpacity
+                    onPress={() => setShowProfilePictureModal(true)}
+                    accessibilityLabel="Profile photo"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={styles.headerAvatarBtn}
+                >
+                    {headerAvatarUri && !headerAvatarFailed ? (
+                        <Image
+                            source={{ uri: headerAvatarUri }}
+                            style={styles.headerAvatar}
+                            resizeMode="cover"
+                            onError={() => setHeaderAvatarFailed(true)}
+                        />
+                    ) : (
+                        <Icon name="person" size={ox(20)} color="#FFFFFF" />
+                    )}
+                </TouchableOpacity>
                 <TouchableOpacity
                     onPress={() => {
                         setOpenPassportCardRequest('name');
@@ -1214,8 +1306,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
                 <View style={styles.statsContainer}>
                     <View style={styles.statItemGlass}>
-                        <Text style={styles.statNumber}>{posts.length}</Text>
+                        <Text style={styles.statNumber}>{formatProfileStatCount(posts.length)}</Text>
                         <Text style={styles.statLabel}>Posts</Text>
+                    </View>
+                    <View style={styles.statItemGlass}>
+                        <Text style={styles.statNumber}>{formatProfileStatCount(combinedStats.views)}</Text>
+                        <Text style={styles.statLabel}>Views</Text>
+                    </View>
+                    <View style={styles.statItemGlass}>
+                        <Text style={styles.statNumber}>{formatProfileStatCount(combinedStats.likes)}</Text>
+                        <Text style={styles.statLabel}>Likes</Text>
                     </View>
                     <TouchableOpacity
                         style={styles.statItemGlass}
@@ -1445,17 +1545,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         </View>
                         <TouchableOpacity
                             style={styles.inviteOption}
-                            onPress={handleSyncFacebookFriends}
-                            disabled={inviteSyncing}
-                        >
-                            <View style={styles.inviteOptionRow}>
-                                <Icon name="logo-facebook" size={ox(16)} color="#60A5FA" />
-                                <Text style={styles.inviteOptionTitle}>{inviteSyncing ? 'Syncing Facebook...' : 'Find Facebook Friends'}</Text>
-                            </View>
-                            <Text style={styles.inviteOptionBody}>Sync friends who connected with your app.</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.inviteOption}
                             onPress={handleShareInviteToWhatsApp}
                         >
                             <View style={styles.inviteOptionRow}>
@@ -1494,7 +1583,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         </TouchableOpacity>
                         {inviteMatchedFriends.length > 0 && (
                             <View style={styles.inviteMatchesWrap}>
-                                <Text style={styles.inviteMatchesLabel}>Facebook matches ({inviteMatchedFriends.length})</Text>
+                                <Text style={styles.inviteMatchesLabel}>Matches ({inviteMatchedFriends.length})</Text>
                                 {inviteMatchedFriends.map((friend) => (
                                     <View key={friend.id} style={styles.inviteMatchRow}>
                                         <View style={{ flex: 1 }}>
@@ -1550,94 +1639,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </Modal>
 
-            {/* Drafts Modal */}
-            <Modal
+            <DraftsSheet
                 visible={draftsOpen}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setDraftsOpen(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Drafts</Text>
-                            <TouchableOpacity onPress={() => setDraftsOpen(false)}>
-                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
-                        <ScrollView style={styles.modalBody}>
-                            {drafts.length > 0 ? (
-                                drafts.map((draft) => (
-                                    <View key={draft.id} style={styles.draftItem}>
-                                        {(draft.videoPosterUrl || draft.videoUrl) && !draft.isTextOnly ? (
-                                            <Image
-                                                source={{ uri: draft.videoPosterUrl || draft.videoUrl }}
-                                                style={styles.draftThumb}
-                                            />
-                                        ) : null}
-                                        <TouchableOpacity
-                                            style={styles.draftInfo}
-                                            onPress={() => {
-                                                setDraftsOpen(false);
-                                                if (draft.isTextOnly) {
-                                                    navigation.navigate('TextOnlyCreate', {
-                                                        text: draft.textBody || draft.caption || '',
-                                                        fromDraft: true,
-                                                        location: draft.location || '',
-                                                        venue: draft.venue || '',
-                                                        landmark: draft.landmark || '',
-                                                        taggedUsers: draft.taggedUsers || [],
-                                                        textTemplateId: draft.textTemplateId || undefined,
-                                                    });
-                                                    return;
-                                                }
-                                                const resumeFilter =
-                                                    !draft.filterBaked &&
-                                                    draft.filterActive &&
-                                                    draft.filterActive !== 'None'
-                                                        ? buildFilterInfo(draft.filterActive as InstantFilterName)
-                                                        : undefined;
-                                                navigation.navigate('CreateComposer', {
-                                                    mediaUrl: draft.videoUrl || undefined,
-                                                    mediaType: draft.mediaType || (draft.videoUrl ? 'video' : undefined),
-                                                    draftCaption: draft.caption || '',
-                                                    draftTextBody: draft.textBody || '',
-                                                    draftLocation: draft.location || '',
-                                                    draftVenue: draft.venue || '',
-                                                    draftLandmark: draft.landmark || '',
-                                                    draftTaggedUsers: draft.taggedUsers || [],
-                                                    videoDuration: draft.videoDuration ?? 0,
-                                                    videoCoverTime: draft.videoCoverTime ?? 0,
-                                                    filterInfo: resumeFilter,
-                                                    filtered: !!resumeFilter,
-                                                    draftFilterActive: draft.filterActive,
-                                                    draftFilterBaked: draft.filterBaked,
-                                                    draftStickers: draft.stickers || [],
-                                                });
-                                            }}
-                                        >
-                                            <Text style={styles.draftDate}>
-                                                {new Date(draft.createdAt).toLocaleDateString()}
-                                            </Text>
-                                            <Text style={styles.draftText} numberOfLines={2}>
-                                                {draft.caption || draft.textBody || 'No text'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            onPress={() => handleDeleteDraft(draft.id)}
-                                            style={styles.deleteButton}
-                                        >
-                                            <Icon name="trash" size={ox(20)} color="#EF4444" />
-                                        </TouchableOpacity>
-                                    </View>
-                                ))
-                            ) : (
-                                <Text style={styles.emptyText}>No drafts yet</Text>
-                            )}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
+                drafts={drafts}
+                onClose={handleDraftsDismiss}
+                onResume={resumeDraft}
+                onDelete={(draftId) => {
+                    void handleDeleteDraft(draftId);
+                }}
+            />
 
             {/* Collections Modal */}
             <Modal
@@ -1731,7 +1741,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 onRequestClose={() => setSettingsOpen(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
+                    <View style={[styles.modalContent, styles.settingsSheet]}>
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Settings</Text>
                             <TouchableOpacity onPress={() => setSettingsOpen(false)}>
@@ -1746,7 +1756,23 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             nestedScrollEnabled
                         >
                             <View style={styles.safetySection}>
-                                <Text style={styles.safetySectionTitle}>Invite Friends</Text>
+                                <Text style={styles.safetySectionTitle}>Comment safety</Text>
+                                <Text style={styles.toggleDescription}>
+                                    Who can comment, hidden words, and the review queue
+                                </Text>
+                                <TouchableOpacity
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
+                                    onPress={() => {
+                                        setSettingsOpen(false);
+                                        setCommentSafetyOpen(true);
+                                    }}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Open comment safety</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Invite friends</Text>
                                 <Text style={styles.toggleDescription}>Share Gazetteer with people you want on here</Text>
                                 <TouchableOpacity
                                     style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
@@ -1841,50 +1867,25 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             <View style={styles.safetySection}>
                                 <View style={styles.safetySectionHeader}>
                                     <Text style={styles.safetySectionTitle}>Push Notifications</Text>
-                                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                                        <TouchableOpacity
+                                    <TouchableOpacity
                                             style={styles.smallActionButton}
                                             onPress={() => {
-                                                void (async () => {
-                                                    try {
-                                                        const { seedInboxTestNotifications } = await import(
-                                                            '../utils/testNotifications'
-                                                        );
-                                                        const n = await seedInboxTestNotifications();
-                                                        const prefs = getNotificationPreferences();
-                                                        setNotificationPrefs(prefs);
-                                                        showProfileAlert({
-                                                            title: 'Inbox badge test',
-                                                            message: `Added ${n} unread notifications. Check the footer Inbox icon.`,
-                                                            icon: 'success',
-                                                            confirmButtonText: 'OK',
-                                                        });
-                                                    } catch (err) {
-                                                        showProfileAlert({
-                                                            title: 'Could not seed notifications',
-                                                            message:
-                                                                err instanceof Error
-                                                                    ? err.message
-                                                                    : 'Try again after signing in.',
-                                                            icon: 'alert',
-                                                            confirmButtonText: 'OK',
-                                                        });
-                                                    }
-                                                })();
-                                            }}
-                                        >
-                                            <Text style={styles.smallActionButtonText}>Test badge</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={styles.smallActionButton}
-                                            onPress={() => {
-                                                const reset = resetNotificationPreferences();
-                                                setNotificationPrefs(reset);
+                                                showProfileAlert({
+                                                    title: 'Reset notifications?',
+                                                    message: 'Every alert type turns back on for this phone.',
+                                                    icon: 'alert',
+                                                    showCancelButton: true,
+                                                    confirmButtonText: 'Reset',
+                                                    cancelButtonText: 'Cancel',
+                                                    onConfirm: () => {
+                                                        setProfileAlert(null);
+                                                        setNotificationPrefs(resetNotificationPreferences());
+                                                    },
+                                                });
                                             }}
                                         >
                                             <Text style={styles.smallActionButtonText}>Reset</Text>
                                         </TouchableOpacity>
-                                    </View>
                                 </View>
 
                                 <View style={styles.toggleRow}>
@@ -2110,12 +2111,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
             <GazetteerAlertSheet
                 visible={profileAlert !== null}
+                variant="card"
                 title={profileAlert?.title ?? ''}
                 message={profileAlert?.message}
                 icon={profileAlert?.icon}
                 confirmButtonText={profileAlert?.confirmButtonText ?? 'OK'}
                 cancelButtonText={profileAlert?.cancelButtonText ?? 'Cancel'}
                 showCancelButton={profileAlert?.showCancelButton ?? false}
+                confirmDestructive={profileAlert?.confirmDestructive ?? false}
                 onConfirm={() => {
                     if (profileAlert?.onConfirm) {
                         profileAlert.onConfirm();
@@ -2167,9 +2170,20 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         borderWidth: 1,
         borderColor: UEFA_GLASS_BORDER,
     },
-    headerSideSlot: {
+    headerAvatarBtn: {
         width: ox(38),
         height: ox(38),
+        borderRadius: ox(19),
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: UEFA_GLASS_BG,
+        borderWidth: 1,
+        borderColor: UEFA_GLASS_BORDER,
+    },
+    headerAvatar: {
+        width: '100%',
+        height: '100%',
     },
     title: {
         flexShrink: 1,
@@ -2227,25 +2241,26 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     statsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        gap: ox(10),
+        gap: ox(6),
         marginBottom: ox(16),
     },
     statItemGlass: {
         flex: 1,
         alignItems: 'center',
-        paddingVertical: ox(12),
+        paddingVertical: ox(10),
+        paddingHorizontal: ox(2),
         borderRadius: ox(14),
         backgroundColor: UEFA_GLASS_BG,
         borderWidth: 1,
         borderColor: UEFA_GLASS_BORDER,
     },
     statNumber: {
-        fontSize: ox(18),
+        fontSize: ox(16),
         fontWeight: '700',
         color: '#FFFFFF',
     },
     statLabel: {
-        fontSize: ox(13),
+        fontSize: ox(11),
         color: '#E2E8F0',
         marginTop: ox(2),
     },
@@ -2683,36 +2698,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         paddingTop: ox(12),
         paddingBottom: ox(28),
     },
-    draftItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: ox(12),
-        padding: ox(12),
-        borderRadius: ox(12),
-        marginBottom: ox(12),
-        ...glassSurface,
-    },
-    draftThumb: {
-        width: ox(52),
-        height: ox(52),
-        borderRadius: ox(8),
-        backgroundColor: '#111827',
-    },
-    draftInfo: {
-        flex: 1,
-    },
-    draftDate: {
-        fontSize: ox(12),
-        color: '#9CA3AF',
-        marginBottom: ox(4),
-    },
-    draftText: {
-        fontSize: ox(14),
-        color: '#FFFFFF',
-    },
-    deleteButton: {
-        padding: ox(8),
-    },
     collectionModalItem: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -2750,10 +2735,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         color: '#9CA3AF',
     },
     logoutButton: {
-        backgroundColor: '#EF4444',
-        paddingVertical: ox(12),
+        backgroundColor: '#E53935',
+        marginTop: ox(6),
+        paddingVertical: ox(13),
         paddingHorizontal: ox(24),
-        borderRadius: ox(8),
+        borderRadius: 12,
         alignItems: 'center',
     },
     logoutButtonText: {
@@ -2761,11 +2747,17 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         fontSize: ox(16),
         fontWeight: '600',
     },
+    settingsSheet: {
+        backgroundColor: '#0B0E14',
+        borderColor: '#2A2F3D',
+    },
     safetySection: {
-        borderRadius: ox(10),
-        padding: ox(11),
-        marginBottom: ox(10),
-        ...glassSurface,
+        borderRadius: 16,
+        padding: ox(14),
+        marginBottom: ox(12),
+        backgroundColor: '#161B22',
+        borderWidth: 1,
+        borderColor: '#2A2F3D',
     },
     safetySectionHeader: {
         flexDirection: 'row',
@@ -2774,12 +2766,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         marginBottom: ox(10),
     },
     safetySectionTitle: {
-        fontSize: ox(15),
+        fontSize: 12,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: '#8B949E',
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
     },
     smallActionButton: {
-        backgroundColor: '#374151',
+        backgroundColor: '#21262D',
+        borderWidth: 1,
+        borderColor: '#2A2F3D',
         borderRadius: ox(8),
         paddingHorizontal: ox(10),
         paddingVertical: ox(6),
@@ -2807,13 +2803,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     toggleDescription: {
         marginTop: ox(2),
         fontSize: ox(12),
-        color: '#9CA3AF',
+        color: '#8B949E',
+        lineHeight: ox(17),
     },
     toggleTrack: {
         width: ox(46),
         height: ox(26),
         borderRadius: ox(13),
-        backgroundColor: '#374151',
+        backgroundColor: '#30363D',
         justifyContent: 'center',
         paddingHorizontal: ox(3),
     },

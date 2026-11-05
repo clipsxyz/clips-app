@@ -867,6 +867,7 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         ),
         videoPosterUrl: pickStoryPosterUri(story) || undefined,
         audience: story.audience || 'public',
+        isFollowing: story.is_following === true || story.isFollowing === true,
         sharedFromPost: story.shared_from_post_id || undefined,
         sharedFromUser: story.shared_from_user_handle || undefined,
         // Real poster avatar from Laravel user relation. Never fall back to the mock
@@ -1053,6 +1054,7 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
                 userHandle: handle,
                 name: handle.split('@')[0] || 'User',
                 avatarUrl: storyAvatarUrl(stories[0]) || getAvatarForHandle(handle),
+                isFollowing: stories.some((story) => story.isFollowing === true),
                 stories: sortStoriesNewestFirst(stories),
             };
         } catch (error) {
@@ -1724,6 +1726,7 @@ export async function fetchFollowedUsersStoryGroups(
                 const existing = byUser.get(story.userId);
                 if (existing) {
                     existing.stories.push(story);
+                    if (story.isFollowing === true) existing.isFollowing = true;
                 } else {
                     const handle = (story.userHandle || '').trim() || story.userId || 'unknown';
                     byUser.set(story.userId, {
@@ -1731,6 +1734,7 @@ export async function fetchFollowedUsersStoryGroups(
                         userHandle: handle,
                         name: handle.split('@')[0] || 'User',
                         avatarUrl: storyAvatarUrl(story) || undefined,
+                        isFollowing: story.isFollowing === true,
                         stories: [story],
                     });
                 }

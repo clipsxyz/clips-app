@@ -55,7 +55,7 @@ import {
     toggleReplyLike,
 } from '../api/posts';
 import { useAuth } from '../context/Auth';
-import { evaluateCommentModeration, getCommentModerationPreferences } from '../utils/commentModeration';
+import { evaluateCommentModeration, getCommentModerationPreferences, resolveCommentComposerAccess } from '../utils/commentModeration';
 import type { Post, Comment } from '../types';
 
 const COMMENT_EMOJIS = [
@@ -990,8 +990,11 @@ export default function PostCommentsSheet({
         setReplyingTo(null);
     }, []);
 
+    const commentAccess = resolveCommentComposerAccess(post, user);
+
     const handleComposerSubmit = useCallback(
         async (text: string) => {
+            if (!resolveCommentComposerAccess(post, user).canComment) return;
             if (replyingTo) {
                 setSubmittingReply(true);
                 try {
@@ -1006,7 +1009,7 @@ export default function PostCommentsSheet({
             }
             await handleAddComment(text);
         },
-        [replyingTo, handleReplyToComment, handleAddComment],
+        [replyingTo, handleReplyToComment, handleAddComment, post, user],
     );
 
     const renderComment: ListRenderItem<Comment> = ({ item }) => (
@@ -1239,16 +1242,22 @@ export default function PostCommentsSheet({
                     <FlatList {...commentsListProps} ListHeaderComponent={listHeader} />
                 )}
                 <View style={styles.footerSolid}>
-                    <CommentInput
-                        placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
-                        onSubmit={(text) => {
-                            void handleComposerSubmit(text);
-                        }}
-                        isLoading={submitting || submittingReply}
-                        replyingToHandle={replyingTo?.handle}
-                        onCancelReply={cancelReply}
-                        autoFocus={Boolean(replyingTo)}
-                    />
+                    {commentAccess.canComment ? (
+                        <CommentInput
+                            placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
+                            onSubmit={(text) => {
+                                void handleComposerSubmit(text);
+                            }}
+                            isLoading={submitting || submittingReply}
+                            replyingToHandle={replyingTo?.handle}
+                            onCancelReply={cancelReply}
+                            autoFocus={Boolean(replyingTo)}
+                        />
+                    ) : (
+                        <View style={styles.commentsClosedBar}>
+                            <Text style={styles.commentsClosedText}>{commentAccess.message}</Text>
+                        </View>
+                    )}
                 </View>
             </View>
         </PassportSheetCanvas>
@@ -1332,6 +1341,21 @@ const styles = StyleSheet.create({
     },
     footerCanvasContent: {
         backgroundColor: 'transparent',
+    },
+    commentsClosedBar: {
+        marginHorizontal: 16,
+        marginBottom: 8,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        alignItems: 'center',
+    },
+    commentsClosedText: {
+        color: '#8B949E',
+        fontSize: 14,
+        fontWeight: '600',
+        textAlign: 'center',
     },
     footerSolid: {
         // Keep composer on a stable strip so keyboard resize doesn't remount the ambient canvas.
