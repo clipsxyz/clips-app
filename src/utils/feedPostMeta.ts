@@ -41,18 +41,12 @@ export function getPostSocialSourceLabel(post: Post): string | null {
     }
 }
 
-export function getReclipDisplay(post: Post, viewerHandle?: string | null): {
+export function getReclipDisplay(post: Post, _viewerHandle?: string | null): {
     isReclip: boolean;
     displayHandle: string;
     profileHandle: string;
 } {
-    const isReclip = Boolean(
-        post.isReclipped &&
-            post.originalUserHandle &&
-            viewerHandle &&
-            post.userHandle === viewerHandle &&
-            post.userReclipped,
-    );
+    const isReclip = Boolean(post.isReclipped && post.originalUserHandle);
     const displayHandle = isReclip ? post.originalUserHandle! : post.userHandle;
     const profileHandle = isReclip ? post.originalUserHandle! : post.userHandle;
     return { isReclip, displayHandle, profileHandle };

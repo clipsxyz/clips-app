@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -30,7 +30,7 @@ import {
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, getFollowedUsers, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
-import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
+import { fetchUserProfile, fetchFollowers, fetchFollowing, removeFollower } from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
 import { emitFollowStatusChanged } from '../hooks/useFollowState';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
@@ -45,6 +45,11 @@ import {
 } from '../api/privacy';
 import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts } from '../api/mockFollowGraph';
 import { isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
+import {
+    buildSuggestedConnections,
+    loadDismissedSuggestions,
+    saveDismissedSuggestions,
+} from '../utils/suggestedConnections';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { FEED_GRID_TILE_RADIUS } from '../components/FeedPageLayout.native';
 import type { Post } from '../types';
@@ -119,6 +124,8 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [connectionFollowMap, setConnectionFollowMap] = useState<Record<string, boolean>>({});
     const [connectionRequestMap, setConnectionRequestMap] = useState<Record<string, boolean>>({});
     const [connectionActionLoadingMap, setConnectionActionLoadingMap] = useState<Record<string, boolean>>({});
+    const [dismissedSuggested, setDismissedSuggested] = useState<Record<string, boolean>>({});
+    const connectionCountDeltaRef = useRef({ followers: 0, following: 0 });
     const [contentTab, setContentTab] = useState<'all' | 'videos' | 'photos' | 'text'>('all');
     const [postNotifyLevel, setPostNotifyLevel] = useState<ProfilePostNotifyLevel>('off');
     const [postNotifySheetMode, setPostNotifySheetMode] = useState<ProfilePostNotifySheetMode | null>(null);
@@ -143,6 +150,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
         void getProfilePostNotifyLevelMobile(viewerId, decodedHandle).then(setPostNotifyLevel);
     }, [user?.id, decodedHandle, isOwnProfile]);
+
+    useEffect(() => {
+        const viewerId = user?.id != null ? String(user.id) : String(user?.handle || '');
+        if (!viewerId) return;
+        let cancelled = false;
+        void loadDismissedSuggestions(viewerId).then((map) => {
+            if (!cancelled) setDismissedSuggested(map);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.id, user?.handle]);
 
     const profileDisplayName = React.useMemo(() => {
         const name = typeof profileUser?.name === 'string' ? profileUser.name.trim() : '';
@@ -728,58 +747,20 @@ const result = await followOrRequest({
         [followingList, viewerFollowedSet],
     );
 
-    const suggestedList = React.useMemo(() => {
-        const excluded = new Set<string>([
-            normalizeHandleKey(String(user?.handle || '')),
-            normalizeHandleKey(decodedHandle),
-            ...Array.from(viewerFollowedSet),
-        ]);
-        const profileLabel = decodedHandle ? `@${decodedHandle.replace(/^@/, '')}` : 'this profile';
-        const followerMap = new Map(followersList.map((row) => [normalizeHandleKey(row.handleNoAt), row]));
-        const followingMap = new Map(followingList.map((row) => [normalizeHandleKey(row.handleNoAt), row]));
-        const suggestedMap = new Map<string, ConnectionRow>();
-
-        const addSuggested = (rawHandle: string, rawName?: string, reason?: string) => {
-            const key = String(rawHandle || '').replace(/^@/, '').trim();
-            if (!key) return;
-            const normalized = normalizeHandleKey(key);
-            if (excluded.has(normalized) || suggestedMap.has(normalized)) return;
-            const inFollowers = followerMap.has(normalized);
-            const inFollowing = followingMap.has(normalized);
-            const suggestionReason =
-                reason ||
-                (inFollowing
-                    ? `Followed by ${profileLabel}`
-                    : inFollowers
-                      ? `Follows ${profileLabel}`
-                      : 'Suggested for you');
-            suggestedMap.set(normalized, {
-                handleNoAt: key,
-                displayName: rawName || key,
-                avatarUrl:
-                    followerMap.get(normalized)?.avatarUrl ||
-                    followingMap.get(normalized)?.avatarUrl ||
-                    getAvatarForHandle(key),
-                suggestionReason,
-                mutualCount: (inFollowers ? 1 : 0) + (inFollowing ? 1 : 0),
-                isPrivate: isProfilePrivate(key),
-                isRequested: !!(user?.handle && hasPendingFollowRequest(user.handle, key)),
-            });
-        };
-
-        [...followersList, ...followingList].forEach((row) => {
-            if (viewerFollowedSet.has(normalizeHandleKey(row.handleNoAt))) return;
-            addSuggested(row.handleNoAt, row.displayName);
-        });
-        allPosts.forEach((post) => {
-            addSuggested(post.userHandle, post.userHandle);
-        });
-        Object.keys(MOCK_FOLLOWING_GRAPH).forEach((h) => addSuggested(h, h));
-
-        return Array.from(suggestedMap.values()).sort(
-            (a, b) => (b.mutualCount || 0) - (a.mutualCount || 0),
-        );
-    }, [followersList, followingList, viewerFollowedSet, user?.handle, decodedHandle]);
+    const suggestedList = React.useMemo(
+        () =>
+            buildSuggestedConnections({
+                followers: followersList,
+                following: followingList,
+                posts: allPosts,
+                viewerHandle: user?.handle,
+                profileHandle: decodedHandle,
+                alreadyFollowing: viewerFollowedSet,
+                dismissed: dismissedSuggested,
+                includeMockAuthors: !isLaravelApiEnabled(),
+            }),
+        [followersList, followingList, viewerFollowedSet, user?.handle, decodedHandle, dismissedSuggested],
+    );
 
     const activeConnectionsList =
         connectionsScope === 'followers'
@@ -796,34 +777,36 @@ const result = await followOrRequest({
         return entry.handleNoAt.toLowerCase().includes(q) || entry.displayName.toLowerCase().includes(q);
     });
 
-    const toggleConnectionFollow = async (entryHandle: string) => {
-        if (!user?.id || !user?.handle) return;
+    const closeConnections = () => {
+        const delta = connectionCountDeltaRef.current;
+        if (isOwnProfile && (delta.followers !== 0 || delta.following !== 0)) {
+            setStats((prev) => ({
+                ...prev,
+                followers: Math.max(0, prev.followers + delta.followers),
+                following: Math.max(0, prev.following + delta.following),
+            }));
+        }
+        connectionCountDeltaRef.current = { followers: 0, following: 0 };
+        setShowConnectionsModal(false);
+    };
+
+    const toggleConnectionFollow = async (entryHandle: string, nextFollowing?: boolean) => {
+        if (!user?.id || !user?.handle) throw new Error('Not signed in');
         if (connectionActionLoadingMap[entryHandle]) return;
         const followUserId = user.id != null ? String(user.id) : getStableUserId(user);
         const key = entryHandle;
         const current = connectionFollowMap[key] === true;
         const requested = connectionRequestMap[key] === true;
+        const next = typeof nextFollowing === 'boolean' ? nextFollowing : !current;
 
         setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: true }));
         try {
-            if (!current && requested) {
-                // Second tap on Requested cancels the local pending request.
-                const result = await followOrRequest({
-                    userId: followUserId,
-                    targetHandle: key,
-                    viewerHandle: user.handle,
-                    nextFollowing: false,
-                });
-                setConnectionFollowMap((prev) => ({ ...prev, [key]: result.following }));
-                setConnectionRequestMap((prev) => ({ ...prev, [key]: false }));
-                return;
-            }
-
             const result = await followOrRequest({
                 userId: followUserId,
                 targetHandle: key,
                 viewerHandle: user.handle,
-                nextFollowing: !current,
+                nextFollowing: next,
+                surfaceErrors: isLaravelApiEnabled(),
             });
             setConnectionFollowMap((prev) => ({ ...prev, [key]: result.following }));
             setConnectionRequestMap((prev) => ({ ...prev, [key]: result.requested }));
@@ -832,13 +815,46 @@ const result = await followOrRequest({
             if (result.following) nextSet.add(norm);
             else nextSet.delete(norm);
             setViewerFollowedSet(nextSet);
+            if (isOwnProfile && current !== result.following) {
+                connectionCountDeltaRef.current.following += result.following ? 1 : -1;
+            }
         } catch (error) {
             console.error('Failed to toggle connection follow:', error);
             setConnectionFollowMap((prev) => ({ ...prev, [key]: current }));
             setConnectionRequestMap((prev) => ({ ...prev, [key]: requested }));
+            throw error;
         } finally {
             setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: false }));
         }
+    };
+
+    const suggestionViewerId = user?.id != null ? String(user.id) : String(user?.handle || '');
+
+    const dismissSuggested = (entryHandle: string) => {
+        const key = normalizeHandleKey(entryHandle);
+        if (!key) return;
+        setDismissedSuggested((prev) => {
+            const next = { ...prev, [key]: true };
+            void saveDismissedSuggestions(suggestionViewerId, next);
+            return next;
+        });
+    };
+
+    const undoDismissSuggested = (entryHandle: string) => {
+        const key = normalizeHandleKey(entryHandle);
+        if (!key) return;
+        setDismissedSuggested((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            void saveDismissedSuggestions(suggestionViewerId, next);
+            return next;
+        });
+    };
+
+    const removeConnectionFollower = async (entryHandle: string) => {
+        await removeFollower(entryHandle);
+        setFollowersList((prev) => prev.filter((row) => normalizeHandleKey(row.handleNoAt) !== normalizeHandleKey(entryHandle)));
+        if (isOwnProfile) connectionCountDeltaRef.current.followers -= 1;
     };
 
     const openPostDetail = useCallback(
@@ -1435,7 +1451,7 @@ const result = await followOrRequest({
 
             <ViewProfileConnectionsModal
                 visible={showConnectionsModal}
-                onClose={() => setShowConnectionsModal(false)}
+                onClose={closeConnections}
                 scope={connectionsScope}
                 onScopeChange={setConnectionsScope}
                 search={connectionsSearch}
@@ -1447,7 +1463,11 @@ const result = await followOrRequest({
                 followMap={connectionFollowMap}
                 requestMap={connectionRequestMap}
                 actionLoadingMap={connectionActionLoadingMap}
-                onToggleFollow={(h) => void toggleConnectionFollow(h)}
+                viewerOwnsList={isOwnProfile}
+                onToggleFollow={(h, next) => toggleConnectionFollow(h, next)}
+                onRemoveFollower={removeConnectionFollower}
+                onDismissSuggested={dismissSuggested}
+                onUndoDismissSuggested={undoDismissSuggested}
                 onOpenProfile={(h) => {
                     setShowConnectionsModal(false);
                     navigation.navigate('ViewProfile', { handle: h });

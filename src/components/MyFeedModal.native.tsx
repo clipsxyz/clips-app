@@ -249,6 +249,14 @@ function MyFeedModal({
                 postId={commentsPost?.id ?? ''}
                 post={commentsPost}
                 isOpen={commentsPost !== null}
+                onCommentCountChange={(pid, count) => {
+                    const apply = (p: Post) =>
+                        String(p.id) === String(pid)
+                            ? { ...p, comments_count: count, stats: { ...p.stats, comments: count } }
+                            : p;
+                    setFeedPosts((prev) => prev.map(apply));
+                    setCommentsPost((prev) => (prev ? apply(prev) : prev));
+                }}
                 onClose={() => setCommentsPost(null)}
                 commentAuthorHandle={user?.handle || ''}
                 currentUserHandle={user?.handle}

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     Modal,
     Platform,
     Pressable,
@@ -51,7 +52,12 @@ type Props = {
     followMap: Record<string, boolean>;
     requestMap: Record<string, boolean>;
     actionLoadingMap: Record<string, boolean>;
-    onToggleFollow: (handleNoAt: string) => void;
+    /** Signed-in user is looking at their own followers / following. */
+    viewerOwnsList?: boolean;
+    onToggleFollow: (handleNoAt: string, nextFollowing: boolean) => Promise<void> | void;
+    onRemoveFollower?: (handleNoAt: string) => Promise<void> | void;
+    onDismissSuggested?: (handleNoAt: string) => void;
+    onUndoDismissSuggested?: (handleNoAt: string) => void;
     onOpenProfile: (handleNoAt: string) => void;
     onLoadMore?: () => void;
     hasMore?: boolean;
@@ -63,6 +69,107 @@ const TABS: { id: ConnectionsScope; label: string }[] = [
     { id: 'following', label: 'Following' },
     { id: 'suggested', label: 'Suggested' },
 ];
+
+function ConnectionFollowButton({
+    handle,
+    initialFollowing,
+    initialRequested,
+    followBack,
+    showRemove,
+    busy,
+    onToggle,
+    onRemove,
+    onError,
+}: {
+    handle: string;
+    initialFollowing: boolean;
+    initialRequested: boolean;
+    followBack: boolean;
+    showRemove: boolean;
+    busy?: boolean;
+    onToggle: (handle: string, nextFollowing: boolean) => Promise<void> | void;
+    onRemove?: (handle: string) => Promise<void> | void;
+    onError: (message: string) => void;
+}) {
+    const [isFollowing, setIsFollowing] = useState(initialFollowing);
+    const [requested, setRequested] = useState(initialRequested);
+    const inFlight = React.useRef(false);
+
+    useEffect(() => {
+        if (inFlight.current) return;
+        setIsFollowing(initialFollowing);
+        setRequested(initialRequested);
+    }, [handle, initialFollowing, initialRequested]);
+
+    const toggle = () => {
+        if (inFlight.current || busy) return;
+        const nextFollowing = !(isFollowing || requested);
+        const prevFollowing = isFollowing;
+        const prevRequested = requested;
+        setIsFollowing(nextFollowing);
+        setRequested(false);
+        inFlight.current = true;
+        Promise.resolve(onToggle(handle, nextFollowing))
+            .catch(() => {
+                setIsFollowing(prevFollowing);
+                setRequested(prevRequested);
+                onError('Couldn’t update follow');
+            })
+            .finally(() => {
+                inFlight.current = false;
+            });
+    };
+
+    const confirmRemove = () => {
+        if (!onRemove || inFlight.current || busy) return;
+        Alert.alert('Remove follower?', `Remove @${handle.replace(/^@/, '')} from your followers?`, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Remove',
+                style: 'destructive',
+                onPress: () => {
+                    inFlight.current = true;
+                    Promise.resolve(onRemove(handle))
+                        .catch(() => onError('Couldn’t remove follower'))
+                        .finally(() => {
+                            inFlight.current = false;
+                        });
+                },
+            },
+        ]);
+    };
+
+    const label = isFollowing ? 'Following' : requested ? 'Requested' : followBack ? 'Follow Back' : 'Follow';
+    const filled = !isFollowing && !requested;
+
+    return (
+        <View style={styles.actionRow}>
+            <Pressable
+                style={[styles.followBtn, !filled && styles.followBtnFollowing]}
+                onPress={(event) => {
+                    event?.stopPropagation?.();
+                    toggle();
+                }}
+            >
+                <Text style={[styles.followBtnText, !filled && styles.followBtnTextFollowing]} numberOfLines={1}>
+                    {label}
+                </Text>
+            </Pressable>
+            {showRemove ? (
+                <Pressable
+                    style={styles.removeBtn}
+                    onPress={(event) => {
+                        event?.stopPropagation?.();
+                        confirmRemove();
+                    }}
+                    accessibilityLabel={`Remove @${handle}`}
+                >
+                    <Icon name="person-remove-outline" size={16} color="#E2E8F0" />
+                </Pressable>
+            ) : null}
+        </View>
+    );
+}
 
 function scopeTitle(scope: ConnectionsScope): string {
     switch (scope) {
@@ -92,7 +199,11 @@ export default function ViewProfileConnectionsModal({
     followMap,
     requestMap,
     actionLoadingMap,
+    viewerOwnsList = false,
     onToggleFollow,
+    onRemoveFollower,
+    onDismissSuggested,
+    onUndoDismissSuggested,
     onOpenProfile,
     onLoadMore,
     hasMore,
@@ -112,6 +223,20 @@ export default function ViewProfileConnectionsModal({
         .replace(/^@/, '')
         .trim()
         .toLowerCase();
+    const [toast, setToast] = useState<string | null>(null);
+    const [undoHandle, setUndoHandle] = useState<string | null>(null);
+    useEffect(() => {
+        if (!toast) return;
+        const timer = setTimeout(() => {
+            setToast(null);
+            setUndoHandle(null);
+        }, undoHandle ? 4200 : 2200);
+        return () => clearTimeout(timer);
+    }, [toast, undoHandle]);
+    const showNotice = (message: string, undo?: string | null) => {
+        setUndoHandle(undo || null);
+        setToast(message);
+    };
 
     return (
         <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -231,37 +356,32 @@ export default function ViewProfileConnectionsModal({
                                         </View>
                                     </Pressable>
                                     {!isOwnRow ? (
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.followBtn,
-                                                following && styles.followBtnFollowing,
-                                                requested && !following && styles.followBtnRequested,
-                                            ]}
-                                            disabled={actionLoading}
-                                            onPress={() => onToggleFollow(key)}
-                                            activeOpacity={0.85}
-                                        >
-                                            {actionLoading ? (
-                                                <ActivityIndicator
-                                                    size="small"
-                                                    color={
-                                                        following || requested
-                                                            ? UCL_TEXT_PRIMARY
-                                                            : UCL_CANVAS_NAVY
-                                                    }
-                                                />
-                                            ) : (
-                                                <Text
-                                                    style={[
-                                                        styles.followBtnText,
-                                                        following && styles.followBtnTextFollowing,
-                                                        requested && !following && styles.followBtnTextRequested,
-                                                    ]}
+                                        <View style={styles.actionRow}>
+                                            {scope === 'suggested' && onDismissSuggested ? (
+                                                <Pressable
+                                                    style={styles.removeBtn}
+                                                    onPress={(event) => {
+                                                        event?.stopPropagation?.();
+                                                        onDismissSuggested(key);
+                                                        showNotice('Suggestion hidden', key);
+                                                    }}
+                                                    accessibilityLabel={`Hide @${key}`}
                                                 >
-                                                    {following ? 'Following' : requested ? 'Requested' : 'Follow'}
-                                                </Text>
-                                            )}
-                                        </TouchableOpacity>
+                                                    <Icon name="close" size={16} color="#E2E8F0" />
+                                                </Pressable>
+                                            ) : null}
+                                            <ConnectionFollowButton
+                                                handle={key}
+                                                initialFollowing={following}
+                                                initialRequested={requested}
+                                                followBack={scope === 'followers' && !following}
+                                                showRemove={viewerOwnsList && scope === 'followers'}
+                                                busy={actionLoading}
+                                                onToggle={onToggleFollow}
+                                                onRemove={onRemoveFollower}
+                                                onError={(message) => showNotice(message)}
+                                            />
+                                        </View>
                                     ) : null}
                                 </View>
                             );
@@ -282,6 +402,22 @@ export default function ViewProfileConnectionsModal({
                         </TouchableOpacity>
                     ) : null}
                 </ScrollView>
+                {toast ? (
+                    <Pressable
+                        style={[styles.toast, { bottom: Math.max(insets.bottom, 16) + 8 }]}
+                        onPress={() => {
+                            if (!undoHandle || !onUndoDismissSuggested) return;
+                            onUndoDismissSuggested(undoHandle);
+                            setUndoHandle(null);
+                            setToast(null);
+                        }}
+                    >
+                        <Text style={styles.toastText}>
+                            {toast}
+                            {undoHandle ? '  Undo' : ''}
+                        </Text>
+                    </Pressable>
+                ) : null}
             </LinearGradient>
         </Modal>
     );
@@ -475,8 +611,38 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '600',
     },
+    actionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    removeBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 999,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.25)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    toast: {
+        position: 'absolute',
+        alignSelf: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: 'rgba(15, 23, 42, 0.92)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.16)',
+    },
+    toastText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
+    },
     followBtn: {
-        minWidth: 88,
+        minWidth: 108,
         paddingHorizontal: 12,
         paddingVertical: 7,
         borderRadius: 999,

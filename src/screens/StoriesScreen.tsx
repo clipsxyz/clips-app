@@ -82,7 +82,7 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost, fetchComments } from '../api/posts';
+import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { followOrRequest } from '../utils/followOrRequest';
 import { hasPendingFollowRequest } from '../api/privacy';
@@ -1002,14 +1002,32 @@ export default function StoriesScreen({ route, navigation }: any) {
     const handleFullscreenReclip = async () => {
         if (!imageFullscreenPost || !user?.id || !user?.handle) return;
         const norm = (h?: string) => String(h || '').trim().toLowerCase();
-        if (norm(imageFullscreenPost.userHandle) === norm(user.handle)) {
+        const sourceHandle =
+            imageFullscreenPost.isReclipped && imageFullscreenPost.originalUserHandle
+                ? imageFullscreenPost.originalUserHandle
+                : imageFullscreenPost.userHandle;
+        if (norm(imageFullscreenPost.userHandle) === norm(user.handle) || norm(sourceHandle) === norm(user.handle)) {
             Alert.alert('Cannot reclip', 'You can’t reclip your own post.');
+            return;
+        }
+        if (imageFullscreenPost.userReclipped) {
+            Alert.alert('Already reclipped', 'You have already reclipped this post.');
             return;
         }
         try {
             const result = await reclipPost(user.id, imageFullscreenPost.id, user.handle);
-            if (result?.originalPost) syncFullscreenPost(result.originalPost);
-            else {
+            if (result?.originalPost && String(result.originalPost.id) === String(imageFullscreenPost.id)) {
+                syncFullscreenPost(result.originalPost);
+            } else if (result?.originalPost) {
+                syncFullscreenPost({
+                    ...imageFullscreenPost,
+                    userReclipped: true,
+                    stats: {
+                        ...imageFullscreenPost.stats,
+                        reclips: result.originalPost.stats.reclips,
+                    },
+                });
+            } else {
                 syncFullscreenPost({
                     ...imageFullscreenPost,
                     userReclipped: true,
@@ -1847,22 +1865,26 @@ export default function StoriesScreen({ route, navigation }: any) {
                 isOpen={fullscreenCommentsPost !== null}
                 commentAuthorHandle={user?.handle || ''}
                 currentUserHandle={user?.handle}
+                onCommentCountChange={(pid, count) => {
+                    const apply = (prev: Post | null) =>
+                        prev && String(prev.id) === String(pid)
+                            ? { ...prev, comments_count: count, stats: { ...prev.stats, comments: count } }
+                            : prev;
+                    setFullscreenCommentsPost(apply);
+                    setImageFullscreenPost(apply);
+                    setOriginalPost(apply);
+                    const held = fullscreenHoldRef.current;
+                    if (held && String(held.id) === String(pid)) {
+                        fullscreenHoldRef.current = {
+                            ...held,
+                            comments_count: count,
+                            stats: { ...held.stats, comments: count },
+                        };
+                    }
+                }}
                 onClose={() => {
-                    const closed = fullscreenCommentsPost;
                     setFullscreenCommentsPost(null);
                     restoreFullscreenFromHold();
-                    if (!closed?.id) return;
-                    void fetchComments(closed.id)
-                        .then((list) => {
-                            syncFullscreenPost({
-                                ...closed,
-                                stats: {
-                                    ...closed.stats,
-                                    comments: list.length,
-                                },
-                            });
-                        })
-                        .catch(() => {});
                 }}
             />
 

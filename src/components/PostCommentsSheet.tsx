@@ -45,6 +45,7 @@ import {
     addComment,
     addReply,
     deleteCommentById,
+    commentThreadPostId,
     fetchCommentsPage,
     getPostById,
     isFrontendOnlyPostId,
@@ -85,6 +86,8 @@ type Props = {
     commentAuthorHandle: string;
     currentUserHandle?: string;
     onAfterClose?: () => void;
+    /** Keeps the post footer on the same total the sheet just changed. */
+    onCommentCountChange?: (postId: string, count: number) => void;
     /** `scenesEmbed` — no Modal; parent positions sheet (Scenes viewer). */
     variant?: 'modal' | 'scenesEmbed';
 };
@@ -489,6 +492,7 @@ export default function PostCommentsSheet({
     commentAuthorHandle,
     currentUserHandle,
     onAfterClose,
+    onCommentCountChange,
     variant = 'modal',
 }: Props) {
     const isScenesEmbed = variant === 'scenesEmbed';
@@ -498,6 +502,8 @@ export default function PostCommentsSheet({
 
     const [post, setPost] = useState<Post | null>(postProp ?? null);
     const [comments, setComments] = useState<Comment[]>([]);
+    const commentsRef = useRef<Comment[]>([]);
+    commentsRef.current = comments;
     const [commentsCursor, setCommentsCursor] = useState<string | null>(null);
     const [commentsHasMore, setCommentsHasMore] = useState(false);
     const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
@@ -510,7 +516,21 @@ export default function PostCommentsSheet({
 
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
-    const postIdStr = String(postId || '');
+    const postIdStr = commentThreadPostId(postProp?.id ? postProp : postId);
+    const countRef = useRef(0);
+    const onCommentCountChangeRef = useRef(onCommentCountChange);
+    onCommentCountChangeRef.current = onCommentCountChange;
+
+    const publishCommentCount = useCallback((next: number) => {
+        const count = Math.max(0, next);
+        countRef.current = count;
+        setPost((prev) =>
+            prev
+                ? { ...prev, comments_count: count, stats: { ...prev.stats, comments: count } }
+                : prev,
+        );
+        if (postIdStr) onCommentCountChangeRef.current?.(postIdStr, count);
+    }, [postIdStr]);
     // Mock / collection snapshot ids can load without a Laravel user id.
     // Real backend post ids require an authenticated user before fetching comments.
     const canLoadComments =
@@ -530,7 +550,7 @@ export default function PostCommentsSheet({
             setSortMode('top');
             return;
         }
-        if (!postId || !canLoadComments) {
+        if (!postIdStr || !canLoadComments) {
             // Still show the snapshot header when auth isn't ready / signed out.
             setPost(postPropRef.current ?? null);
             setComments([]);
@@ -540,27 +560,61 @@ export default function PostCommentsSheet({
 
         let cancelled = false;
         (async () => {
-            setLoading(true);
-            setPost(postPropRef.current ?? null);
-            setComments([]);
+            if (commentsRef.current.length === 0) setLoading(true);
+            const snapshot = postPropRef.current ?? null;
+            countRef.current = Number(snapshot?.stats?.comments ?? snapshot?.comments_count ?? 0) || 0;
+            if (String(postId || '') !== postIdStr) {
+                console.warn('[comments] sheet postId does not match the footer post id', {
+                    postIdProp: String(postId || ''),
+                    postId: postIdStr,
+                });
+            }
+            setPost(snapshot);
+            setComments((prev) => prev.filter((row) => !row.postId || String(row.postId) === postIdStr));
             setCommentsCursor(null);
             setCommentsHasMore(false);
             setCommentsLoadingMore(false);
             try {
                 const [fetchedPost, fetchedPage] = await Promise.all([
-                    getPostById(postId, user?.id),
-                    fetchCommentsPage(postId, null, 30, 5, user?.id),
+                    getPostById(postIdStr, user?.id),
+                    fetchCommentsPage(postIdStr, null, 30, 5, user?.id),
                 ]);
                 if (cancelled) return;
-                setPost(fetchedPost ?? postPropRef.current ?? null);
-                setComments(fetchedPage.items);
+                const loaded = fetchedPost ?? postPropRef.current ?? null;
+                const footerCount = Number(loaded?.stats?.comments ?? loaded?.comments_count ?? countRef.current) || 0;
+                if (fetchedPage.items.length === 0 && (footerCount > 0 || (fetchedPage.commentsCount ?? 0) > 0)) {
+                    console.warn('[comments] empty list while comments_count > 0', {
+                        route: `/comments/post/${postIdStr}`,
+                        query: { postId: postIdStr, cursor: null, limit: 30, repliesLimit: 5, userId: user?.id || null },
+                        commentsCount: fetchedPage.commentsCount ?? footerCount,
+                    });
+                }
+                setPost(loaded);
+                if (typeof fetchedPage.commentsCount === 'number') {
+                    const count = Math.max(fetchedPage.commentsCount, countRef.current);
+                    countRef.current = count;
+                    setPost((prev) =>
+                        prev
+                            ? { ...prev, comments_count: count, stats: { ...prev.stats, comments: count } }
+                            : prev,
+                    );
+                    onCommentCountChangeRef.current?.(postIdStr, count);
+                }
+                setComments((prev) => {
+                    const incoming = fetchedPage.items;
+                    const seen = new Set(incoming.map((row) => String(row.id)));
+                    const kept = prev.filter((row) => {
+                        if (row.postId && String(row.postId) !== postIdStr) return false;
+                        return !seen.has(String(row.id));
+                    });
+                    return [...kept, ...incoming];
+                });
                 setCommentsCursor(fetchedPage.nextCursor);
                 setCommentsHasMore(fetchedPage.hasMore);
             } catch (err) {
                 console.error('Failed to load comments sheet:', err);
                 if (!cancelled) {
                     setPost(postPropRef.current ?? null);
-                    setComments([]);
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -570,7 +624,7 @@ export default function PostCommentsSheet({
         return () => {
             cancelled = true;
         };
-    }, [isOpen, postId, canLoadComments, user?.id]);
+    }, [isOpen, postId, postIdStr, canLoadComments, user?.id]);
 
     const sortedComments = useMemo(() => {
         const next = [...comments];
@@ -597,7 +651,7 @@ export default function PostCommentsSheet({
         if (commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
         setCommentsLoadingMore(true);
         try {
-            const page = await fetchCommentsPage(postId, commentsCursor, 30, 5, user?.id);
+            const page = await fetchCommentsPage(postIdStr, commentsCursor, 30, 5, user?.id);
             if (page.items.length > 0) {
                 setComments((prev) => {
                     const seen = new Set(prev.map((c) => String(c.id)));
@@ -618,7 +672,7 @@ export default function PostCommentsSheet({
         } finally {
             setCommentsLoadingMore(false);
         }
-    }, [commentsCursor, commentsHasMore, commentsLoadingMore, postId, user?.id]);
+    }, [commentsCursor, commentsHasMore, commentsLoadingMore, postIdStr, user?.id]);
 
     const handleScroll = useCallback(
         (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -660,7 +714,7 @@ export default function PostCommentsSheet({
 
         const optimisticComment: Comment = {
             id: `temp-${Date.now()}`,
-            postId,
+            postId: postIdStr,
             userHandle: handle,
             text,
             createdAt: Date.now(),
@@ -670,12 +724,15 @@ export default function PostCommentsSheet({
             moderationReason: moderation.matched[0],
         };
         setComments((prev) => [...prev, optimisticComment]);
+        publishCommentCount(countRef.current + 1);
         setSubmitting(true);
         try {
-            const newComment = await addComment(postId, handle, text);
+            const newComment = await addComment(postIdStr, handle, text);
             setComments((prev) => prev.map((c) => (c.id === optimisticComment.id ? newComment : c)));
         } catch (err) {
             console.error('Failed to add comment:', err);
+            setComments((prev) => prev.filter((c) => c.id !== optimisticComment.id));
+            publishCommentCount(countRef.current - 1);
             Alert.alert('Error', 'Failed to add comment');
         } finally {
             setSubmitting(false);
@@ -746,7 +803,7 @@ export default function PostCommentsSheet({
 
         const optimisticReply: Comment = {
             id: `temp-reply-${Date.now()}`,
-            postId,
+            postId: postIdStr,
             userHandle: handle,
             text,
             createdAt: Date.now(),
@@ -766,9 +823,10 @@ export default function PostCommentsSheet({
                 };
             }),
         );
+        publishCommentCount(countRef.current + 1);
 
         try {
-            const newReply = await addReply(postId, parentId, handle, text);
+            const newReply = await addReply(postIdStr, parentId, handle, text);
             setComments((prev) =>
                 prev.map((comment) => {
                     if (comment.id !== parentId) return comment;
@@ -783,6 +841,17 @@ export default function PostCommentsSheet({
             return true;
         } catch (err) {
             console.error('Failed to add reply:', err);
+            setComments((prev) =>
+                prev.map((comment) => {
+                    if (comment.id !== parentId) return comment;
+                    return {
+                        ...comment,
+                        replies: (comment.replies || []).filter((r) => r.id !== optimisticReply.id),
+                        replyCount: Math.max(0, (comment.replyCount || comment.replies?.length || 1) - 1),
+                    };
+                }),
+            );
+            publishCommentCount(countRef.current - 1);
             throw err;
         }
     };

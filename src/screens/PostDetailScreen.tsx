@@ -9,6 +9,7 @@ import {
     Alert,
     Modal,
     Pressable,
+    ScrollView,
     KeyboardAvoidingView,
     Platform,
     useWindowDimensions,
@@ -25,7 +26,6 @@ import {
     deletePost,
     reclipPost,
     setReclipState,
-    fetchComments,
     upsertLocalPost,
 } from '../api/posts';
 import { blockUser } from '../api/messages';
@@ -101,7 +101,6 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const [mediaHeight, setMediaHeight] = useState(() =>
         Math.round(screenWidth / RATIO_PORTRAIT_9_16),
     );
-    const [mediaStageHeight, setMediaStageHeight] = useState(0);
     const [isMuted, setIsMuted] = useState(true);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(!!openComments);
@@ -428,16 +427,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const portraitFillHeight = feedMediaHeight(cardMediaWidth, post.width, post.height, {
         fullscreenPortrait: true,
     });
-    const reservedChrome = ox(56) + ox(52) + ox(118) + ox(24) + tabBarClearance;
-    const viewportFillHeight = Math.max(
-        windowHeight - reservedChrome,
-        Math.round(cardMediaWidth / RATIO_PORTRAIT_9_16),
-    );
+    const maxPortraitHeight = Math.round(cardMediaWidth / RATIO_PORTRAIT_9_16);
     const detailMediaHeight = textOnlyPost
         ? Math.min(cardMediaWidth * 0.55, windowHeight * 0.32)
-        : mediaStageHeight > 0
-          ? mediaStageHeight
-          : Math.max(portraitFillHeight || mediaHeight, viewportFillHeight);
+        : Math.min(portraitFillHeight || mediaHeight, maxPortraitHeight);
     const isCurrentUser = Boolean(
         user?.handle &&
             String(user.handle).trim().toLowerCase() ===
@@ -461,7 +454,12 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 <View style={styles.headerSide} />
             </View>
 
-            <View style={[styles.page, { paddingBottom: tabBarClearance }]}>
+            <ScrollView
+                style={styles.page}
+                contentContainerStyle={{ paddingBottom: tabBarClearance, flexGrow: 1 }}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+            >
                 <View style={styles.card} collapsable={false}>
                     {textOnlyPost ? (
                         <FeedTextOnlyFeedLayout
@@ -490,15 +488,9 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     </View>
                     {hasVisualMedia ? (
                         <View
-                            style={styles.mediaStage}
+                            style={[styles.mediaStage, { height: detailMediaHeight }]}
                             collapsable={false}
                             renderToHardwareTextureAndroid={false}
-                            onLayout={(event) => {
-                                const next = Math.round(event.nativeEvent.layout.height);
-                                if (next > 0 && Math.abs(next - mediaStageHeight) > 2) {
-                                    setMediaStageHeight(next);
-                                }
-                            }}
                         >
                             <FeedPostMedia
                                 post={post}
@@ -584,7 +576,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                         <View style={styles.tabBarSpacer} />
                     </View>
                 </View>
-            </View>
+            </ScrollView>
 
             <Modal
                 visible={commentsOpen}
@@ -611,18 +603,17 @@ export default function PostDetailScreen({ route, navigation }: any) {
                             variant="scenesEmbed"
                             commentAuthorHandle={user?.handle ?? ''}
                             currentUserHandle={user?.handle}
-                            onAfterClose={() => {
-                                fetchComments(post.id)
-                                    .then((list) =>
-                                        setPost((p) => {
-                                            const next = p
-                                                ? { ...p, stats: { ...p.stats, comments: list.length } }
-                                                : null;
-                                            syncPostOut(next);
-                                            return next;
-                                        }),
-                                    )
-                                    .catch(() => {});
+                            onCommentCountChange={(_pid, count) => {
+                                setPost((p) => {
+                                    if (!p) return p;
+                                    const next = {
+                                        ...p,
+                                        comments_count: count,
+                                        stats: { ...p.stats, comments: count },
+                                    };
+                                    syncPostOut(next);
+                                    return next;
+                                });
                             }}
                             onClose={() => setCommentsOpen(false)}
                         />
@@ -874,10 +865,8 @@ const styles = StyleSheet.create({
         backgroundColor: FEED_PAGE_BG,
         paddingHorizontal: ox(16),
         paddingTop: ox(8),
-        paddingBottom: ox(8),
     },
     card: {
-        flex: 1,
         backgroundColor: FEED_CARD_BG,
         borderRadius: FEED_CARD_RADIUS,
         borderWidth: FEED_CARD_SHELL_BORDER_WIDTH,
@@ -885,9 +874,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     mediaStage: {
-        flex: 1,
         width: '100%',
-        minHeight: 0,
         backgroundColor: '#000000',
         overflow: 'hidden',
     },

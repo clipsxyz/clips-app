@@ -48,7 +48,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { resetRootToScreen } from '../navigation/rootNavigationRef';
-import { fetchPostsByUser, getFollowedUsers } from '../api/posts';
+import { fetchPostsByUser, getFollowedUsers, posts as catalogPosts } from '../api/posts';
 import {
     getUserCollections,
     savePostToDefaultCollection,
@@ -59,7 +59,17 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones, fetchFollowers, fetchFollowing, removeFollower } from '../api/client';
+import { followOrRequest } from '../utils/followOrRequest';
+import {
+    buildSuggestedConnections,
+    loadDismissedSuggestions,
+    saveDismissedSuggestions,
+} from '../utils/suggestedConnections';
+import ViewProfileConnectionsModal, {
+    type ConnectionRow,
+    type ConnectionsScope,
+} from '../components/ViewProfileConnectionsModal.native';
 import type { Post, Collection } from '../types';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import MyFeedModal from '../components/MyFeedModal.native';
@@ -137,6 +147,17 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         getEffectiveProfilePrivate(user?.handle, user?.is_private)
     );
     const [audienceCounts, setAudienceCounts] = useState({ followers: 0, following: 0 });
+    const [audienceSheetOpen, setAudienceSheetOpen] = useState(false);
+    const [audienceScope, setAudienceScope] = useState<ConnectionsScope>('followers');
+    const [audienceSearch, setAudienceSearch] = useState('');
+    const [audienceFollowers, setAudienceFollowers] = useState<ConnectionRow[]>([]);
+    const [audienceFollowing, setAudienceFollowing] = useState<ConnectionRow[]>([]);
+    const [audienceFollowMap, setAudienceFollowMap] = useState<Record<string, boolean>>({});
+    const [audienceRequestMap, setAudienceRequestMap] = useState<Record<string, boolean>>({});
+    const [audienceLoading, setAudienceLoading] = useState(false);
+    const [audienceActionLoading, setAudienceActionLoading] = useState<Record<string, boolean>>({});
+    const [dismissedSuggested, setDismissedSuggested] = useState<Record<string, boolean>>({});
+    const audienceDeltaRef = useRef({ followers: 0, following: 0 });
     const [securityModalOpen, setSecurityModalOpen] = useState(false);
     const [securityStep, setSecurityStep] = useState<'phone' | 'code'>('phone');
     const [securityBusy, setSecurityBusy] = useState(false);
@@ -168,6 +189,18 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useEffect(() => {
         loadData();
     }, [user?.handle]);
+
+    useEffect(() => {
+        const viewerId = user?.id != null ? String(user.id) : String(user?.handle || '');
+        if (!viewerId) return;
+        let cancelled = false;
+        void loadDismissedSuggestions(viewerId).then((map) => {
+            if (!cancelled) setDismissedSuggested(map);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.id, user?.handle]);
 
     /** The mount effect above already runs the first load; the focus effect skips its
      *  first pass and refreshes silently afterwards, so a focus never double-fetches or
@@ -349,6 +382,186 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             console.error('Error loading profile extras:', error);
         }
     };
+
+    const normalizeAudienceRows = (items: any[]): ConnectionRow[] =>
+        (Array.isArray(items) ? items : [])
+            .map((item: any) => {
+                const handleRaw = String(item?.handle || item?.userHandle || item?.username || '')
+                    .replace(/^@/, '')
+                    .trim();
+                if (!handleRaw) return null;
+                return {
+                    handleNoAt: handleRaw,
+                    displayName: String(item?.display_name || item?.displayName || item?.name || handleRaw),
+                    avatarUrl: typeof item?.avatar_url === 'string' ? item.avatar_url : item?.avatarUrl,
+                    isRequested: !!(item?.is_requested || item?.has_pending_request || item?.isRequested),
+                    isPrivate: !!(item?.is_private || item?.isPrivate),
+                    isFollowing:
+                        typeof item?.is_following_by_me === 'boolean'
+                            ? item.is_following_by_me
+                            : typeof item?.is_following === 'boolean'
+                              ? item.is_following
+                              : undefined,
+                };
+            })
+            .filter(Boolean) as ConnectionRow[];
+
+    const loadOwnAudience = useCallback(async () => {
+        if (!user?.handle && !user?.id) return;
+        setAudienceLoading(true);
+        try {
+            if (!isLaravelApiEnabled() || !user?.handle) {
+                const handles = user?.id ? await getFollowedUsers(String(user.id)).catch(() => [] as string[]) : [];
+                const following = (Array.isArray(handles) ? handles : []).map((entry) => {
+                    const handleNoAt = String(entry || '').replace(/^@/, '').trim();
+                    return { handleNoAt, displayName: handleNoAt, isFollowing: true };
+                }).filter((row) => row.handleNoAt);
+                setAudienceFollowing(following);
+                setAudienceFollowers([]);
+                const followPatch: Record<string, boolean> = {};
+                following.forEach((row) => {
+                    followPatch[row.handleNoAt] = true;
+                });
+                setAudienceFollowMap(followPatch);
+                setAudienceRequestMap({});
+                return;
+            }
+            const [followersRes, followingRes] = await Promise.all([
+                fetchFollowers(user.handle, 0, 40),
+                fetchFollowing(user.handle, 0, 40),
+            ]);
+            const followers = normalizeAudienceRows(followersRes?.items);
+            const following = normalizeAudienceRows(followingRes?.items);
+            setAudienceFollowers(followers);
+            setAudienceFollowing(following);
+            const followPatch: Record<string, boolean> = {};
+            const requestPatch: Record<string, boolean> = {};
+            [...followers, ...following].forEach((row) => {
+                followPatch[row.handleNoAt] = row.isFollowing === true;
+                requestPatch[row.handleNoAt] = !!row.isRequested;
+            });
+            setAudienceFollowMap(followPatch);
+            setAudienceRequestMap(requestPatch);
+        } catch (err) {
+            console.error('Failed to load audience lists:', err);
+        } finally {
+            setAudienceLoading(false);
+        }
+    }, [user?.handle, user?.id]);
+
+    const openAudience = (scope: 'followers' | 'following') => {
+        setAudienceScope(scope);
+        setAudienceSearch('');
+        audienceDeltaRef.current = { followers: 0, following: 0 };
+        setAudienceSheetOpen(true);
+        void loadOwnAudience();
+    };
+
+    const closeAudience = () => {
+        const delta = audienceDeltaRef.current;
+        if (delta.followers !== 0 || delta.following !== 0) {
+            setAudienceCounts((prev) => ({
+                followers: Math.max(0, prev.followers + delta.followers),
+                following: Math.max(0, prev.following + delta.following),
+            }));
+            audienceDeltaRef.current = { followers: 0, following: 0 };
+        }
+        setAudienceSheetOpen(false);
+    };
+
+    const toggleAudienceFollow = async (entryHandle: string, nextFollowing: boolean) => {
+        if (!user?.id || !user?.handle) throw new Error('Not signed in');
+        if (audienceActionLoading[entryHandle]) return;
+        const wasFollowing = audienceFollowMap[entryHandle] === true;
+        setAudienceActionLoading((prev) => ({ ...prev, [entryHandle]: true }));
+        try {
+            const result = await followOrRequest({
+                userId: String(user.id),
+                targetHandle: entryHandle,
+                viewerHandle: user.handle,
+                nextFollowing,
+                surfaceErrors: isLaravelApiEnabled(),
+            });
+            setAudienceFollowMap((prev) => ({ ...prev, [entryHandle]: result.following }));
+            setAudienceRequestMap((prev) => ({ ...prev, [entryHandle]: result.requested }));
+            if (wasFollowing !== result.following) {
+                audienceDeltaRef.current.following += result.following ? 1 : -1;
+            }
+        } finally {
+            setAudienceActionLoading((prev) => ({ ...prev, [entryHandle]: false }));
+        }
+    };
+
+    const removeAudienceFollower = async (entryHandle: string) => {
+        await removeFollower(entryHandle);
+        const key = entryHandle.replace(/^@/, '').trim().toLowerCase();
+        setAudienceFollowers((prev) =>
+            prev.filter((row) => row.handleNoAt.replace(/^@/, '').trim().toLowerCase() !== key),
+        );
+        audienceDeltaRef.current.followers -= 1;
+    };
+
+    const suggestionViewerId = user?.id != null ? String(user.id) : String(user?.handle || '');
+
+    const dismissSuggested = (entryHandle: string) => {
+        const key = entryHandle.replace(/^@/, '').trim().toLowerCase();
+        if (!key) return;
+        setDismissedSuggested((prev) => {
+            const next = { ...prev, [key]: true };
+            void saveDismissedSuggestions(suggestionViewerId, next);
+            return next;
+        });
+    };
+
+    const undoDismissSuggested = (entryHandle: string) => {
+        const key = entryHandle.replace(/^@/, '').trim().toLowerCase();
+        if (!key) return;
+        setDismissedSuggested((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            void saveDismissedSuggestions(suggestionViewerId, next);
+            return next;
+        });
+    };
+
+    const audienceRows = useMemo(() => {
+        const followed = new Set<string>();
+        Object.entries(audienceFollowMap).forEach(([handle, isFollowing]) => {
+            if (isFollowing) followed.add(handle.replace(/^@/, '').trim().toLowerCase());
+        });
+        audienceFollowing.forEach((row) => followed.add(row.handleNoAt.replace(/^@/, '').trim().toLowerCase()));
+        const base =
+            audienceScope === 'following'
+                ? audienceFollowing
+                : audienceScope === 'mutual'
+                  ? audienceFollowers.filter((row) => audienceFollowMap[row.handleNoAt])
+                  : audienceScope === 'suggested'
+                    ? buildSuggestedConnections({
+                          followers: audienceFollowers,
+                          following: audienceFollowing,
+                          posts: catalogPosts,
+                          viewerHandle: user?.handle,
+                          profileHandle: user?.handle,
+                          alreadyFollowing: followed,
+                          dismissed: dismissedSuggested,
+                          includeMockAuthors: !isLaravelApiEnabled(),
+                      })
+                    : audienceFollowers;
+        const q = audienceSearch.trim().toLowerCase();
+        if (!q) return base;
+        return base.filter(
+            (row) =>
+                row.handleNoAt.toLowerCase().includes(q) || row.displayName.toLowerCase().includes(q),
+        );
+    }, [
+        audienceScope,
+        audienceFollowers,
+        audienceFollowing,
+        audienceFollowMap,
+        audienceSearch,
+        dismissedSuggested,
+        user?.handle,
+    ]);
 
     const handleOpenPostFromCommentSafety = React.useCallback(
         (postId: string) => {
@@ -971,14 +1184,22 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Text style={styles.statNumber}>{posts.length}</Text>
                         <Text style={styles.statLabel}>Posts</Text>
                     </View>
-                    <View style={styles.statItemGlass}>
+                    <TouchableOpacity
+                        style={styles.statItemGlass}
+                        activeOpacity={0.85}
+                        onPress={() => openAudience('followers')}
+                    >
                         <Text style={styles.statNumber}>{audienceCounts.followers}</Text>
                         <Text style={styles.statLabel}>Followers</Text>
-                    </View>
-                    <View style={styles.statItemGlass}>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.statItemGlass}
+                        activeOpacity={0.85}
+                        onPress={() => openAudience('following')}
+                    >
                         <Text style={styles.statNumber}>{audienceCounts.following}</Text>
                         <Text style={styles.statLabel}>Following</Text>
-                    </View>
+                    </TouchableOpacity>
                 </View>
 
                 <View style={styles.profileActionsRow}>
@@ -1799,6 +2020,31 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     </Animated.View>
                 </View>
             </Modal>
+
+            <ViewProfileConnectionsModal
+                visible={audienceSheetOpen}
+                onClose={closeAudience}
+                scope={audienceScope}
+                onScopeChange={setAudienceScope}
+                search={audienceSearch}
+                onSearchChange={setAudienceSearch}
+                rows={audienceRows}
+                loading={audienceLoading}
+                loadingMore={false}
+                viewerHandle={user?.handle}
+                followMap={audienceFollowMap}
+                requestMap={audienceRequestMap}
+                actionLoadingMap={audienceActionLoading}
+                viewerOwnsList
+                onToggleFollow={toggleAudienceFollow}
+                onRemoveFollower={removeAudienceFollower}
+                onDismissSuggested={dismissSuggested}
+                onUndoDismissSuggested={undoDismissSuggested}
+                onOpenProfile={(handle) => {
+                    setAudienceSheetOpen(false);
+                    navigation.navigate('ViewProfile', { handle });
+                }}
+            />
 
             <GazetteerAlertSheet
                 visible={profileAlert !== null}

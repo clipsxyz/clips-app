@@ -236,6 +236,56 @@ class UserController extends Controller
     }
 
     /**
+     * Remove someone from the signed-in user's followers.
+     */
+    public function removeFollower(Request $request, string $handle): JsonResponse
+    {
+        $owner = Auth::user();
+        if (! $owner) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        $follower = User::whereRaw('LOWER(handle) = ?', [strtolower($handle)])->first();
+        if (! $follower) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+        if ($owner->id === $follower->id) {
+            return response()->json(['error' => 'Cannot remove yourself'], 400);
+        }
+
+        $removed = DB::transaction(function () use ($owner, $follower) {
+            $existing = DB::table('user_follows')
+                ->where('follower_id', $follower->id)
+                ->where('following_id', $owner->id)
+                ->where('status', 'accepted')
+                ->first();
+            if (! $existing) {
+                return false;
+            }
+            DB::table('user_follows')
+                ->where('follower_id', $follower->id)
+                ->where('following_id', $owner->id)
+                ->delete();
+            if ((int) $owner->followers_count > 0) {
+                $owner->decrement('followers_count');
+            }
+            if ((int) $follower->following_count > 0) {
+                $follower->decrement('following_count');
+            }
+
+            return true;
+        });
+
+        if (! $removed) {
+            return response()->json(['error' => 'Follower not found'], 404);
+        }
+
+        StoryService::forgetRailCacheForUser((string) $owner->id);
+        StoryService::forgetRailCacheForUser((string) $follower->id);
+
+        return response()->json(['removed' => true]);
+    }
+
+    /**
      * Get user's followers
      */
     public function followers(Request $request, string $handle): JsonResponse

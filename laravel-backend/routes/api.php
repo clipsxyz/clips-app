@@ -300,6 +300,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/{handle}/posts', [UserController::class, 'posts']);
         Route::get('/{handle}', [UserController::class, 'show']);
         Route::post('/{handle}/follow', [UserController::class, 'toggleFollow']);
+        Route::post('/{handle}/follower/remove', [UserController::class, 'removeFollower']);
         Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest']);
         Route::post('/{handle}/follow/deny', [UserController::class, 'denyFollowRequest']);
         Route::get('/{handle}/followers', [UserController::class, 'followers']);

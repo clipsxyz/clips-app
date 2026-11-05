@@ -285,6 +285,28 @@ function resolveCommentsPostId(postId: string): string {
   return id;
 }
 
+/** Comments created this session, so a reopen still shows them if the refetch lags or misses. */
+const postedCommentsByPost = new Map<string, Comment[]>();
+
+function rememberPostedComment(postId: string, comment: Comment): void {
+  const key = resolveCommentsPostId(String(postId || comment.postId || ''));
+  if (!key || !comment?.id) return;
+  const prev = postedCommentsByPost.get(key) || [];
+  postedCommentsByPost.set(
+    key,
+    [comment, ...prev.filter((row) => String(row.id) !== String(comment.id))].slice(0, 50),
+  );
+}
+
+function mergePostedComments(postId: string, items: Comment[]): Comment[] {
+  const key = resolveCommentsPostId(String(postId || ''));
+  const extra = (postedCommentsByPost.get(key) || []).filter((row) => !row.parentId);
+  if (!extra.length) return items;
+  const seen = new Set(items.map((row) => String(row.id)));
+  const missing = extra.filter((row) => !seen.has(String(row.id)));
+  return missing.length ? [...missing, ...items] : items;
+}
+
 function listTopLevelCommentsForPost(postId: string): Comment[] {
   const resolved = resolveCommentsPostId(postId);
   return comments.filter((c) => {
@@ -1216,7 +1238,11 @@ export function decorateForUser(userId: string, p: Post): Post {
     userLiked: localLiked !== undefined ? localLiked : p.userLiked === true,
     isBookmarked: !!s.bookmarks[idKey] || !!s.bookmarks[p.id],
     isFollowing,
-    userReclipped: !!s.reclips[idKey] || !!s.reclips[p.id],
+    userReclipped:
+      Object.prototype.hasOwnProperty.call(s.reclips, idKey) ||
+      Object.prototype.hasOwnProperty.call(s.reclips, p.id)
+        ? !!(s.reclips[idKey] || s.reclips[p.id])
+        : p.userReclipped === true,
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
     taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
     textStyle: p.textStyle,
@@ -1453,6 +1479,10 @@ width: response.width ?? existing?.width,
     authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
     userLiked: response.user_liked || false,
     userReclipped: response.user_reclipped || false,
+    isReclipped: Boolean(response.is_reclipped ?? response.isReclipped),
+    originalPostId: response.original_post_id || response.originalPostId || undefined,
+    originalUserHandle: response.original_user_handle || response.originalUserHandle || undefined,
+    reclippedBy: response.reclipped_by || response.reclippedBy || undefined,
     stickers: response.stickers,
     templateId: response.template_id || response.templateId,
     bannerText: response.banner_text || response.bannerText,
@@ -3056,7 +3086,28 @@ export type CommentsPage = {
   items: Comment[];
   nextCursor: string | null;
   hasMore: boolean;
+  /** Full comment total for this post id, including replies. Matches the footer. */
+  commentsCount?: number;
 };
+
+/** The id the footer counter is stored on. Never a parent, reel, or original-post id. */
+export function commentThreadPostId(
+  postOrId: string | number | { id?: string | number | null } | null | undefined,
+): string {
+  if (postOrId == null) return '';
+  if (typeof postOrId === 'string' || typeof postOrId === 'number') return String(postOrId);
+  return String(postOrId.id ?? '');
+}
+
+function bumpCachedCommentCount(postId: string, delta: number): void {
+  const id = String(postId);
+  for (const post of posts) {
+    if (String(post.id) !== id || !post.stats) continue;
+    const next = Math.max(0, (Number(post.stats.comments) || 0) + delta);
+    post.stats.comments = next;
+    post.comments_count = next;
+  }
+}
 
 export type HiddenCommentReviewItem = {
   id: string;
@@ -3129,19 +3180,39 @@ export async function fetchCommentsPage(
 
   const useLaravelAPI = isLaravelApiEnabled();
   if (useLaravelAPI) {
+    const threadId = resolvedPostId;
     try {
-      const response = await apiClient.fetchCommentsPage(postId, cursor, limit, userId, repliesLimit);
+      const response = await apiClient.fetchCommentsPage(threadId, cursor, limit, userId, repliesLimit);
       const itemsRaw = Array.isArray(response?.items) ? response.items : [];
+      const commentsCount = Number(response?.commentsCount);
+      const knownCount = Number.isFinite(commentsCount) ? commentsCount : undefined;
+      if (itemsRaw.length === 0 && (knownCount ?? 0) > 0) {
+        console.warn('[comments] empty list while comments_count > 0', {
+          route: `/comments/post/${threadId}`,
+          query: {
+            postId: threadId,
+            cursor,
+            limit,
+            repliesLimit,
+            userId: userId || null,
+            paged: true,
+          },
+          commentsCount: knownCount,
+        });
+      }
+      const mapped = itemsRaw.map(mapLaravelCommentToComment);
       return {
-        items: itemsRaw.map(mapLaravelCommentToComment),
+        items: cursor ? mapped : mergePostedComments(threadId, mapped),
         nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
         hasMore: !!response?.hasMore,
+        commentsCount: knownCount,
       };
     } catch (error: any) {
       if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
         console.warn('fetchCommentsPage API failed:', error);
       }
-      return { items: [], nextCursor: null, hasMore: false };
+      const remembered = mergePostedComments(threadId, listTopLevelCommentsForPost(threadId));
+      return { items: remembered, nextCursor: null, hasMore: false };
     }
   }
 
@@ -3270,19 +3341,24 @@ export async function addComment(postId: string, userHandle: string, text: strin
   const resolvedPostId = resolveCommentsPostId(postId);
 
   if (shouldUseLivePostApi(resolvedPostId)) {
-    const response = await apiClient.addComment(postId, text);
-    const moderation = evaluateCommentModeration(response.text || response.text_content || text);
-    return {
+    const response = await apiClient.addComment(resolvedPostId, text);
+    bumpCachedCommentCount(String(response?.post_id || response?.postId || resolvedPostId), 1);
+    const moderation = evaluateCommentModeration(response?.text || response?.text_content || text);
+    const rawTs = response?.created_at || response?.createdAt;
+    const createdAtMs = rawTs ? new Date(rawTs).getTime() : Date.now();
+    const saved: Comment = {
       id: response.id,
-      postId: response.post_id || response.postId || postId,
+      postId: response.post_id || response.postId || resolvedPostId,
       userHandle: response.user_handle || response.userHandle || userHandle,
-      text: response.text || response.text_content,
+      text: response.text || response.text_content || text,
       userLiked: false,
-      createdAt: new Date(response.created_at || response.createdAt).getTime(),
+      createdAt: Number.isFinite(createdAtMs) ? createdAtMs : Date.now(),
       likes: response.likes_count || response.likes || 0,
       moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
       moderationReason: moderation.matched[0]
     };
+    rememberPostedComment(saved.postId, saved);
+    return saved;
   }
 
   // Mock implementation (fallback)
@@ -3302,6 +3378,7 @@ export async function addComment(postId: string, userHandle: string, text: strin
     moderationReason: moderation.matched[0],
   };
   comments.push(comment);
+  rememberPostedComment(resolvedPostId, comment);
 
   // Update post comment count
   let post =
@@ -3457,6 +3534,26 @@ export async function toggleReplyLike(
 }
 
 export async function addReply(postId: string, parentId: string, userHandle: string, text: string): Promise<Comment> {
+  const resolvedPostId = resolveCommentsPostId(postId);
+  if (shouldUseLivePostApi(resolvedPostId)) {
+    const response = await apiClient.addReply(parentId, text);
+    const savedPostId = String(response?.post_id || response?.postId || resolvedPostId);
+    bumpCachedCommentCount(savedPostId, 1);
+    const moderation = evaluateCommentModeration(response?.text || response?.text_content || text);
+    return {
+      id: response.id,
+      postId: savedPostId,
+      userHandle: response.user_handle || response.userHandle || userHandle,
+      text: response.text || response.text_content || text,
+      userLiked: false,
+      createdAt: new Date(response.created_at || response.createdAt || Date.now()).getTime(),
+      likes: Number(response.likes_count || response.likes || 0) || 0,
+      parentId: response.parent_id || response.parentId || parentId,
+      moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+      moderationReason: moderation.matched[0],
+    };
+  }
+
   await delay(300);
   const moderation = evaluateCommentModeration(text);
   const reply: Comment = {
@@ -3480,6 +3577,7 @@ export async function addReply(postId: string, parentId: string, userHandle: str
     }
     parentComment.replies.push(reply);
     parentComment.replyCount = (parentComment.replyCount || 0) + 1;
+    bumpCachedCommentCount(resolvedPostId, 1);
 
     // Instagram-style: reply-to-comment → Activity/Notifs for the parent author (not a DM).
     const parentAuthor = String(parentComment.userHandle || '').trim();

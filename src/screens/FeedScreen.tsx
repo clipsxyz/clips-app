@@ -2934,7 +2934,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     // (and renderItem) do not churn when only one post's engagement fields change.
     const updatePost = React.useCallback((postId: string, updater: (post: Post) => Post) => {
         setPages(prev => prev.map(page =>
-            page.map(p => p.id === postId ? updater(p) : p)
+            page.map(p => String(p.id) === String(postId) ? updater(p) : p)
         ));
     }, []);
 
@@ -3193,7 +3193,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const tryReclipPost = React.useCallback(
         async (p: Post) => {
             const norm = (h?: string) => String(h || '').trim().toLowerCase();
-            if (!user || norm(p.userHandle) === norm(user.handle)) {
+            const sourceHandle = p.isReclipped && p.originalUserHandle ? p.originalUserHandle : p.userHandle;
+            if (!user || norm(p.userHandle) === norm(user.handle) || norm(sourceHandle) === norm(user.handle)) {
                 setFeedGazetteerAlert({
                     title: 'Cannot reclip',
                     message: 'You cannot reclip your own post',
@@ -3228,8 +3229,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }));
         try {
             const result = await reclipPost(userId, p.id, user.handle);
-            if (result.originalPost) {
+            if (result.originalPost && String(result.originalPost.id) === String(p.id)) {
                 updatePost(p.id, () => result.originalPost);
+            } else if (result.originalPost) {
+                updatePost(p.id, (prev) => ({
+                    ...prev,
+                    stats: { ...prev.stats, reclips: result.originalPost.stats.reclips },
+                }));
             }
             // Following feed should pick up your reclip on next load.
             if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {

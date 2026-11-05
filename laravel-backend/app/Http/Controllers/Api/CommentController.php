@@ -120,11 +120,31 @@ class CommentController extends Controller
             return $commentData;
         });
 
+        // Same total the post footer uses: every comment row for this post id,
+        // including replies. The list above is only the top-level page.
+        $storedCount = (int) (Post::query()->whereKey($postId)->value('comments_count') ?? 0);
+        $rowCount = (int) Comment::query()->where('post_id', $postId)->count();
+        $commentsCount = max($storedCount, $rowCount);
+
+        if ($transformedComments->isEmpty() && $commentsCount > 0 && ! $cursorState['created_at']) {
+            \Log::info('comments.empty_page', [
+                'route' => '/comments/post/'.$postId,
+                'postId' => $postId,
+                'commentsCount' => $commentsCount,
+                'cursor' => $request->get('cursor'),
+                'limit' => $limit,
+                'repliesLimit' => $repliesLimit,
+                'paged' => $isPaged,
+            ]);
+        }
+
         if ($isPaged || $request->filled('cursor')) {
             return response()->json([
+                'postId' => $postId,
                 'items' => $transformedComments,
                 'nextCursor' => $nextCursor,
                 'hasMore' => $hasMore,
+                'commentsCount' => $commentsCount,
             ]);
         }
 

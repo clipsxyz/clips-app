@@ -1241,8 +1241,8 @@ const FeedPostMedia = React.memo(
     // and the wrapper then caught up and reflowed. Tying the frame to the wrapper means
     // both change in the same commit, so there is no gap and no post-mount correction.
     //
-    // Detail uses the wrapper height too: the post viewer stages a tall portrait box and
-    // cover-fills it. Shrinking to the feed 4:5 clamp left blank space under vertical clips.
+    // Detail uses the wrapper height too. The post viewer sizes that box to the clip,
+    // capped at 9:16, and portrait frames use contain so the full picture stays visible.
     const frameHeight =
         (mode === 'feed' || mode === 'detail') && height > 0
             ? height
@@ -1292,12 +1292,15 @@ const FeedPostMedia = React.memo(
                       return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
                   })();
         const slideRatio = intrinsicRatio(slideSize?.width, slideSize?.height);
+        const slideIsPortrait = slideRatio == null || slideRatio < 1;
         const slideResizeMode: 'cover' | 'contain' =
-            mode === 'detail'
-                ? 'cover'
-                : slideRatio != null && slideRatio > 1
-                  ? 'contain'
-                  : 'cover';
+            mode === 'detail' && slideIsPortrait
+                ? 'contain'
+                : mode === 'detail'
+                  ? 'cover'
+                  : slideRatio != null && slideRatio > 1
+                    ? 'contain'
+                    : 'cover';
         // Hold ONLY the slide the horizontal drag started on so the outgoing clip's audio
         // cuts the instant the finger swipes, while the target (a different slideIndex) is
         // never held.

@@ -7,7 +7,6 @@ import {
     StyleSheet,
     View,
 } from 'react-native';
-import { fetchComments } from '../api/posts';
 import { appendMessage } from '../api/messages';
 import type { Post } from '../types';
 import FeedDmSheet, { type FeedDmSheetHandle } from './FeedDmSheet.native';
@@ -209,16 +208,12 @@ function FeedOverlayHost({
                                 isOpen={commentsOpen}
                                 commentAuthorHandle={userHandle ?? ''}
                                 currentUserHandle={userHandle}
-                                onAfterClose={() => {
-                                    const pid = String(commentsPost.id);
-                                    fetchComments(pid)
-                                        .then((list) =>
-                                            updatePost(pid, (p) => ({
-                                                ...p,
-                                                stats: { ...p.stats, comments: list.length },
-                                            })),
-                                        )
-                                        .catch(() => {});
+                                onCommentCountChange={(pid, count) => {
+                                    updatePost(String(pid), (p) => ({
+                                        ...p,
+                                        comments_count: count,
+                                        stats: { ...p.stats, comments: count },
+                                    }));
                                 }}
                                 onClose={closeCommentsSheet}
                             />

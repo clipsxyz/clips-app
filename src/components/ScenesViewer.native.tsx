@@ -223,7 +223,7 @@ export default function ScenesViewer({
     const patchPost = useCallback(
         (postId: string, patch: Partial<Post> | ((p: Post) => Post)) => {
             const next = postsProp.map((p) => {
-                if (p.id !== postId) return p;
+                if (String(p.id) !== String(postId)) return p;
                 return typeof patch === 'function' ? patch(p) : { ...p, ...patch };
             });
             onPostsChange?.(next);
@@ -664,7 +664,11 @@ export default function ScenesViewer({
             return;
         }
         const norm = (h?: string) => String(h || '').trim().toLowerCase();
-        if (norm(activePost.userHandle) === norm(viewerHandle)) {
+        const sourceHandle =
+            activePost.isReclipped && activePost.originalUserHandle
+                ? activePost.originalUserHandle
+                : activePost.userHandle;
+        if (norm(activePost.userHandle) === norm(viewerHandle) || norm(sourceHandle) === norm(viewerHandle)) {
             Alert.alert('Cannot reclip', "You can't reclip your own post.");
             return;
         }
@@ -678,9 +682,14 @@ export default function ScenesViewer({
         });
         try {
             const result = await reclipPost(viewerUserId, activePost.id, viewerHandle);
-            if (result.originalPost) {
+            if (result.originalPost && String(result.originalPost.id) === String(activePost.id)) {
                 patchPost(activePost.id, {
                     ...result.originalPost,
+                    userReclipped: true,
+                });
+            } else if (result.originalPost) {
+                patchPost(activePost.id, {
+                    stats: { ...activePost.stats, reclips: result.originalPost.stats.reclips },
                     userReclipped: true,
                 });
             }
@@ -1165,7 +1174,14 @@ export default function ScenesViewer({
                         <View style={styles.commentsModalSheet}>
                             <PostCommentsSheet
                                 variant="scenesEmbed"
-                                postId={activePost.id}
+                                postId={String(activePost.id)}
+                                onCommentCountChange={(pid, count) => {
+                                    patchPost(String(pid), (p) => ({
+                                        ...p,
+                                        comments_count: count,
+                                        stats: { ...p.stats, comments: count },
+                                    }));
+                                }}
                                 post={activePost}
                                 isOpen={commentsOpen}
                                 commentAuthorHandle={viewerHandle ?? ''}

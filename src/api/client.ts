@@ -1185,6 +1185,13 @@ export async function fetchUserPosts(
     return payload;
 }
 
+export async function removeFollower(handle: string) {
+    const encodedHandle = encodeURIComponent(handle);
+    return apiRequest(`/users/${encodedHandle}/follower/remove`, {
+        method: 'POST',
+    });
+}
+
 export async function toggleFollow(handle: string) {
     // Encode the handle for URL (handles special characters like @)
     const encodedHandle = encodeURIComponent(handle);
