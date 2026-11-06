@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Boost;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -13,11 +14,14 @@ class PostFactory extends Factory
 
     public function definition(): array
     {
-        $user = User::factory()->create();
         return [
             'id' => (string) Str::uuid(),
-            'user_id' => $user->id,
-            'user_handle' => $user->handle,
+            'user_id' => User::factory(),
+            'user_handle' => function (array $attributes) {
+                $handle = User::query()->whereKey($attributes['user_id'])->value('handle');
+
+                return $handle ?: '@gazetteer';
+            },
             'text_content' => $this->faker->optional()->sentence,
             'media_url' => $this->faker->optional()->imageUrl(),
             'media_type' => $this->faker->randomElement(['image', 'video']),
@@ -30,6 +34,24 @@ class PostFactory extends Factory
             'reclips_count' => 0,
             'is_reclipped' => false,
         ];
+    }
+
+    public function forUser(User $user): static
+    {
+        return $this->state([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+    }
+
+    /**
+     * Create the post with an active boost and one day of metrics.
+     */
+    public function boosted(): static
+    {
+        return $this->afterCreating(function (Post $post) {
+            Boost::factory()->forPost($post)->withMetrics()->create();
+        });
     }
 
     public function video(): static

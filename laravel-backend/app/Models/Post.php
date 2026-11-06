@@ -89,6 +89,10 @@ class Post extends Model
         'music_track_id', // Reference to music track from library
         'music_attribution', // Attribution text for music track
         'link_preview', // JSON: server-resolved OG/oEmbed payload { url, title, description, image_url, source, ... }
+        'is_boosted',
+        'boosted_until',
+        'boost_radius',
+        'boost_tier',
     ];
 
     protected $casts = [
@@ -104,6 +108,9 @@ class Post extends Model
         'shares_count' => 'integer',
         'reclips_count' => 'integer',
         'is_reclipped' => 'boolean',
+        'is_boosted' => 'boolean',
+        'boosted_until' => 'datetime',
+        'boost_radius' => 'float',
         'video_captions_enabled' => 'boolean',
         'subtitles_enabled' => 'boolean',
         'latitude' => 'float',

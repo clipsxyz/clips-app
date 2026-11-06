@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Boost;
 use App\Models\BoostAnalyticsEvent;
+use App\Models\BoostMetric;
 use App\Models\Message;
 use App\Models\Post;
 use App\Models\ProfileVisitEvent;
@@ -203,6 +204,73 @@ class BoostAnalyticsService
             $usedSourceContext ? 'source_post' : 'fallback_active_boost'
         );
         return true;
+    }
+
+    /**
+     * Feed impression, unique reach, or detail click. Owner views are ignored.
+     * Reach is stored once per viewer. Failures stay inside the caller.
+     */
+    public static function trackClientEvent(Boost $boost, string $event, ?string $actorUserId): bool
+    {
+        if (! in_array($event, ['impression', 'reach', 'click'], true)) {
+            return false;
+        }
+        if ($actorUserId && (string) $boost->user_id === $actorUserId) {
+            return false;
+        }
+
+        if ($event === 'reach' && $actorUserId) {
+            $alreadyReached = BoostAnalyticsEvent::query()
+                ->where('boost_id', $boost->id)
+                ->where('actor_user_id', $actorUserId)
+                ->where('event_type', 'reach')
+                ->exists();
+            if ($alreadyReached) {
+                return false;
+            }
+        }
+
+        if ($event === 'impression') {
+            $boost->increment('impressions_count');
+        }
+
+        self::recordEvent($boost->id, (string) $boost->post_id, $event, $actorUserId, 'feed');
+        self::incrementDailyMetric($boost, $event);
+
+        return true;
+    }
+
+    private static function incrementDailyMetric(Boost $boost, string $event): void
+    {
+        $column = match ($event) {
+            'impression' => 'impressions',
+            'reach' => 'reach',
+            'click' => 'clicks',
+            default => null,
+        };
+        if ($column === null) {
+            return;
+        }
+
+        $day = now()->toDateString();
+        $metric = BoostMetric::query()
+            ->where('boost_id', $boost->id)
+            ->whereDate('date', $day)
+            ->first();
+
+        if (! $metric) {
+            $metric = BoostMetric::query()->create([
+                'boost_id' => $boost->id,
+                'date' => $day,
+                'impressions' => 0,
+                'reach' => 0,
+                'clicks' => 0,
+                'ctr' => 0,
+            ]);
+        }
+
+        $metric->increment($column);
+        $boost->recalculateCtrForDate($day);
     }
 
     private static function recordEvent(int $boostId, string $postId, string $eventType, ?string $actorUserId, ?string $attributionContext = null): void

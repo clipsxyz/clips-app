@@ -331,8 +331,10 @@ export default function InboxScreen({ navigation, route }: any) {
     }, [user?.handle, insights, seenInsightIds, persistSeenInsights]);
 
     const unseenInsightsCount = useMemo(
-        () => insights.filter((insight) => insight.storyId && !seenInsightIds.has(insight.storyId)).length,
-        [insights, seenInsightIds]
+        () =>
+            actionableInsights.filter((insight) => insight.storyId && !seenInsightIds.has(insight.storyId))
+                .length,
+        [actionableInsights, seenInsightIds]
     );
     const storyViewedVersion = useSyncExternalStore(subscribeStoryViewed, getStoryViewedVersion);
     useEffect(() => {
@@ -400,6 +402,11 @@ export default function InboxScreen({ navigation, route }: any) {
             busSubs.forEach((sub) => sub.remove());
         };
     }, [user?.handle]);
+
+    useEffect(() => {
+        if (activeTab !== 'insights' || !user?.handle) return;
+        void loadDataRef.current?.({ silent: true });
+    }, [activeTab, user?.handle]);
 
     useEffect(() => {
         const requestedTab = route?.params?.initialTab;

@@ -3,6 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import FeedScreen from '../screens/FeedScreen';
 import BoostScreen from '../screens/BoostScreen';
+import BoostSuccessScreen from '../screens/BoostSuccessScreen';
+import BoostCancelScreen from '../screens/BoostCancelScreen';
 import SearchScreen from '../screens/SearchScreen';
 import InboxScreen from '../screens/InboxScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -83,7 +85,18 @@ function createMainTabStack(
 }
 
 export const HomeTabStack = createMainTabStack('Feed', HomeFeedScreen);
-export const BoostTabStack = createMainTabStack('BoostMain', BoostScreen);
+
+export function BoostTabStack() {
+    return (
+        <Stack.Navigator initialRouteName="BoostMain" screenOptions={stackScreenOptions}>
+            <Stack.Screen name="BoostMain" component={BoostScreen} />
+            <Stack.Screen name="BoostSuccess" component={BoostSuccessScreen} />
+            <Stack.Screen name="BoostCancel" component={BoostCancelScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+        </Stack.Navigator>
+    );
+}
+
 export const SearchTabStack = createMainTabStack('SearchMain', SearchScreen);
 
 export function InboxTabStack() {

@@ -137,6 +137,7 @@ import {
 } from '../utils/globalVideoMuteNative';
 import { FlatList, RefreshControl } from 'react-native-gesture-handler';
 
+import PromotedBadge from '../components/PromotedBadge.native';
 import FeedPageLayout, {
     FEED_CARD_BODY,
     FEED_CARD_CAPTION_PADDING,
@@ -145,10 +146,7 @@ import FeedPageLayout, {
     FEED_CARD_HEADER_OVERLAY,
     FEED_CARD_MEDIA_WRAP,
     FEED_CARD_OVERLAY_HEADER_GRADIENT,
-    FEED_CARD_SPONSORED_FEED_TYPE,
-    FEED_CARD_SPONSORED_PILL,
     FEED_CARD_SPONSORED_ROW,
-    FEED_CARD_SPONSORED_TEXT,
     FEED_CARD_UPLOAD_OVERLAY,
     FEED_CARD_UPLOAD_SUBTITLE,
     FEED_CARD_UPLOAD_TITLE,
@@ -219,6 +217,9 @@ import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
+import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
+import { withActiveBoost } from '../utils/boostFeedTracking';
+import { handlePostPress, useBoostedPostViewability } from '../components/FeedList';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
@@ -1540,12 +1541,7 @@ const FeedCard = React.memo(function FeedCard({
 
             {post.isBoosted && (
                 <View style={FEED_CARD_SPONSORED_ROW}>
-                    <View style={FEED_CARD_SPONSORED_PILL}>
-                        <Text style={FEED_CARD_SPONSORED_TEXT}>Sponsored</Text>
-                    </View>
-                    {post.boostFeedType ? (
-                        <Text style={FEED_CARD_SPONSORED_FEED_TYPE}>· {post.boostFeedType} boost</Text>
-                    ) : null}
+                    <PromotedBadge />
                 </View>
             )}
 
@@ -1980,12 +1976,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     page.map((p) => {
                         const ft = labels.get(String(p.id));
                         if (!ft) return p;
-                        if (p.isBoosted && p.boostFeedType === ft) return p;
-                        return {
+                        const next = withActiveBoost({
                             ...p,
                             isBoosted: true,
                             boostFeedType: p.boostFeedType ?? ft,
-                        };
+                        });
+                        if (p.isBoosted && p.boostFeedType === ft && p.boost?.id === next.boost?.id) return p;
+                        return next;
                     }),
                 ),
             );
@@ -1998,6 +1995,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         const sub = DeviceEventEmitter.addListener(
             'boostActivated',
             (payload: { postId?: string; feedType?: 'local' | 'regional' | 'national' }) => {
+                void applySponsoredLabels();
                 const postId = payload?.postId ? String(payload.postId) : '';
                 if (!postId) return;
                 setPages((prev) =>
@@ -2016,7 +2014,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             },
         );
         return () => sub.remove();
-    }, []);
+    }, [applySponsoredLabels]);
+
+    useEffect(() => {
+        const sub = DeviceEventEmitter.addListener(BOOST_STATUS_REFRESH_EVENT, () => {
+            void applySponsoredLabels();
+        });
+        return () => sub.remove();
+    }, [applySponsoredLabels]);
 
     useEffect(() => {
         const rewrite = (h: string | undefined, oldNorm: string, nextHandle: string) => {
@@ -2737,10 +2742,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     ).current;
 
+    const boostedPostViewability = useBoostedPostViewability();
     const viewabilityConfigCallbackPairs = useRef([
         {
             viewabilityConfig: viewabilityConfigRef.current,
             onViewableItemsChanged,
+        },
+        {
+            viewabilityConfig: boostedPostViewability.viewabilityConfig.current,
+            onViewableItemsChanged: boostedPostViewability.onViewableItemsChanged,
         },
     ]);
 
@@ -5370,7 +5380,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             }
                             return;
                         }
-                        navigation.navigate('PostDetail', { postId: mergedPost.id });
+                        handlePostPress(mergedPost, () => {
+                            navigation.navigate('PostDetail', { postId: mergedPost.id });
+                        });
                     }}
 onVisitProfile={() =>
                           navigation.navigate('ViewProfile', {

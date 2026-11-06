@@ -4,7 +4,7 @@ import { parsePublicShareLink } from '../utils/publicShareLink';
 /** Deep-link prefixes for WhatsApp / web share URLs opening the native app. */
 export function nativeShareLinkingPrefixes(): string[] {
     const origin = getPublicWebBaseUrl();
-    const prefixes = ['https://clips.app', 'https://www.clips.app'];
+    const prefixes = ['https://clips.app', 'https://www.clips.app', 'gazetteer://'];
     if (origin && !prefixes.includes(origin)) prefixes.unshift(origin);
     return prefixes;
 }

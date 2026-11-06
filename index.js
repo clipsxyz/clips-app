@@ -36,7 +36,8 @@ import './src/utils/reanimatedBottomSheetCompat.native';
 // NativeWind global.css can prevent the first paint on some Android builds; styles live in StyleSheet on native screens.
 // import './global.css';
 import { name as appName } from './app.json';
-import { registerBackgroundMessageHandler } from './src/services/notifications';
+import messaging from '@react-native-firebase/messaging';
+import { handleBackgroundPush } from './src/services/pushPayloadNative';
 
 LogBox.ignoreLogs([
   'Sending `onAnimatedValueUpdate`',
@@ -63,7 +64,13 @@ function Root() {
   }
 }
 
-// Register once at app entry so background notifications can be handled when supported.
-registerBackgroundMessageHandler().catch(() => {});
+// Registered outside the React tree so a background or killed app can still read the payload.
+try {
+  messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+    await handleBackgroundPush(remoteMessage);
+  });
+} catch (error) {
+  console.warn('[FCM] background handler unavailable:', error);
+}
 
 AppRegistry.registerComponent(appName, () => Root);

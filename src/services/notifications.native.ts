@@ -1,7 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { DeviceEventEmitter } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
 import { apiRequest } from '../api/client';
+import { extractPushPayload } from '../utils/pushPayload';
+import { handleBackgroundPush } from './pushPayloadNative';
+import { handleNotificationRouting } from '../utils/navigationService';
+import { clearCachedFcmToken, getLastSyncedFcmToken, subscribeFcmTokenRefresh, syncFCMToken } from './fcmService';
+import { hasNotificationPermission } from '../utils/permissions';
+
+export { syncFCMToken, clearCachedFcmToken } from './fcmService';
+export { hasNotificationPermission, isPushNotificationAuthorized, requestNotificationPermission } from '../utils/permissions';
 
 const NOTIFICATION_PREFS_KEY = 'notification_preferences';
 
@@ -32,7 +40,6 @@ export type NotificationPreferenceChannel =
   | 'share'
   | 'reclip';
 
-type NotificationPermission = 'default' | 'granted' | 'denied';
 type NotificationPayload = { data?: Record<string, any>; notification?: { title?: string; body?: string } };
 type NotificationInitOptions = {
   onNotificationPress?: (data: Record<string, any>) => void;
@@ -57,7 +64,6 @@ let hydrated = false;
 let unsubscribeForeground: (() => void) | null = null;
 let unsubscribeOpened: (() => void) | null = null;
 let unsubscribeTokenRefresh: (() => void) | null = null;
-let currentFcmToken: string | null = null;
 
 function getMessagingInstance(): any | null {
   try {
@@ -89,38 +95,13 @@ async function getCurrentUserIdentity(): Promise<{ id?: string; handle?: string 
   }
 }
 
-async function saveTokenToBackend(token: string): Promise<void> {
-  try {
-    const user = await getCurrentUserIdentity();
-    if (!user?.id || user.id === 'unknown') {
-      console.log('[FCM] skip token save until user is signed in');
-      return;
-    }
-    await apiRequest('/notifications/fcm-token', {
-      method: 'POST',
-      body: JSON.stringify({
-        token,
-        userId: user.id,
-        userHandle: user.handle || '',
-      }),
-    });
-    console.log('[FCM] token registered for', user.handle || user.id);
-  } catch (error) {
-    console.warn('Failed to save FCM token to backend:', error);
-  }
-}
-
 /** Call after login / hydrate so the device token is tied to the Sanctum user. */
 export async function registerFcmTokenForCurrentUser(): Promise<string | null> {
   await hydratePreferencesOnce();
-  const messaging = getMessagingInstance();
-  if (!messaging) return null;
+  const allowed = await hasNotificationPermission();
+  if (!allowed) return null;
   try {
-    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
-      await messaging.requestPermission();
-    }
-    await requestNotificationPermission();
-    return await getFCMToken();
+    return await syncFCMToken();
   } catch (error) {
     console.warn('[FCM] register after auth failed:', error);
     return null;
@@ -232,45 +213,8 @@ export function resetNotificationPreferences(): NotificationPreferences {
   return next;
 }
 
-export async function requestNotificationPermission(): Promise<NotificationPermission> {
-  if (Platform.OS !== 'android') {
-    return 'granted';
-  }
-
-  if (Platform.Version < 33) {
-    return 'granted';
-  }
-
-  try {
-    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-    return result === PermissionsAndroid.RESULTS.GRANTED ? 'granted' : 'denied';
-  } catch (error) {
-    console.error('Error requesting notification permission:', error);
-    return 'denied';
-  }
-}
-
 export async function getFCMToken(): Promise<string | null> {
-  const messaging = await getMessagingInstance();
-  if (!messaging) {
-    console.warn('[FCM] messaging module unavailable');
-    return null;
-  }
-  try {
-    const token = await messaging.getToken();
-    if (token) {
-      // Explicit log so `adb logcat` / `npx react-native log-android` can copy the device token.
-      console.log('[FCM] device token:', token);
-      await saveTokenToBackend(token);
-      currentFcmToken = token;
-    } else {
-      console.warn('[FCM] getToken returned empty');
-    }
-    return token || null;
-  } catch (error) {
-    console.warn('Failed to get FCM token:', error);
-    return null;
-  }
+  return syncFCMToken();
 }
 
 export async function onForegroundMessage(
@@ -296,7 +240,6 @@ export function showBrowserNotification(title: string, options?: any): void {
 
 export async function initializeNotifications(options?: NotificationInitOptions): Promise<void> {
   await hydratePreferencesOnce();
-  const prefs = getNotificationPreferences();
 
   const messaging = await getMessagingInstance();
   if (!messaging) {
@@ -304,13 +247,11 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     return;
   }
 
-  // Always attempt token fetch so Firebase console / log-android can capture the device token.
+  // Register a token only when permission was already granted. The pre-permission
+  // modal is what shows the system prompt.
   try {
-    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
-      await messaging.requestPermission();
-    }
-    await requestNotificationPermission();
-    await getFCMToken();
+    const allowed = await hasNotificationPermission();
+    if (allowed) await getFCMToken();
   } catch (error) {
     console.warn('Native FCM token fetch failed:', error);
   }
@@ -327,20 +268,26 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     unsubscribeTokenRefresh();
     unsubscribeTokenRefresh = null;
   }
+  unsubscribeTokenRefresh = subscribeFcmTokenRefresh();
 
   // Deep-link listeners always register in mock/dev — tapping a push must navigate even if
   // the master Settings toggle is off (toggle gates delivery, not open handling).
-  if (typeof messaging.onNotificationOpenedApp === 'function' && options?.onNotificationPress) {
+  if (typeof messaging.onNotificationOpenedApp === 'function') {
     unsubscribeOpened = messaging.onNotificationOpenedApp((remoteMessage: NotificationPayload) => {
-      options.onNotificationPress?.(remoteMessage?.data || {});
+      handleNotificationRouting(remoteMessage);
+      options?.onNotificationPress?.(extractPushPayload(remoteMessage).data);
     });
   }
 
-  if (typeof messaging.getInitialNotification === 'function' && options?.onNotificationPress) {
+  if (typeof messaging.getInitialNotification === 'function') {
     try {
       const initial = await messaging.getInitialNotification();
-      if (initial?.data) {
-        options.onNotificationPress(initial.data);
+      if (initial) {
+        const parsed = extractPushPayload(initial);
+        if (Object.keys(parsed.data).length > 0) {
+          handleNotificationRouting(initial);
+          options?.onNotificationPress?.(parsed.data);
+        }
       }
     } catch (error) {
       console.warn('Failed to read initial notification:', error);
@@ -348,50 +295,24 @@ export async function initializeNotifications(options?: NotificationInitOptions)
   }
 
   unsubscribeForeground = await onForegroundMessage((payload: NotificationPayload) => {
-    const data = payload?.data || {};
-    const type = String(data.type || data.notificationType || '').toLowerCase();
-    if (type === 'group_invite') {
-      void import('../utils/dispatchBrowserEvent').then(({ dispatchBrowserEvent }) => {
-        dispatchBrowserEvent('notificationsUpdated', {});
-        dispatchBrowserEvent('inboxUnreadChanged', {});
-      });
-      return;
+    const parsed = extractPushPayload(payload);
+    if (parsed.title || parsed.body) {
+      DeviceEventEmitter.emit('foregroundPush', parsed);
     }
-    if (type !== 'dm' && type !== 'message' && type !== 'group_chat') return;
+    const data = parsed.data;
+    const type = String(data.type || data.notificationType || '').toLowerCase();
     void import('../utils/dispatchBrowserEvent').then(({ dispatchBrowserEvent }) => {
-      dispatchBrowserEvent('conversationUpdated', {
-        conversation_id: data.conversation_id || data.conversationId,
-        chat_group_id: data.group_id || data.chatGroupId || data.chat_group_id,
-        sender_id: data.sender_id || data.senderId,
-      });
+      if (type === 'dm' || type === 'message' || type === 'group_chat' || type === 'sticker' || type === 'reply') {
+        dispatchBrowserEvent('conversationUpdated', {
+          conversation_id: data.conversation_id || data.conversationId,
+          chat_group_id: data.group_id || data.chatGroupId || data.chat_group_id,
+          sender_id: data.sender_id || data.senderId,
+        });
+      }
+      dispatchBrowserEvent('notificationsUpdated', {});
       dispatchBrowserEvent('inboxUnreadChanged', {});
     });
   });
-
-  if (!prefs.enabled) {
-    return;
-  }
-
-  const permission = await requestNotificationPermission();
-  if (permission !== 'granted') {
-    return;
-  }
-
-  try {
-    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
-      await messaging.requestPermission();
-    }
-  } catch (error) {
-    console.warn('Native notification permission request failed:', error);
-  }
-
-  if (typeof messaging.onTokenRefresh === 'function') {
-    unsubscribeTokenRefresh = messaging.onTokenRefresh((token: string) => {
-      console.log('[FCM] device token (refresh):', token);
-      currentFcmToken = token;
-      void saveTokenToBackend(token);
-    });
-  }
 }
 
 export function teardownNotifications(): void {
@@ -418,8 +339,10 @@ export async function registerBackgroundMessageHandler(
   }
   try {
     messaging.setBackgroundMessageHandler(async (remoteMessage: NotificationPayload) => {
+      await handleBackgroundPush(remoteMessage);
       if (handler) {
-        await handler(remoteMessage?.data || {});
+        const parsed = extractPushPayload(remoteMessage);
+        await handler(parsed.data);
       }
     });
     return true;
@@ -432,7 +355,8 @@ export async function registerBackgroundMessageHandler(
 export async function clearNotificationSession(): Promise<void> {
   const messaging = getMessagingInstance();
   const tokens = new Set<string>();
-  if (currentFcmToken) tokens.add(currentFcmToken);
+  const remembered = getLastSyncedFcmToken();
+  if (remembered) tokens.add(remembered);
   try {
     const live = await messaging?.getToken?.();
     if (typeof live === 'string' && live.trim()) tokens.add(live.trim());
@@ -442,7 +366,11 @@ export async function clearNotificationSession(): Promise<void> {
   for (const token of tokens) {
     await removeTokenFromBackend(token);
   }
-  currentFcmToken = null;
+  try {
+    await clearCachedFcmToken();
+  } catch {
+    /* ignore */
+  }
   if (messaging && typeof messaging.deleteToken === 'function') {
     try {
       await messaging.deleteToken();

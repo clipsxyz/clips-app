@@ -116,3 +116,48 @@ describe('navigateFromPushNotificationData share and reclip', () => {
     });
 });
 
+describe('navigateFromPushNotificationData route', () => {
+    it('opens the home feed when route is feed', () => {
+        const navigate = vi.fn();
+        const ok = navigateFromPushNotificationData(
+            { isReady: () => true, navigate },
+            { type: 'test_notification', route: 'feed' },
+        );
+        expect(ok).toBe(true);
+        expect(navigate).toHaveBeenCalledWith('MainTabs', {
+            screen: 'Home',
+            params: undefined,
+        });
+    });
+
+    it('opens PostDetail from route and postId', () => {
+        const navigate = vi.fn();
+        navigateFromPushNotificationData(
+            { isReady: () => true, navigate },
+            { route: 'post', postId: 'post-9' },
+        );
+        expect(navigate).toHaveBeenCalledWith('PostDetail', { postId: 'post-9' });
+    });
+
+    it('opens the feed when a post route has no post_id', () => {
+        const navigate = vi.fn();
+        navigateFromPushNotificationData(
+            { isReady: () => true, navigate },
+            { route: 'post' },
+        );
+        expect(navigate).toHaveBeenCalledWith('MainTabs', {
+            screen: 'Home',
+            params: undefined,
+        });
+    });
+
+    it('opens StoryViewer from route and story_id', () => {
+        const navigate = vi.fn();
+        navigateFromPushNotificationData(
+            { isReady: () => true, navigate },
+            { route: 'story', story_id: 'story-4' },
+        );
+        expect(navigate).toHaveBeenCalledWith('StoryViewer', { storyId: 'story-4' });
+    });
+});
+

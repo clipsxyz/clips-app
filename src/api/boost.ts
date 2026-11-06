@@ -30,11 +30,13 @@ export interface BoostedPost {
 export interface BoostAnalytics {
     hasBoost: boolean;
     isActive: boolean;
+    boostId?: number;
     postId: string;
     range?: '24h' | '7d' | 'all';
     feedType?: BoostFeedType | null;
     activatedAt?: string | null;
     expiresAt?: string | null;
+    spend?: number;
     spendEur?: number;
     analytics: {
         impressions: number;
@@ -224,7 +226,7 @@ export async function getActiveBoost(postId: string): Promise<BoostedPost | null
                 postId: id,
                 userId: '',
                 feedType: status.feedType as BoostFeedType,
-                price: 0,
+                price: Number(status.spendEur) > 0 ? Number(status.spendEur) : 0,
                 activatedAt: status.activatedAt ? new Date(status.activatedAt).getTime() : 0,
                 expiresAt: status.expiresAt ? new Date(status.expiresAt).getTime() : 0,
                 isActive: true,
@@ -400,6 +402,51 @@ export async function getBoostStats(postId: string): Promise<{
         activatedAt: boost.activatedAt,
         expiresAt: boost.expiresAt
     };
+}
+
+export type BoostPostListStatus = 'all' | 'ready' | 'active' | 'ended';
+
+export type BoostPostCounts = {
+    all: number;
+    ready: number;
+    active: number;
+    ended: number;
+};
+
+export type BoostPostsPage = {
+    status: BoostPostListStatus;
+    counts: BoostPostCounts;
+    posts: any[];
+};
+
+const EMPTY_BOOST_COUNTS: BoostPostCounts = { all: 0, ready: 0, active: 0, ended: 0 };
+
+/** Owner posts for one Boost screen tab, with counts for every tab. */
+export async function fetchBoostPosts(status: BoostPostListStatus = 'all'): Promise<BoostPostsPage> {
+    const data = await apiClient.apiRequest(`/boost/posts?status=${encodeURIComponent(status)}`);
+    const counts = data?.counts ?? {};
+    const resolved = (data?.status === 'ready' || data?.status === 'active' || data?.status === 'ended' || data?.status === 'all')
+        ? data.status
+        : status;
+    return {
+        status: resolved,
+        counts: {
+            all: Number(counts.all ?? EMPTY_BOOST_COUNTS.all),
+            ready: Number(counts.ready ?? EMPTY_BOOST_COUNTS.ready),
+            active: Number(counts.active ?? EMPTY_BOOST_COUNTS.active),
+            ended: Number(counts.ended ?? EMPTY_BOOST_COUNTS.ended),
+        },
+        posts: Array.isArray(data?.posts) ? data.posts : [],
+    };
+}
+
+export async function confirmBoostCheckout(sessionId: string): Promise<{ post_id?: string; feed_type?: BoostFeedType }> {
+    const data = await apiClient.apiRequest('/boosts/confirm-checkout', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId }),
+    }) as { post_id?: string; feed_type?: BoostFeedType; error?: string };
+    if (data?.error) throw new Error(data.error);
+    return { post_id: data?.post_id, feed_type: data?.feed_type };
 }
 
 export async function getBoostAnalytics(postId: string, range: '24h' | '7d' | 'all' = 'all'): Promise<BoostAnalytics> {

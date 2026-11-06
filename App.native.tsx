@@ -3,17 +3,14 @@
  * Social media app with live streaming
  */
 
-import React, { useEffect, useState } from 'react';
-import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppState, Linking, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { CommonActions, DarkTheme, NavigationContainer, StackActions } from '@react-navigation/native';
 import { isMainTabName } from './src/navigation/mainTabs';
 import { resetRootToScreen, rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
-import {
-  getNativeShareNavState,
-  nativeShareLinkingPrefixes,
-} from './src/navigation/shareLinking.native';
+import { handleIncomingDeepLink, linking, wasDeepLinkProcessed } from './src/navigation/linking';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { enableFreeze } from 'react-native-screens';
@@ -49,9 +46,13 @@ import MessagesScreen from './src/screens/MessagesScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
 import VideoPlaybackSettingsScreen from './src/screens/VideoPlaybackSettingsScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import ChangePhoneNumberScreen from './src/screens/ChangePhoneNumberScreen';
 import PaymentScreen from './src/screens/PaymentScreen';
 import PaymentSuccessScreen from './src/screens/PaymentSuccessScreen';
+import BoostSuccessScreen from './src/screens/BoostSuccessScreen';
+import BoostAnalyticsScreen from './src/screens/BoostAnalyticsScreen';
+import BoostCancelScreen from './src/screens/BoostCancelScreen';
 import SplashScreen from './src/screens/SplashScreen';
 import LandingScreen from './src/screens/LandingScreen';
 import TermsScreen from './src/screens/TermsScreen';
@@ -64,8 +65,10 @@ import ImageFullscreenScreen from './src/screens/ImageFullscreenScreen.native';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
 import { resetGlobalVideoMutedForNewSession } from './src/utils/globalVideoMuteNative';
-import { schedulePushNotificationNavigation } from './src/utils/pushNotificationNavigationNative';
 import UploadProgressToast from './src/components/UploadProgressToast.native';
+import ForegroundPushBanner from './src/components/ForegroundPushBanner.native';
+import NotificationPermissionModal from './src/components/NotificationPermissionModal.native';
+import BoostActivatedModal from './src/components/BoostActivatedModal.native';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -309,8 +312,17 @@ function MainTabs() {
 }
 
 function App(): React.JSX.Element {
-  const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
-    schedulePushNotificationNavigation(() => navigationRef, data || {});
+  const lastProcessedUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      if (!url || url === lastProcessedUrlRef.current || wasDeepLinkProcessed(url)) return;
+      lastProcessedUrlRef.current = url;
+      if (url.includes('boost/success')) {
+        handleIncomingDeepLink(url);
+      }
+    });
+    return () => subscription.remove();
   }, []);
 
   React.useEffect(() => {
@@ -321,7 +333,7 @@ function App(): React.JSX.Element {
   }, []);
 
   React.useEffect(() => {
-    initializeNotifications({ onNotificationPress: handleNotificationPress })
+    initializeNotifications()
       .then(() =>
         import('./src/services/notifications').then((mod) => {
           const register =
@@ -336,7 +348,7 @@ function App(): React.JSX.Element {
         console.warn('Native notification initialization failed:', error);
       });
     return () => teardownNotifications();
-  }, [handleNotificationPress]);
+  }, []);
 
   return (
     <AppErrorBoundary>
@@ -346,13 +358,14 @@ function App(): React.JSX.Element {
       <SafeAreaProvider>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
         <UploadProgressToast />
+        <ForegroundPushBanner />
+        <NotificationPermissionModal />
+        <BoostActivatedModal />
+        <View style={styles.appRoot}>
         <NavigationContainer
           ref={navigationRef}
           theme={NAV_THEME}
-          linking={{
-            prefixes: nativeShareLinkingPrefixes(),
-            getStateFromPath: (path) => getNativeShareNavState(path),
-          }}
+          linking={linking}
         >
           <Stack.Navigator
             initialRouteName="Splash"
@@ -423,6 +436,15 @@ function App(): React.JSX.Element {
             }}
           />
           <Stack.Screen
+            name="StoryViewer"
+            component={StoriesScreen}
+            options={{
+              presentation: 'fullScreenModal',
+              contentStyle: { backgroundColor: '#000000' },
+              animation: 'default',
+            }}
+          />
+          <Stack.Screen
             name="Scenes"
             component={ScenesScreen as React.ComponentType}
             options={{
@@ -440,6 +462,11 @@ function App(): React.JSX.Element {
           />
           <Stack.Screen
             name="InstantCreate"
+            component={InstantCreateScreen}
+            options={{ presentation: 'fullScreenModal' }}
+          />
+          <Stack.Screen
+            name="CreatePost"
             component={InstantCreateScreen}
             options={{ presentation: 'fullScreenModal' }}
           />
@@ -481,6 +508,11 @@ function App(): React.JSX.Element {
             options={{ presentation: 'modal' }}
           />
           <Stack.Screen
+            name="Settings"
+            component={SettingsScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
             name="ChangePhoneNumber"
             component={ChangePhoneNumberScreen}
             options={{ presentation: 'modal' }}
@@ -495,6 +527,17 @@ function App(): React.JSX.Element {
             component={PaymentSuccessScreen}
             options={{ presentation: 'modal' }}
           />
+          <Stack.Screen
+            name="BoostSuccess"
+            component={BoostSuccessScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="BoostCancel"
+            component={BoostCancelScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen name="BoostAnalytics" component={BoostAnalyticsScreen} />
           <Stack.Screen
             name="Landing"
             component={LandingScreen}
@@ -522,6 +565,7 @@ function App(): React.JSX.Element {
           />
           </Stack.Navigator>
         </NavigationContainer>
+        </View>
       </SafeAreaProvider>
       </BottomSheetModalProvider>
     </AuthProvider>

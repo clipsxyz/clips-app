@@ -265,18 +265,30 @@ function remapDevMediaHostToApiOrigin(absoluteUrl: string): string {
     }
 }
 
+/**
+ * A physical phone cannot open `localhost` or `127.0.0.1` — that is the phone.
+ * Dev media saved with those hosts has to use the LAN API origin.
+ */
+function preferPhoneReachableMediaHost(url: string): string {
+    if (!url || !isReactNativeRuntime() || isAndroidEmulator()) return url;
+    const lanOrigin = DEV_LAN_API_BASE_URL.replace(/\/api$/i, '');
+    return url.replace(/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?/i, lanOrigin);
+}
+
 /** Turn `/storage/...` (and other relative Laravel paths) into a loadable URL. */
 export function resolvePublicMediaUrl(url: string | null | undefined): string {
     const raw = String(url || '').trim();
     if (!raw) return '';
     if (/^(data:|file:|content:|ph:)/i.test(raw)) return raw;
-    if (/^https?:\/\//i.test(raw)) return remapDevMediaHostToApiOrigin(raw);
+    if (/^https?:\/\//i.test(raw)) return preferPhoneReachableMediaHost(remapDevMediaHostToApiOrigin(raw));
     let origin = currentApiOrigin();
-    if (!origin || !/^https?:\/\//i.test(origin)) {
+    if (!origin || !/^https?:\/\//i.test(origin) || (isReactNativeRuntime() && !isAndroidEmulator() && isLoopbackApiHost(origin))) {
         origin = isReactNativeRuntime() ? DEV_LAN_API_BASE_URL.replace(/\/api$/i, '') : origin;
     }
-    if (raw.startsWith('/')) return origin ? `${origin}${raw}` : raw;
-    return origin ? `${origin}/${raw}` : raw;
+    const absolute = raw.startsWith('/')
+        ? (origin ? `${origin}${raw}` : raw)
+        : (origin ? `${origin}/${raw}` : raw);
+    return preferPhoneReachableMediaHost(absolute);
 }
 
 /**

@@ -421,6 +421,11 @@ class StoryController extends Controller
             return response()->json(['error' => 'Story has expired'], 400);
         }
 
+        // Opening your own story is not activity for Insights.
+        if ((string) $story->user_id === (string) $userId) {
+            return response()->json(['success' => true]);
+        }
+
         DB::transaction(function () use ($userId, $story) {
             StoryView::firstOrCreate(
                 [
@@ -452,8 +457,9 @@ class StoryController extends Controller
             ->where('user_id', $user->id)
             ->active()
             ->with([
-                'views' => function ($q) {
+                'views' => function ($q) use ($user) {
                     $q->whereNotNull('user_id')
+                        ->where('user_id', '!=', $user->id)
                         ->with('user:id,username,handle,display_name,avatar_url')
                         ->orderByDesc('created_at');
                 },
@@ -465,10 +471,13 @@ class StoryController extends Controller
 
         $ownerHandle = mb_strtolower((string) $user->handle);
 
-        $insights = $stories->map(function (Story $story) use ($ownerHandle) {
+        $insights = $stories->map(function (Story $story) use ($ownerHandle, $user) {
             $viewers = $this->presentViewers($story);
             $reactions = $story->reactions
-                ->filter(function ($reaction) use ($ownerHandle) {
+                ->filter(function ($reaction) use ($ownerHandle, $user) {
+                    if ((string) ($reaction->user_id ?? '') === (string) $user->id) {
+                        return false;
+                    }
                     $handle = mb_strtolower((string) ($reaction->user?->handle ?? $reaction->user_handle ?? ''));
                     return $handle !== '' && $handle !== $ownerHandle;
                 })
@@ -481,7 +490,10 @@ class StoryController extends Controller
                 })
                 ->values();
             $replies = $story->replies
-                ->filter(function ($reply) use ($ownerHandle) {
+                ->filter(function ($reply) use ($ownerHandle, $user) {
+                    if ((string) ($reply->user_id ?? '') === (string) $user->id) {
+                        return false;
+                    }
                     $handle = mb_strtolower((string) ($reply->user?->handle ?? $reply->user_handle ?? ''));
                     return $handle !== '' && $handle !== $ownerHandle;
                 })
@@ -500,13 +512,20 @@ class StoryController extends Controller
                 'media_type' => $story->media_type,
                 'text' => $story->text,
                 'created_at' => optional($story->created_at)?->toIso8601String(),
-                'views' => (int) $story->views_count,
+                'views' => count($viewers),
                 'unique_viewers' => $this->uniqueViewerCount($story),
                 'viewers' => $viewers,
                 'viewer_handles' => collect($viewers)->pluck('handle')->filter()->values()->all(),
                 'reactions' => $reactions,
                 'replies' => $replies,
             ];
+        })->filter(function (array $row) {
+            $reactions = $row['reactions'] ?? [];
+            $replies = $row['replies'] ?? [];
+
+            return count($row['viewer_handles'] ?? []) > 0
+                || (is_countable($reactions) && count($reactions) > 0)
+                || (is_countable($replies) && count($replies) > 0);
         })->values();
 
         return response()->json(['insights' => $insights]);
@@ -732,8 +751,10 @@ class StoryController extends Controller
         }
 
         return $story->views
-            ->filter(function (StoryView $view) {
-                return filled($view->user_id) && $view->user;
+            ->filter(function (StoryView $view) use ($story) {
+                return filled($view->user_id)
+                    && (string) $view->user_id !== (string) $story->user_id
+                    && $view->user;
             })
             ->unique('user_id')
             ->values()
@@ -757,6 +778,7 @@ class StoryController extends Controller
         return (int) DB::table('story_views')
             ->where('story_id', $story->id)
             ->whereNotNull('user_id')
+            ->where('user_id', '!=', $story->user_id)
             ->selectRaw('COUNT(DISTINCT user_id) as aggregate')
             ->value('aggregate');
     }

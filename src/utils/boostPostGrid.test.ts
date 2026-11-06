@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     classifyBoostStatus,
+    boostFilterEmptyState,
     getQualityLabel,
     estimateReachTeaser,
     boostStatusLabel,
@@ -28,6 +29,26 @@ describe('boostPostGrid', () => {
 
     it('classifies ready', () => {
         expect(classifyBoostStatus(mockPost())).toBe('ready');
+    });
+
+    it('prefers the backend boost status over local flags', () => {
+        expect(classifyBoostStatus(mockPost({ boostStatus: 'ended', isBoosted: true }))).toBe('ended');
+    });
+
+    it('uses a tab-specific empty state', () => {
+        expect(boostFilterEmptyState('active')).toMatchObject({
+            title: 'No Active Boosts',
+            action: 'ready',
+        });
+        expect(boostFilterEmptyState('ended')).toMatchObject({
+            title: 'No Past Boosts Yet',
+            action: 'ready',
+        });
+        expect(boostFilterEmptyState('ready')).toMatchObject({
+            title: 'No Posts Available',
+            action: 'create',
+        });
+        expect(boostFilterEmptyState('all').action).toBe('create');
     });
 
     it('returns quality label', () => {

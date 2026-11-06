@@ -87,6 +87,7 @@ import CollectionCoverThumb from '../components/CollectionCoverThumb.native';
 import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
 import ProfilePictureModal from '../components/ProfilePictureModal.native';
 import CommentSafetyModal from '../components/CommentSafetyModal.native';
+import { PushNotificationSettingsRow } from './SettingsScreen';
 import {
     getNotificationPreferences,
     loadNotificationPreferences,
@@ -1887,6 +1888,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                             <Text style={styles.smallActionButtonText}>Reset</Text>
                                         </TouchableOpacity>
                                 </View>
+
+                                <PushNotificationSettingsRow
+                                    active={settingsOpen}
+                                    onBeforePermissionModal={() => setSettingsOpen(false)}
+                                />
 
                                 <View style={styles.toggleRow}>
                                     <View style={styles.toggleInfo}>

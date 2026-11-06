@@ -1070,10 +1070,6 @@ export default function InboxPage() {
         () => (user?.handle ? getSeenInsightStoryIds(user.handle) : new Set<string>()),
         [user?.handle, insights, getSeenInsightStoryIds]
     );
-    const unseenInsightsCount = React.useMemo(
-        () => insights.filter((insight) => !seenInsightIds.has(insight.storyId)).length,
-        [insights, seenInsightIds]
-    );
     const actionableInsights = React.useMemo(
         () =>
             insights.filter(
@@ -1084,6 +1080,12 @@ export default function InboxPage() {
                     (Array.isArray(insight.replies) && insight.replies.length > 0)
             ),
         [insights]
+    );
+    const unseenInsightsCount = React.useMemo(
+        () =>
+            actionableInsights.filter((insight) => insight.storyId && !seenInsightIds.has(insight.storyId))
+                .length,
+        [actionableInsights, seenInsightIds]
     );
     const insightsOverview = React.useMemo(
         () =>

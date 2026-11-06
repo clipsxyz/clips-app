@@ -21,6 +21,9 @@ use App\Http\Controllers\Api\CollectionController;
 use App\Http\Controllers\Api\MusicController;
 use App\Http\Controllers\Api\MusicLibraryController;
 use App\Http\Controllers\Api\BoostController;
+use App\Http\Controllers\Api\BoostAnalyticsController;
+use App\Http\Controllers\Api\BoostCheckoutController;
+use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SuggestedPlacesController;
 use App\Http\Controllers\Api\FeedContentPreferenceController;
 use App\Http\Controllers\Api\PostReportController;
@@ -228,9 +231,16 @@ Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken']
 Route::get('/public/stories', [StoryController::class, 'showPublic'])
     ->middleware('throttle:30,1');
 
+Route::post('/webhooks/stripe', [StripeWebhookController::class, 'handle']);
+
 // Protected routes
 Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])->group(function () {
     Route::get('/boost/analytics/{postId}', [BoostController::class, 'analytics']);
+    Route::get('/boost/posts', [BoostController::class, 'posts']);
+    Route::post('/boosts/create-checkout-session', [BoostCheckoutController::class, 'createCheckoutSession']);
+    Route::post('/boosts/confirm-checkout', [BoostCheckoutController::class, 'confirmCheckout']);
+    Route::post('/boosts/{boostId}/track', [BoostController::class, 'track'])->whereNumber('boostId');
+    Route::get('/boosts/{boost}/analytics', [BoostAnalyticsController::class, 'show'])->whereNumber('boost');
 
     Route::get('/feed-content-preferences', [FeedContentPreferenceController::class, 'show']);
     Route::post('/feed-content-preferences/mute', [FeedContentPreferenceController::class, 'mute']);
@@ -312,6 +322,9 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/{handle}/following', [UserController::class, 'following']);
         Route::post('/privacy/toggle', [UserController::class, 'togglePrivacy']);
     });
+
+    // Client alias used by the mobile FCM service (`POST /api/fcm-token`).
+    Route::post('/fcm-token', [NotificationController::class, 'saveFCMToken']);
 
     // Notifications routes
     Route::prefix('notifications')->group(function () {

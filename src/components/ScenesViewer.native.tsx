@@ -22,6 +22,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import PromotedBadge from './PromotedBadge.native';
 import LinearGradient from 'react-native-linear-gradient';
 import { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
@@ -1118,6 +1119,11 @@ export default function ScenesViewer({
                         ) : null}
                     </View>
                 </View>
+                {activePost.isBoosted ? (
+                    <View style={styles.promotedRow}>
+                        <PromotedBadge />
+                    </View>
+                ) : null}
                 {caption ? (
                     <View style={styles.captionRow}>
                         <Text style={styles.caption} numberOfLines={2}>
@@ -1625,6 +1631,10 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '600',
+    },
+    promotedRow: {
+        alignSelf: 'flex-start',
+        marginBottom: 8,
     },
     captionRow: {
         flexDirection: 'row',

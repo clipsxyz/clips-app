@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\BoostCheckoutReturnController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\File;
 
@@ -13,6 +14,9 @@ use Illuminate\Support\Facades\File;
 | be assigned to the "web" middleware group. Make something great!
 |
 */
+
+Route::get('/boost/success', [BoostCheckoutReturnController::class, 'success']);
+Route::get('/boost/cancel', [BoostCheckoutReturnController::class, 'cancel']);
 
 Route::get('/', function () {
     return response()->json([

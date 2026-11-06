@@ -11,6 +11,11 @@ function num(...vals: Array<number | string | null | undefined>): number {
     return 0;
 }
 
+function money(value: unknown): number | undefined {
+    const n = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 export function buildInstantAnalytics(post: Post, range: '24h' | '7d' | 'all' = 'all'): BoostAnalytics {
     const impressions = num(post.stats?.views, post.views_count);
     const likes = num(post.stats?.likes, post.likes_count);
@@ -24,7 +29,8 @@ export function buildInstantAnalytics(post: Post, range: '24h' | '7d' | 'all' = 
         feedType: (post.boostFeedType as BoostAnalytics['feedType']) || null,
         activatedAt: null,
         expiresAt: null,
-        spendEur: 0,
+        spend: num(post.boostSpendEur),
+        spendEur: num(post.boostSpendEur),
         analytics: {
             impressions,
             likes,
@@ -58,7 +64,8 @@ export function mergeBoostAnalytics(post: Post, api: BoostAnalytics | null, rang
         ...instant,
         ...api,
         range: api.range ?? range,
-        spendEur: typeof api.spendEur === 'number' ? api.spendEur : instant.spendEur,
+        spend: money(api.spend) ?? money(api.spendEur) ?? money(instant.spend) ?? money(instant.spendEur) ?? 0,
+        spendEur: money(api.spend) ?? money(api.spendEur) ?? money(instant.spend) ?? money(instant.spendEur) ?? 0,
         analytics: {
             impressions: pick(a?.impressions, floor.impressions),
             likes: pick(a?.likes, floor.likes),

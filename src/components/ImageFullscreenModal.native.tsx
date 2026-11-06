@@ -23,6 +23,7 @@ import Animated, {
     cancelAnimation,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import PromotedBadge from './PromotedBadge.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video, { type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
@@ -600,6 +601,11 @@ export default function ImageFullscreenModal({
                 style={[styles.chromeFooter, { paddingBottom: footerPadBottom }]}
                 pointerEvents="box-none"
             >
+                {post.isBoosted ? (
+                    <View style={styles.promotedRow}>
+                        <PromotedBadge />
+                    </View>
+                ) : null}
                 {displayCaption.length > 0 ? (
                     <View style={styles.captionBlock}>
                         <FeedCaptionText caption={displayCaption} />
@@ -853,6 +859,10 @@ const styles = StyleSheet.create({
         zIndex: 30,
         elevation: 30,
         backgroundColor: 'rgba(0,0,0,0.92)',
+    },
+    promotedRow: {
+        paddingHorizontal: 16,
+        paddingTop: 12,
     },
     captionBlock: {
         paddingHorizontal: 16,

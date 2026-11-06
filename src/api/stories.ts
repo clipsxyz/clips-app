@@ -1479,14 +1479,20 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                     mediaType: row.media_type || row.mediaType || undefined,
                     text: row.text || undefined,
                     createdAt: row.created_at ? new Date(row.created_at).getTime() : now,
-                    views: Math.max(Number(row.views || row.views_count || 0), viewers.length),
+                    views: viewers.length,
                     viewers,
                     likes: likers.length,
                     likers,
                     reactions: reactionRows,
                     replies: replyRows,
                 } satisfies StoryInsight;
-            });
+            }).filter(
+                (item) =>
+                    item.views > 0 ||
+                    (item.likes > 0 && item.likers.length > 0) ||
+                    item.reactions.length > 0 ||
+                    item.replies.length > 0,
+            );
         } catch (error) {
             console.warn('getStoryInsightsForUser API failed:', error);
         }

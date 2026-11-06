@@ -2,10 +2,51 @@ import type { Post } from '../types';
 
 export type BoostPostStatus = 'ready' | 'active' | 'ended';
 
+export type BoostPostFilter = 'all' | BoostPostStatus;
+
+export type BoostPostCounts = {
+    all: number;
+    ready: number;
+    active: number;
+    ended: number;
+};
+
 export function classifyBoostStatus(p: Post): BoostPostStatus {
+    if (p.boostStatus === 'active' || p.boostStatus === 'ready' || p.boostStatus === 'ended') {
+        return p.boostStatus;
+    }
     if (p.isBoosted) return 'active';
     if (p.boostFeedType && !p.isBoosted) return 'ended';
     return 'ready';
+}
+
+export type BoostEmptyAction = 'ready' | 'create';
+
+export function boostFilterEmptyState(
+    filter: BoostPostFilter,
+): { title: string; message: string; action: BoostEmptyAction; actionLabel: string } {
+    if (filter === 'active') {
+        return {
+            title: 'No Active Boosts',
+            message: "Tap 'Ready' to pick a post and boost your reach!",
+            action: 'ready',
+            actionLabel: 'View Ready',
+        };
+    }
+    if (filter === 'ended') {
+        return {
+            title: 'No Past Boosts Yet',
+            message: 'Finished boost runs and performance records will appear here.',
+            action: 'ready',
+            actionLabel: 'View Ready',
+        };
+    }
+    return {
+        title: 'No Posts Available',
+        message: 'Create a post first to get started.',
+        action: 'create',
+        actionLabel: 'Create Post',
+    };
 }
 
 export function getQualityLabel(p: Post): { label: string; tone: 'emerald' | 'sky' | 'amber' } {

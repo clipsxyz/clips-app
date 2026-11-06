@@ -184,9 +184,15 @@ export type Post = {
   /** Optional author account classification mirrored from backend/user profile. */
   userAccountType?: 'personal' | 'business';
   // Boost data
+  /** Server classification for the Boost screen tabs. */
+  boostStatus?: 'ready' | 'active' | 'ended';
   isBoosted?: boolean;
   boostExpiresAt?: number; // Epoch timestamp when boost expires
   boostFeedType?: 'local' | 'regional' | 'national';
+  /** Euro amount charged for the current boost, when the API knows it. */
+  boostSpendEur?: number;
+  /** Active boost row, when the feed knows its id. */
+  boost?: { id: number };
   // Stickers and templates
   stickers?: StickerOverlay[]; // Stickers applied to the post
   templateId?: string; // Template used to create the post

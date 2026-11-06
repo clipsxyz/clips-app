@@ -20,6 +20,9 @@ class BoostController extends Controller
     const BOOST_DURATION_HOURS = 6;
     const BOOST_UNIT_PRICE_EUR_CENTS = 5; // €0.05 per eligible user
 
+    /** Stand-in audience when a local database has nobody inside the radius. */
+    private const LOCAL_MIN_AUDIENCE = 150;
+
     /**
      * Duration multipliers used in the frontend.
      * Keep in sync with src/components/BoostSelectionModal.tsx
@@ -132,6 +135,32 @@ class BoostController extends Controller
     }
 
     /**
+     * Local development has no nearby users, so the boost screen would show an empty audience.
+     * Production always keeps the real spatial count, including zero.
+     */
+    /**
+     * The ad budget shown in the boost sheet: €0.05 per eligible user, times duration.
+     */
+    public function audiencePriceCents(string $userId, string $feedType, float $radiusKm, int $durationHours): int
+    {
+        $multiplier = $this->durationMultiplier($durationHours);
+        $eligibleUsers = $this->audienceCountForEnvironment(
+            $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
+        );
+
+        return (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
+    }
+
+    private function audienceCountForEnvironment(int $eligibleUsers): int
+    {
+        if ($eligibleUsers > 0 || ! app()->environment('local')) {
+            return $eligibleUsers;
+        }
+
+        return self::LOCAL_MIN_AUDIENCE;
+    }
+
+    /**
      * Create a Stripe PaymentIntent for a boost. Returns client_secret for frontend confirmCardPayment.
      */
     public function createPaymentIntent(Request $request)
@@ -157,7 +186,9 @@ class BoostController extends Controller
         $durationHours = (int) $request->input('durationHours');
         $multiplier = $this->durationMultiplier($durationHours);
 
-        $eligibleUsers = $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm);
+        $eligibleUsers = $this->audienceCountForEnvironment(
+            $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
+        );
         $priceCents = (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
 
         if ($priceCents <= 0) {
@@ -215,7 +246,9 @@ class BoostController extends Controller
         $durationHours = (int) $request->input('durationHours');
         $multiplier = $this->durationMultiplier($durationHours);
 
-        $eligibleUsers = $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm);
+        $eligibleUsers = $this->audienceCountForEnvironment(
+            $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
+        );
         $priceCents = (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
 
         return response()->json([
@@ -326,6 +359,31 @@ class BoostController extends Controller
     }
 
     /**
+     * Record a feed impression, unique reach, or detail click for an active boost.
+     */
+    public function track(Request $request, int $boostId): JsonResponse
+    {
+        $validated = $request->validate([
+            'event' => 'required|string|in:impression,reach,click',
+        ]);
+
+        try {
+            $boost = Boost::query()->active()->find($boostId);
+            if ($boost) {
+                BoostAnalyticsService::trackClientEvent(
+                    $boost,
+                    (string) $validated['event'],
+                    $request->user() ? (string) $request->user()->id : null
+                );
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Boost track failed', ['boost_id' => $boostId, 'error' => $e->getMessage()]);
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
      * Get active boosted post IDs for a feed type.
      * Returns empty array on DB/driver errors so the feed still loads.
      */
@@ -337,17 +395,25 @@ class BoostController extends Controller
         }
 
         try {
-            $ids = Boost::active()
+            $rows = Boost::active()
                 ->forFeedType($feedType)
-                ->pluck('post_id')
-                ->unique()
-                ->values()
-                ->toArray();
+                ->orderByDesc('activated_at')
+                ->get(['id', 'post_id']);
+            $boostIdsByPost = [];
+            foreach ($rows as $row) {
+                $postId = (string) $row->post_id;
+                if (! isset($boostIdsByPost[$postId])) {
+                    $boostIdsByPost[$postId] = (int) $row->id;
+                }
+            }
 
-            return response()->json(['postIds' => $ids]);
+            return response()->json([
+                'postIds' => array_keys($boostIdsByPost),
+                'boostIdsByPost' => $boostIdsByPost,
+            ]);
         } catch (\Throwable $e) {
             Log::warning('Boost activeIds failed (e.g. DB driver missing)', ['error' => $e->getMessage()]);
-            return response()->json(['postIds' => []]);
+            return response()->json(['postIds' => [], 'boostIdsByPost' => []]);
         }
     }
 
@@ -378,6 +444,7 @@ class BoostController extends Controller
                 'feedType'      => $boost->feed_type,
                 'activatedAt'   => $boost->activated_at->toIso8601String(),
                 'expiresAt'     => $boost->expires_at->toIso8601String(),
+                'spendEur'      => $this->spendEurForBoost($boost),
             ]);
         } catch (\Throwable $e) {
             Log::warning('Boost status failed', ['postId' => $postId, 'error' => $e->getMessage()]);
@@ -428,7 +495,8 @@ class BoostController extends Controller
                 'isActive' => false,
                 'postId' => $postId,
                 'range' => $range,
-                'spendEur' => 0,
+                'spend' => $this->spendEurForPost($postId, (string) $viewer->id),
+                'spendEur' => $this->spendEurForPost($postId, (string) $viewer->id),
                 'analytics' => $post ? [
                     'impressions' => (int) ($post->views_count ?? 0),
                     'likes' => (int) ($post->likes_count ?? 0),
@@ -469,6 +537,13 @@ class BoostController extends Controller
         $likes = $events->isEmpty() && $range === 'all' ? (int) ($boost->likes_count ?? 0) : (int) $counts['like'];
         $comments = $events->isEmpty() && $range === 'all' ? (int) ($boost->comments_count ?? 0) : (int) $counts['comment'];
         $shares = $events->isEmpty() && $range === 'all' ? (int) ($boost->shares_count ?? 0) : (int) $counts['share'];
+        $post = Post::query()->find($boost->post_id);
+        if ($post) {
+            $impressions = max($impressions, (int) ($post->views_count ?? 0));
+            $likes = max($likes, (int) ($post->likes_count ?? 0));
+            $comments = max($comments, (int) ($post->comments_count ?? 0));
+            $shares = max($shares, (int) ($post->shares_count ?? 0));
+        }
         $profileVisits = max(
             (int) $counts['profile_visit'],
             BoostAnalyticsService::profileVisitCountForUser((string) $viewer->id, $fromTs)
@@ -514,18 +589,20 @@ class BoostController extends Controller
             ->when($fromTs, fn ($q) => $q->where('created_at', '>=', $fromTs))
             ->count();
 
-        $price = (float) ($boost->price ?? 0);
+        $price = $this->spendEurForBoost($boost);
         $costPerProfileVisit = $profileVisits > 0 ? round($price / $profileVisits, 4) : null;
         $costPerMessageStart = $messagesStarted > 0 ? round($price / $messagesStarted, 4) : null;
 
         return response()->json([
             'hasBoost' => true,
-            'isActive' => $boost->expires_at->isFuture(),
+            'isActive' => $boost->expires_at && $boost->expires_at->isFuture(),
+            'boostId' => $boost->id,
             'postId' => $boost->post_id,
             'range' => $range,
             'feedType' => $boost->feed_type,
             'activatedAt' => optional($boost->activated_at)->toIso8601String(),
             'expiresAt' => optional($boost->expires_at)->toIso8601String(),
+            'spend' => $price,
             'spendEur' => $price,
             'analytics' => [
                 'impressions' => $impressions,
@@ -541,5 +618,119 @@ class BoostController extends Controller
                 'sourceMatchedEventsCount' => (int) $sourceMatchedEventsCount,
             ],
         ]);
+    }
+
+    /**
+     * The signed-in user's posts, filtered by boost status, plus counts for every tab.
+     *
+     * Active means a boost whose expires_at is still in the future. Ended means a boost
+     * that already expired and no newer boost is live. Ready means the post has never
+     * had a live boost.
+     */
+    public function posts(Request $request): JsonResponse
+    {
+        $viewer = Auth::user();
+        if (! $viewer) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $status = (string) $request->query('status', 'all');
+        if (! in_array($status, ['all', 'ready', 'active', 'ended'], true)) {
+            $status = 'all';
+        }
+
+        $owned = Post::query()
+            ->where('user_id', $viewer->id)
+            ->notReclipped();
+
+        $activeIds = Boost::query()
+            ->where('user_id', $viewer->id)
+            ->where('expires_at', '>', now())
+            ->pluck('post_id');
+
+        $endedIds = Boost::query()
+            ->where('user_id', $viewer->id)
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<=', now())
+            ->when($activeIds->isNotEmpty(), fn ($query) => $query->whereNotIn('post_id', $activeIds))
+            ->pluck('post_id');
+
+        $allCount = (clone $owned)->count();
+        $activeCount = $activeIds->isEmpty()
+            ? 0
+            : (clone $owned)->whereIn('id', $activeIds)->count();
+        $endedCount = $endedIds->isEmpty()
+            ? 0
+            : (clone $owned)->whereIn('id', $endedIds)->count();
+        $readyCount = max(0, $allCount - $activeCount - $endedCount);
+
+        $postsQuery = (clone $owned)->with('user')->orderByDesc('created_at')->limit(50);
+        if ($status === 'active') {
+            $postsQuery->whereIn('id', $activeIds->isEmpty() ? ['__none__'] : $activeIds);
+        } elseif ($status === 'ended') {
+            $postsQuery->whereIn('id', $endedIds->isEmpty() ? ['__none__'] : $endedIds);
+        } elseif ($status === 'ready') {
+            $busyIds = $activeIds->merge($endedIds)->unique()->values();
+            if ($busyIds->isNotEmpty()) {
+                $postsQuery->whereNotIn('id', $busyIds);
+            }
+        }
+
+        $posts = $postsQuery->get();
+        $boostsByPost = Boost::query()
+            ->where('user_id', $viewer->id)
+            ->whereIn('post_id', $posts->pluck('id'))
+            ->orderByDesc('expires_at')
+            ->get()
+            ->groupBy('post_id');
+
+        $payload = $posts->map(function (Post $post) use ($boostsByPost, $activeIds, $endedIds) {
+            $boostStatus = $activeIds->contains($post->id)
+                ? 'active'
+                : ($endedIds->contains($post->id) ? 'ended' : 'ready');
+            $rows = $boostsByPost->get($post->id, collect());
+            $representative = $rows->first(fn (Boost $boost) => $boost->expires_at && $boost->expires_at->isFuture())
+                ?: $rows->first();
+            $data = $post->toArray();
+            $poster = $post->resolvedThumbnailUrl();
+            $data['user_handle'] = $data['user_handle'] ?: $post->user?->handle;
+            $data['thumbnail_url'] = $poster;
+            $data['video_poster_url'] = $poster;
+            $data['poster_url'] = $poster;
+            $data['boost_status'] = $boostStatus;
+            $data['is_boosted'] = $boostStatus === 'active';
+            $data['boost_feed_type'] = $representative?->feed_type;
+            $data['spend_eur'] = $representative ? $this->spendEurForBoost($representative) : 0;
+
+            return $data;
+        })->values();
+
+        return response()->json([
+            'success' => true,
+            'status' => $status,
+            'counts' => [
+                'all' => $allCount,
+                'ready' => $readyCount,
+                'active' => $activeCount,
+                'ended' => $endedCount,
+            ],
+            'posts' => $payload,
+        ]);
+    }
+
+    private function spendEurForBoost(Boost $boost): float
+    {
+        return $boost->chargedSpendEur();
+    }
+
+    private function spendEurForPost(string $postId, string $userId): float
+    {
+        $boost = Boost::query()
+            ->where('post_id', $postId)
+            ->where('user_id', $userId)
+            ->orderByDesc('id')
+            ->first();
+
+        return $boost ? $this->spendEurForBoost($boost) : 0.0;
     }
 }

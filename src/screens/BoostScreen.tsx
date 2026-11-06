@@ -6,34 +6,103 @@ import {
     FlatList,
     TouchableOpacity,
     ActivityIndicator,
-    Alert,
+    DeviceEventEmitter,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import {
-    chipActiveMagenta,
-    chipActiveMagentaText,
     gazetteerHeader,
     SCREEN_CANVAS_BASE,
     UEFA_PASSPORT_GRADIENT,
     UEFA_PASSPORT_GRADIENT_LOCATIONS,
 } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, decorateForUser } from '../api/posts';
+import { fetchPostsByUser, decorateForUser, mapLaravelProfilePosts } from '../api/posts';
 import type { Post } from '../types';
 import BoostSelectionModal from '../components/BoostSelectionModal.native';
-import BoostPostTile, { boostTileSize } from '../components/BoostPostTile.native';
-import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
+import BoostPostTile, {
+    BOOST_POST_TILE_ASPECT_RATIO,
+    boostTileSize,
+} from '../components/BoostPostTile.native';
+import {
+    FEED_CARD_RADIUS,
+} from '../components/FeedPageLayout.native';
+import { fetchBoostPosts, getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import {
     classifyBoostStatus,
+    type BoostPostCounts,
+    type BoostPostFilter,
 } from '../utils/boostPostGrid';
 
+import BoostEmptyState from '../components/BoostEmptyState.native';
 import BoostInsightsSheet from '../components/BoostInsightsSheet.native';
 import { ox } from '../constants/nativeOpticalScale';
+import { rootNavigationRef } from '../navigation/rootNavigationRef';
+import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
 
 /** Minimum gap between silent focus-triggered refreshes (ms). Prevents API thrashing. */
 const SILENT_REFRESH_MS = 3000;
+
+const EMPTY_COUNTS: BoostPostCounts = { all: 0, ready: 0, active: 0, ended: 0 };
+
+async function loadLocalBoostPosts(
+    handle: string,
+    userId: string,
+    status: BoostPostFilter,
+): Promise<{ posts: Post[]; counts: BoostPostCounts }> {
+    const userPosts = await fetchPostsByUser(handle, 50);
+    const boostLabels = await getAllActiveBoostLabels();
+    const decorated = userPosts.map((post) => {
+        const base = decorateForUser(userId, post);
+        const feedType = boostLabels.get(String(post.id));
+        const withFlag = !feedType && !base.isBoosted
+            ? base
+            : {
+                ...base,
+                isBoosted: true as const,
+                boostFeedType: base.boostFeedType ?? feedType ?? 'regional',
+            };
+        return { ...withFlag, boostStatus: classifyBoostStatus(withFlag) };
+    });
+    const counts: BoostPostCounts = {
+        all: decorated.length,
+        ready: decorated.filter((post) => post.boostStatus === 'ready').length,
+        active: decorated.filter((post) => post.boostStatus === 'active').length,
+        ended: decorated.filter((post) => post.boostStatus === 'ended').length,
+    };
+    const posts = status === 'all'
+        ? decorated
+        : decorated.filter((post) => post.boostStatus === status);
+    return { posts, counts };
+}
+
+function stampApiBoostPosts(raw: unknown[]): Post[] {
+    const rows = Array.isArray(raw) ? raw : [];
+    const mapped = mapLaravelProfilePosts(rows);
+    const byId = new Map(rows.map((item) => [String((item as { id?: string })?.id), item as Record<string, unknown>]));
+    return mapped.map((post) => {
+        const item = byId.get(String(post.id));
+        const rawStatus = item?.boost_status ?? item?.boostStatus;
+        const boostStatus = rawStatus === 'active' || rawStatus === 'ended' || rawStatus === 'ready'
+            ? rawStatus
+            : undefined;
+        const feedType = item?.boost_feed_type ?? item?.boostFeedType;
+        return {
+            ...post,
+            boostStatus,
+            isBoosted: boostStatus === 'active' || post.isBoosted,
+            boostFeedType: (typeof feedType === 'string' ? feedType : post.boostFeedType) as Post['boostFeedType'],
+        };
+    });
+}
+
+/** Same inset and inter-card gap as the floating feed card (`marginHorizontal` 16, `marginVertical` 8). */
+const BOOST_GRID_COLUMNS = 3;
+const BOOST_GRID_GAP = 8;
+const BOOST_GRID_PADDING = 16;
 
 function BoostCanvas({
     children,
@@ -59,7 +128,7 @@ function BoostCanvas({
     );
 }
 
-const BoostScreen: React.FC = ({ navigation }: any) => {
+const BoostScreen: React.FC = ({ navigation, route }: any) => {
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
     const [posts, setPosts] = useState<Post[]>([]);
@@ -67,15 +136,17 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const [error, setError] = useState<string | null>(null);
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [showBoostModal, setShowBoostModal] = useState(false);
-    const [boostFilter, setBoostFilter] = useState<'all' | 'ready' | 'active' | 'ended'>('all');
+    const [boostFilter, setBoostFilter] = useState<BoostPostFilter>('all');
+    const [counts, setCounts] = useState<BoostPostCounts>(EMPTY_COUNTS);
+    const [listLoading, setListLoading] = useState(false);
     const [boostSort, setBoostSort] = useState<'best' | 'recent'>('best');
     const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
     const [insightsPost, setInsightsPost] = useState<Post | null>(null);
     const [insightsVisible, setInsightsVisible] = useState(false);
 
-    // Guard against overlapping/duplicate fetches — an unguarded load loop here is what
-    // exhausts the API throttle and surfaces as HTTP 429 "Too Many Attempts".
-    const inFlightRef = useRef(false);
+    // Latest request wins when the user switches tabs before the previous call returns.
+    const requestGenRef = useRef(0);
+    const hasLoadedRef = useRef(false);
     const lastLoadRef = useRef(0);
 
     const loadUserPosts = useCallback(async (opts?: { silent?: boolean }) => {
@@ -83,44 +154,76 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
             setLoading(false);
             return;
         }
-        // Short-circuit overlapping requests (focus + effect + tab re-renders used to
-        // fire this repeatedly and hammer the API into a 429 "Too Many Attempts").
-        if (inFlightRef.current) return;
         // Debounce silent focus refreshes so rapid re-renders can't thrash the endpoint.
         if (opts?.silent && Date.now() - lastLoadRef.current < SILENT_REFRESH_MS) return;
-        inFlightRef.current = true;
+        const status = boostFilter;
+        const gen = ++requestGenRef.current;
         lastLoadRef.current = Date.now();
-        if (!opts?.silent) {
+        if (!opts?.silent && !hasLoadedRef.current) {
             setLoading(true);
+        } else if (!opts?.silent) {
+            setListLoading(true);
+            setPosts([]);
         }
         setError(null);
         try {
-            const userPosts = await fetchPostsByUser(user.handle, 50);
-            // One map lookup for all Sponsored flags — avoid N× getActiveBoost (was timing out on API in mock).
-            const boostLabels = await getAllActiveBoostLabels();
-            const decorated = userPosts.map((p) => {
-                const base = decorateForUser(userId, p);
-                const feedType = boostLabels.get(String(p.id));
-                if (!feedType && !base.isBoosted) return base;
-                return {
-                    ...base,
-                    isBoosted: true as const,
-                    boostFeedType: base.boostFeedType ?? feedType ?? 'regional',
-                };
-            });
-            setPosts(decorated);
+            let nextPosts: Post[] = [];
+            let nextCounts = EMPTY_COUNTS;
+            if (isLaravelApiEnabled()) {
+                const page = await fetchBoostPosts(status);
+                nextPosts = stampApiBoostPosts(page.posts).map((post) => decorateForUser(userId, post));
+                nextCounts = page.counts;
+            } else {
+                const local = await loadLocalBoostPosts(user.handle, userId, status);
+                nextPosts = local.posts;
+                nextCounts = local.counts;
+            }
+            if (gen !== requestGenRef.current) return;
+            setPosts(nextPosts);
+            setCounts(nextCounts);
         } catch (err) {
             console.error('Error loading user posts:', err);
-            setError('Failed to load your posts');
+            try {
+                const local = await loadLocalBoostPosts(user.handle, userId, status);
+                if (gen !== requestGenRef.current) return;
+                setPosts(local.posts);
+                setCounts(local.counts);
+            } catch (fallbackErr) {
+                console.error('Error loading local boost posts:', fallbackErr);
+                if (gen !== requestGenRef.current) return;
+                setError('Failed to load your posts');
+            }
         } finally {
-            inFlightRef.current = false;
-            setLoading(false);
+            if (gen === requestGenRef.current) {
+                hasLoadedRef.current = true;
+                setLoading(false);
+                setListLoading(false);
+            }
         }
-    }, [user?.handle, userId]);
+    }, [user?.handle, userId, boostFilter]);
 
     useEffect(() => {
         void loadUserPosts();
     }, [loadUserPosts]);
+
+    useEffect(() => {
+        const sub = DeviceEventEmitter.addListener(BOOST_STATUS_REFRESH_EVENT, () => {
+            setBoostFilter('active');
+        });
+        return () => sub.remove();
+    }, []);
+
+    const handledBoostSuccessRef = useRef<string | null>(null);
+    useEffect(() => {
+        const action = route?.params?.initialAction;
+        if (action !== 'success') return;
+        const sessionId = String(route?.params?.session_id || '');
+        const key = `${action}:${sessionId}`;
+        if (handledBoostSuccessRef.current === key) return;
+        handledBoostSuccessRef.current = key;
+        setBoostFilter('active');
+        navigation.setParams?.({ initialAction: undefined });
+    }, [navigation, route?.params?.initialAction, route?.params?.session_id]);
 
     /** Mount effect above covers the first load; skip the focus effect's first pass so
      *  mounting never issues a second (guarded) fetch. Later focuses refresh silently. */
@@ -138,7 +241,16 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         }, [loadUserPosts]),
     );
 
+    const openInsights = (post: Post) => {
+        setInsightsPost(post);
+        setInsightsVisible(true);
+    };
+
     const openBoostModal = useCallback(async (post: Post) => {
+        if (classifyBoostStatus(post) === 'active') {
+            openInsights(post);
+            return;
+        }
         setSelectedPost(post);
         setShowBoostModal(true);
         try {
@@ -146,10 +258,13 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
             if (existing?.isActive) {
                 setShowBoostModal(false);
                 setSelectedPost(null);
-                Alert.alert(
-                    'Already boosted',
-                    'This post is already boosted. It will expire in 6 hours.',
-                );
+                openInsights({
+                    ...post,
+                    isBoosted: true,
+                    boostStatus: 'active',
+                    boostFeedType: existing.feedType ?? post.boostFeedType,
+                    boostSpendEur: existing.price > 0 ? existing.price : post.boostSpendEur,
+                });
             }
         } catch {
             // Keep modal open if status check fails offline
@@ -161,7 +276,11 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         setSelectedPost(null);
     };
 
-    const tileSize = useMemo(() => boostTileSize(3, 6, 8), []);
+    const tileWidth = useMemo(
+        () => boostTileSize(BOOST_GRID_COLUMNS, BOOST_GRID_GAP, BOOST_GRID_PADDING),
+        [],
+    );
+    const tileHeight = Math.max(1, Math.round(tileWidth / BOOST_POST_TILE_ASPECT_RATIO));
 
     const qualityScore = useCallback((p: Post): number => {
         const views = Math.max(1, p.stats.views || 1);
@@ -185,17 +304,19 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         return next;
     }, [filteredPosts, boostSort, qualityScore]);
 
-    const boostSummary = useMemo(() => {
-        const active = posts.filter((p) => classifyBoostStatus(p) === 'active').length;
-        const ready = posts.filter((p) => classifyBoostStatus(p) === 'ready').length;
-        const ended = posts.filter((p) => classifyBoostStatus(p) === 'ended').length;
-        return { active, ready, ended, total: posts.length };
-    }, [posts]);
+    const boostSummary = counts;
 
-    const openInsights = (post: Post) => {
-        setInsightsPost(post);
-        setInsightsVisible(true);
-    };
+    const onSwitchToReady = useCallback(() => {
+        setBoostFilter('ready');
+    }, []);
+
+    const onCreatePost = useCallback(() => {
+        if (rootNavigationRef.isReady()) {
+            rootNavigationRef.navigate('CreatePost' as never);
+            return;
+        }
+        navigation.navigate('CreatePost');
+    }, [navigation]);
 
     if (!user) {
         return (
@@ -233,10 +354,10 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                 </View>
                 <View style={styles.chipsRow}>
                     {([
-                        { id: 'all' as const, label: `All (${boostSummary.total})` },
-                        { id: 'ready' as const, label: `Ready (${boostSummary.ready})` },
-                        { id: 'active' as const, label: `Active (${boostSummary.active})` },
-                        { id: 'ended' as const, label: `Ended (${boostSummary.ended})` },
+                        { id: 'all' as const, label: `All: ${boostSummary.all}` },
+                        { id: 'ready' as const, label: `Ready: ${boostSummary.ready}` },
+                        { id: 'active' as const, label: `Active: ${boostSummary.active}` },
+                        { id: 'ended' as const, label: `Ended: ${boostSummary.ended}` },
                     ]).map((chip) => {
                         const active = boostFilter === chip.id;
                         return (
@@ -285,40 +406,59 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </View>
 
-            {sortedPosts.length === 0 ? (
+            {listLoading ? (
                 <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>{posts.length === 0 ? "You haven't created any posts yet." : 'No posts in this filter.'}</Text>
-                    <TouchableOpacity
-                        onPress={() => navigation.navigate('InstantCreate')}
-                        style={styles.createButton}
-                    >
-                        <Text style={styles.createButtonText}>Create Your First Post</Text>
-                    </TouchableOpacity>
+                    <ActivityIndicator size="large" color="#FFFFFF" />
+                </View>
+            ) : sortedPosts.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                    <BoostEmptyState
+                        tab={boostFilter}
+                        onSwitchToReady={onSwitchToReady}
+                        onCreatePost={onCreatePost}
+                    />
                 </View>
             ) : (
                 <FlatList
                     data={sortedPosts}
                     keyExtractor={(item) => item.id}
-                    numColumns={3}
+                    numColumns={BOOST_GRID_COLUMNS}
                     columnWrapperStyle={styles.gridRow}
                     contentContainerStyle={styles.gridContent}
                     renderItem={({ item }) => {
+                        const isSelected = showBoostModal && selectedPost?.id === item.id;
+                        const isBoosting = classifyBoostStatus(item) === 'active';
                         return (
-                            <View style={[styles.gridCell, { width: tileSize }]}>
-                                <View style={[styles.tileWrap, { width: tileSize, height: tileSize }]}>
+                            <View style={[styles.gridCell, { width: tileWidth }]}>
+                                <View
+                                    style={[
+                                        styles.tileWrap,
+                                        { width: tileWidth, height: tileHeight },
+                                        isBoosting && styles.tileWrapBoosting,
+                                        isSelected && styles.tileWrapSelected,
+                                    ]}
+                                >
                                     <BoostPostTile
                                         post={item}
-                                        size={tileSize}
+                                        width={tileWidth}
                                         showBoostIcon
                                         onPress={() => {
                                             void openBoostModal(item);
                                         }}
                                     />
                                     <View style={styles.tileOverlayBadges} pointerEvents="none">
-                                        <Text style={styles.tapToBoostPill} numberOfLines={1}>
-                                            Tap to boost
+                                        <Text
+                                            style={[styles.tapToBoostPill, isBoosting && styles.boostingPill]}
+                                            numberOfLines={1}
+                                        >
+                                            {isBoosting ? 'Boosting' : 'Tap to boost'}
                                         </Text>
                                     </View>
+                                    {isSelected ? (
+                                        <View style={styles.selectedMark} pointerEvents="none">
+                                            <Icon name="checkmark" size={16} color="#FFFFFF" />
+                                        </View>
+                                    ) : null}
                                 </View>
                                 <TouchableOpacity
                                     onPress={() => openInsights(item)}
@@ -344,6 +484,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
             <BoostSelectionModal
                 isOpen={showBoostModal}
                 post={selectedPost}
+                selectedPost={selectedPost}
                 onClose={closeBoostModal}
                 onSelect={(feedType, price, meta) => {
                     setShowBoostModal(false);
@@ -412,7 +553,8 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     filterChipActive: {
-        ...chipActiveMagenta,
+        backgroundColor: 'rgba(255,255,255,0.16)',
+        borderColor: 'rgba(255,255,255,0.55)',
     },
     filterChipText: {
         fontSize: ox(11),
@@ -420,7 +562,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     filterChipTextActive: {
-        ...chipActiveMagentaText,
+        color: '#FFFFFF',
     },
     smallChip: {
         paddingHorizontal: ox(9),
@@ -431,11 +573,12 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     smallChipActive: {
-        ...chipActiveMagenta,
+        backgroundColor: 'rgba(255,255,255,0.16)',
+        borderColor: 'rgba(255,255,255,0.55)',
     },
     rangeChipActive: {
-        borderColor: 'rgba(244, 114, 182, 0.55)',
-        backgroundColor: 'rgba(217, 27, 92, 0.25)',
+        backgroundColor: 'rgba(255,255,255,0.16)',
+        borderColor: 'rgba(255,255,255,0.55)',
     },
     smallChipText: {
         fontSize: ox(10),
@@ -443,7 +586,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     smallChipTextActive: {
-        ...chipActiveMagentaText,
+        color: '#FFFFFF',
     },
     emptyContainer: {
         flex: 1,
@@ -451,52 +594,63 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: ox(40),
     },
-    emptyText: {
-        fontSize: ox(16),
-        color: '#9CA3AF',
-        marginBottom: ox(24),
-        textAlign: 'center',
-    },
-    createButton: {
-        paddingHorizontal: ox(24),
-        paddingVertical: ox(12),
-        backgroundColor: '#d91b5c',
-        borderRadius: ox(12),
-    },
-    createButtonText: {
-        color: '#FFFFFF',
-        fontSize: ox(16),
-        fontWeight: '600',
-    },
     gridContent: {
-        paddingHorizontal: ox(8),
+        paddingHorizontal: BOOST_GRID_PADDING,
         paddingBottom: ox(24),
     },
     gridRow: {
-        gap: ox(6),
-        marginBottom: ox(10),
+        gap: BOOST_GRID_GAP,
+        marginBottom: BOOST_GRID_GAP,
         alignItems: 'flex-start',
     },
     gridCell: {
         marginBottom: ox(4),
     },
     tileWrap: {
-        borderRadius: ox(12),
+        borderRadius: FEED_CARD_RADIUS,
         overflow: 'hidden',
         position: 'relative',
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    tileWrapBoosting: {
+        borderColor: 'rgba(255,255,255,0.85)',
+    },
+    tileWrapSelected: {
+        borderColor: '#d91b5c',
+        shadowColor: '#d91b5c',
+        shadowOpacity: 0.9,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 8,
+    },
+    selectedMark: {
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        backgroundColor: '#d91b5c',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
     },
     tileOverlayBadges: {
-        position: 'absolute',
-        left: ox(6),
-        right: ox(6),
-        bottom: ox(6),
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: ox(4),
+        ...StyleSheet.absoluteFillObject,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: ox(8),
+    },
+    boostingPill: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        borderColor: 'rgba(255,255,255,0.75)',
     },
     tapToBoostPill: {
         fontSize: ox(10),
         fontWeight: '700',
+        textAlign: 'center',
         paddingHorizontal: ox(8),
         paddingVertical: ox(4),
         borderRadius: ox(8),

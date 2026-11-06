@@ -162,13 +162,15 @@ function storyTagPins(story: {
 export default function StoriesScreen({ route, navigation }: any) {
     const {
         openUserHandle,
-        openStoryId,
+        openStoryId: openStoryIdParam,
+        storyId,
         fromStories24Rail,
         railHandles: railHandlesParam,
         forceRefreshAt,
         targetHandle,
         soloMode,
     } = route.params || {};
+    const openStoryId = openStoryIdParam || storyId;
     const railHandles = Array.isArray(railHandlesParam) ? railHandlesParam : [];
     const railHandlesKey = railHandles.join('|');
     const insets = useSafeAreaInsets();

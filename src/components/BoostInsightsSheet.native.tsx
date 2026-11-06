@@ -16,6 +16,7 @@ import {
     resolveBoostInsightsPreview,
 } from '../utils/boostInsightsNative';
 import GazetteerBottomSheetModal from './GazetteerBottomSheetModal.native';
+import { rootNavigationRef } from '../navigation/rootNavigationRef';
 import CachedImage from './CachedImage.native';
 import {
     SCREEN_CANVAS_BASE,
@@ -25,6 +26,7 @@ import {
     UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
 import { getQualityLabel, getQualityReason, estimateReachTeaser } from '../utils/boostPostGrid';
+import { getPostBodyText } from '../utils/effectiveTextPostStyleNative';
 
 type Props = {
     visible: boolean;
@@ -82,8 +84,8 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
         profileVisits: analytics?.profileVisits ?? 0,
         messageStarts: analytics?.messageStarts ?? 0,
     };
-    const spend =
-        typeof resolved?.spendEur === 'number' ? `EUR ${resolved.spendEur.toFixed(2)}` : 'EUR 0.00';
+    const spendAmount = Number(resolved?.spend ?? resolved?.spendEur);
+    const spend = Number.isFinite(spendAmount) ? `EUR ${spendAmount.toFixed(2)}` : 'EUR 0.00';
     const trendValues =
         analytics?.trend?.impressions?.map((t: { value: number }) => Number(t.value) || 0) ?? [];
     const trendSpark = sparkline(trendValues);
@@ -191,6 +193,27 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
                             <Text style={styles.matchedPill}>Source matched</Text>
                         ) : null}
                     </View>
+                    {resolved?.boostId ? (
+                        <TouchableOpacity
+                            style={styles.performanceLink}
+                            onPress={() => {
+                                const boostId = resolved.boostId;
+                                const postTitle = getPostBodyText(post).trim() || 'Boost performance';
+                                const impressions = metrics.impressions;
+                                const reach = metrics.profileVisits;
+                                const clicks = metrics.likes + metrics.comments + metrics.shares;
+                                onClose();
+                                if (boostId != null && rootNavigationRef.isReady()) {
+                                    (rootNavigationRef.navigate as (name: string, params?: object) => void)(
+                                        'BoostAnalytics',
+                                        { boostId, postTitle, impressions, reach, clicks },
+                                    );
+                                }
+                            }}
+                        >
+                            <Text style={styles.performanceLinkText}>View daily performance</Text>
+                        </TouchableOpacity>
+                    ) : null}
                     <View style={styles.block}>
                         <View style={styles.blockHeader}>
                             <Text style={styles.blockTitle}>Trend ({range})</Text>
@@ -344,6 +367,21 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+    performanceLink: {
+        alignSelf: 'flex-start',
+        marginBottom: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#1e293b',
+        borderWidth: 1,
+        borderColor: '#334155',
+    },
+    performanceLinkText: {
+        color: '#f8fafc',
+        fontSize: 13,
+        fontWeight: '700',
+    },
     statusPill: {
         fontSize: 11,
         fontWeight: '700',

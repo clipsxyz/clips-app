@@ -14,6 +14,7 @@ import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
+import { withActiveBoost } from '../utils/boostFeedTracking';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { mapApiLinkPreview } from '../utils/linkPreview';
@@ -1353,6 +1354,30 @@ function rewriteMediaUrlForNetwork(url: string): string {
   return resolvePublicMediaUrl(url) || url;
 }
 
+function laravelBoostFields(response: any): Pick<Post, 'isBoosted' | 'boostFeedType'> {
+  const until = response?.boosted_until || response?.boostedUntil;
+  let isBoosted = Boolean(response?.is_boosted ?? response?.isBoosted);
+  if (until) {
+    const ts = new Date(until).getTime();
+    if (Number.isFinite(ts)) isBoosted = ts > Date.now();
+  }
+  const raw = String(response?.boost_feed_type || response?.boostFeedType || response?.boost_tier || response?.boostTier || '');
+  const boostFeedType: Post['boostFeedType'] | undefined =
+    raw === 'premium' || raw === 'regional'
+      ? 'regional'
+      : raw === 'featured' || raw === 'national'
+        ? 'national'
+        : raw === 'standard' || raw === 'local'
+          ? 'local'
+          : undefined;
+  const spendRaw = Number(response?.spend_eur ?? response?.spendEur ?? response?.boost_price);
+  return {
+    isBoosted,
+    boostFeedType: isBoosted ? boostFeedType : undefined,
+    boostSpendEur: Number.isFinite(spendRaw) && spendRaw > 0 ? spendRaw : undefined,
+  };
+}
+
 // Transform Laravel API post response to frontend Post format
 export function transformLaravelPost(response: any): Post {
   const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
@@ -1466,6 +1491,7 @@ export function transformLaravelPost(response: any): Post {
     videoPosterUrl: rewrittenPoster || undefined,
     thumbnailUrl: rewrittenPoster || undefined,
     mediaType: resolvedMediaType,
+    ...laravelBoostFields(response),
     videoFrameMode: resolvedVideoFrameMode,
     mediaItems: processedMediaItems ?? mediaItems,
     // Intrinsic media dimensions, backfilled server-side for posts created before the
@@ -2050,11 +2076,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         items = items.map((p) => {
           const label = allBoostLabels.get(String(p.id));
           if (!label && !p.isBoosted) return p;
-          return {
+          return withActiveBoost({
             ...p,
             isBoosted: true as const,
             boostFeedType: p.boostFeedType ?? label ?? feedTypeApi ?? 'regional',
-          };
+          });
         });
       }
 
@@ -2269,11 +2295,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       items = items.map((p) => {
         const label = allBoostLabels.get(String(p.id));
         if (!label && !p.isBoosted) return p;
-        return {
+        return withActiveBoost({
           ...p,
           isBoosted: true as const,
           boostFeedType: p.boostFeedType ?? label ?? feedType ?? 'regional',
-        };
+        });
       });
     }
     // Dev/test: inject Ava's Galway demo on first page only when this tab matches her author location (mock path).

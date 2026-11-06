@@ -385,4 +385,25 @@ class User extends Authenticatable
                     ->withPivot('user_handle')
                     ->withTimestamps();
     }
+
+    /**
+     * Latest device token registered for this account.
+     * Stored in fcm_tokens, exposed here so commands can read $user->fcm_token.
+     */
+    public function getFcmTokenAttribute(): ?string
+    {
+        $existing = $this->attributes['fcm_token'] ?? null;
+        if (is_string($existing) && trim($existing) !== '') {
+            return trim($existing);
+        }
+
+        $token = DB::table('fcm_tokens')
+            ->where('user_id', $this->id)
+            ->orderByDesc('updated_at')
+            ->value('token');
+
+        $token = is_string($token) ? trim($token) : '';
+
+        return $token !== '' ? $token : null;
+    }
 }

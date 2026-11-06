@@ -1,6 +1,7 @@
 import React from 'react';
 import {
     ActivityIndicator,
+    DeviceEventEmitter,
     Modal,
     Pressable,
     ScrollView,
@@ -11,10 +12,16 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
+import LinearGradient from 'react-native-linear-gradient';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
-import { estimateBoostPriceApi, updateAuthProfile } from '../api/client';
+import { estimateBoostPriceApi, updateAuthProfile, apiRequest } from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { confirmBoostCheckout } from '../api/boost';
+import { openStripeCheckout } from '../utils/stripeCheckoutNative';
+import { BOOST_ACTIVATED_EVENT } from './BoostActivatedModal.native';
+import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
+import BoostWizardBottomSheet from './BoostWizardBottomSheet.native';
 
 export type BoostFeedType = 'local' | 'regional' | 'national';
 export type BoostGoal = 'views' | 'profile_visits' | 'messages';
@@ -22,7 +29,8 @@ export type BoostDuration = 6 | 12 | 24 | 72;
 
 interface BoostSelectionModalProps {
     isOpen: boolean;
-    post: Post | null;
+    post?: Post | null;
+    selectedPost?: Post | null;
     onClose: () => void;
     onSelect: (
         feedType: BoostFeedType,
@@ -51,6 +59,7 @@ const DEFAULT_REGIONAL_BOUNDARY_KM = 6;
 export default function BoostSelectionModal({
     isOpen,
     post,
+    selectedPost,
     onClose,
     onSelect,
 }: BoostSelectionModalProps) {
@@ -64,6 +73,8 @@ export default function BoostSelectionModal({
     const [eligibleUsersCount, setEligibleUsersCount] = React.useState<number | null>(null);
     const [estimatedTotalPrice, setEstimatedTotalPrice] = React.useState<number | null>(null);
     const [estimateLoading, setEstimateLoading] = React.useState(false);
+    const [isProcessing, setIsProcessing] = React.useState(false);
+    const [payError, setPayError] = React.useState<string | null>(null);
     const [estimateError, setEstimateError] = React.useState<string | null>(null);
     const [debouncedRadiusKm, setDebouncedRadiusKm] = React.useState<number>(2);
     const [sliderRadiusKm, setSliderRadiusKm] = React.useState<number>(2);
@@ -75,6 +86,10 @@ export default function BoostSelectionModal({
         Number.isFinite(regionalBoundaryKm) ? regionalBoundaryKm : DEFAULT_REGIONAL_BOUNDARY_KM
     );
 
+    const tier: 'standard' | 'premium' | 'featured' =
+        radiusKm <= effectiveLocalBoundary ? 'standard' : radiusKm <= effectiveRegionalBoundary ? 'premium' : 'featured';
+    const radius = Math.max(1, radiusKm);
+    const duration = selectedDuration;
     const selectedOption: BoostFeedType =
         radiusKm <= effectiveLocalBoundary ? 'local' : radiusKm <= effectiveRegionalBoundary ? 'regional' : 'national';
     const debouncedSelectedOption: BoostFeedType =
@@ -231,17 +246,46 @@ export default function BoostSelectionModal({
         }
     }, [sliderRadiusKm, radiusKm]);
 
-    if (!isOpen || !post) return null;
+    const activePost = selectedPost ?? post ?? null;
+    if (!isOpen || !activePost) return null;
 
-    const handleSubmit = () => {
-        if (eligibleUsersCount == null || estimatedTotalPrice == null || estimatedTotalPrice <= 0) return;
-        onSelect(selectedOption, estimatedTotalPrice, {
-            goal: 'views',
-            durationHours: selectedDuration,
-            estimatedReach,
-            radiusKm,
-            eligibleUsersCount,
-        });
+    const handleContinueToPayment = async () => {
+        const postId = activePost.id;
+        if (!postId || eligibleUsersCount == null || estimatedTotalPrice == null || estimatedTotalPrice <= 0 || isProcessing) return;
+        setIsProcessing(true);
+        setPayError(null);
+        try {
+            const data = await apiRequest('/boosts/create-checkout-session', {
+                method: 'POST',
+                body: JSON.stringify({
+                    post_id: postId,
+                    radius,
+                    tier,
+                    duration,
+                }),
+            }) as { checkout_url?: string; session_id?: string; error?: string };
+            if (data?.error) throw new Error(data.error);
+            const checkoutUrl = String(data?.checkout_url || '').trim();
+            if (!checkoutUrl) throw new Error('Checkout link was not returned');
+            const outcome = await openStripeCheckout(checkoutUrl);
+            if (outcome.outcome === 'success') {
+                const sessionId = outcome.sessionId || data.session_id;
+                let feedType = selectedOption;
+                if (sessionId) {
+                    const confirmed = await confirmBoostCheckout(sessionId);
+                    if (confirmed.feed_type) feedType = confirmed.feed_type;
+                }
+                onClose();
+                DeviceEventEmitter.emit('boostActivated', { postId, feedType });
+                DeviceEventEmitter.emit(BOOST_STATUS_REFRESH_EVENT, { sessionId });
+                DeviceEventEmitter.emit(BOOST_ACTIVATED_EVENT);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Could not start checkout';
+            setPayError(message);
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const adjustRadius = (delta: number) => {
@@ -255,6 +299,7 @@ export default function BoostSelectionModal({
                 <View style={styles.sheet}>
                     <View style={styles.header}>
                         <Text style={styles.title}>Boost post</Text>
+                        <BoostWizardBottomSheet selectedPost={activePost} />
                         <Text style={styles.stepText}>Step {activeStep} of 3</Text>
                         <View style={styles.chips}>
                             <Text style={styles.chip}>Radius: {radiusKm} km</Text>
@@ -385,6 +430,7 @@ export default function BoostSelectionModal({
                             </View>
                         )}
                         {!!estimateError && <Text style={styles.errorText}>{estimateError}</Text>}
+                        {!!payError && <Text style={styles.errorText}>{payError}</Text>}
                         {eligibleTooLow && (
                             <Text style={styles.warnText}>
                                 Audience is below minimum ({MIN_ELIGIBLE_AUDIENCE} users). Increase radius.
@@ -400,12 +446,22 @@ export default function BoostSelectionModal({
                                 <Text style={styles.navBtnText}>Back</Text>
                             </Pressable>
                             {activeStep < 3 ? (
-                                <Pressable style={[styles.primaryBtn]} onPress={() => setActiveStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}>
+                                <Pressable style={styles.nextBtn} onPress={() => setActiveStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}>
                                     <Text style={styles.primaryBtnText}>Next</Text>
                                 </Pressable>
                             ) : (
-                                <Pressable style={[styles.primaryBtn, !canContinue && styles.primaryBtnDisabled]} disabled={!canContinue} onPress={handleSubmit}>
-                                    <Text style={styles.primaryBtnText}>Continue to payment</Text>
+                                <Pressable
+                                    style={[styles.primaryBtn, (!canContinue || isProcessing) && styles.primaryBtnDisabled]}
+                                    disabled={!canContinue || isProcessing}
+                                    onPress={() => { void handleContinueToPayment(); }}
+                                >
+                                    <LinearGradient colors={['#d91b5c', '#7c3aed']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.payGradient}>
+                                        {isProcessing ? (
+                                            <ActivityIndicator color="#FFFFFF" />
+                                        ) : (
+                                            <Text style={styles.primaryBtnText}>Continue to Payment</Text>
+                                        )}
+                                    </LinearGradient>
                                 </Pressable>
                             )}
                         </View>
@@ -439,17 +495,19 @@ const styles = StyleSheet.create({
         borderBottomColor: 'rgba(255,255,255,0.1)',
     },
     title: { color: '#F9FAFB', fontSize: 18, fontWeight: '700' },
-    stepText: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
+    stepText: { color: '#9CA3AF', fontSize: 11, marginTop: 10 },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     chip: {
-        color: '#FBCFE8',
+        color: '#FFFFFF',
         fontSize: 11,
+        fontWeight: '600',
         paddingHorizontal: 10,
         paddingVertical: 5,
         borderRadius: 16,
+        overflow: 'hidden',
         borderWidth: 1,
-        borderColor: 'rgba(217,27,92,0.55)',
-        backgroundColor: 'rgba(217,27,92,0.2)',
+        borderColor: 'rgba(255,255,255,0.55)',
+        backgroundColor: 'rgba(255,255,255,0.16)',
     },
     body: { flexGrow: 0 },
     bodyContent: { padding: 14, gap: 10 },
@@ -504,9 +562,12 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.15)',
         backgroundColor: 'rgba(255,255,255,0.06)',
     },
-    durationBtnActive: { borderColor: 'rgba(217,27,92,0.55)', backgroundColor: 'rgba(217,27,92,0.2)' },
+    durationBtnActive: {
+        borderColor: 'rgba(255,255,255,0.55)',
+        backgroundColor: 'rgba(255,255,255,0.16)',
+    },
     durationBtnText: { color: '#D1D5DB', fontWeight: '600' },
-    durationBtnTextActive: { color: '#FBCFE8' },
+    durationBtnTextActive: { color: '#FFFFFF' },
     footer: {
         paddingHorizontal: 16,
         paddingTop: 10,
@@ -532,12 +593,23 @@ const styles = StyleSheet.create({
     },
     navBtnDisabled: { opacity: 0.45 },
     navBtnText: { color: '#E5E7EB', fontWeight: '700' },
-    primaryBtn: {
+    nextBtn: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: 12,
         backgroundColor: '#d91b5c',
+        paddingVertical: 12,
+    },
+    primaryBtn: {
+        flex: 1,
+        borderRadius: 12,
+        overflow: 'hidden',
+    },
+    payGradient: {
+        minHeight: 48,
+        alignItems: 'center',
+        justifyContent: 'center',
         paddingVertical: 12,
     },
     primaryBtnDisabled: { opacity: 0.45 },

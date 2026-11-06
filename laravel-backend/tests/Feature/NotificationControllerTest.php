@@ -36,6 +36,45 @@ class NotificationControllerTest extends TestCase
         ]);
     }
 
+    public function test_save_fcm_token_skips_write_when_token_is_unchanged(): void
+    {
+        $user = User::factory()->create();
+        $storedAt = now()->subHour();
+        DB::table('fcm_tokens')->insert([
+            'user_id' => (string) $user->id,
+            'user_handle' => $user->handle,
+            'token' => 'test-token-123',
+            'created_at' => $storedAt,
+            'updated_at' => $storedAt,
+        ]);
+        $before = (string) DB::table('fcm_tokens')->where('token', 'test-token-123')->value('updated_at');
+        $logged = false;
+        \Illuminate\Support\Facades\Log::listen(function ($message) use (&$logged) {
+            if ($message->message === 'FCM token registered') {
+                $logged = true;
+            }
+        });
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/notifications/fcm-token', [
+                'token' => 'test-token-123',
+                'userId' => (string) $user->id,
+                'userHandle' => $user->handle,
+            ]);
+
+        $response->assertOk()
+            ->assertJson([
+                'success' => true,
+                'message' => 'Token already up-to-date',
+            ]);
+
+        $this->assertSame(
+            $before,
+            (string) DB::table('fcm_tokens')->where('token', 'test-token-123')->value('updated_at')
+        );
+        $this->assertFalse($logged);
+    }
+
     public function test_save_fcm_token_validates_input(): void
     {
         $user = User::factory()->create();
@@ -44,6 +83,24 @@ class NotificationControllerTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonStructure(['success', 'errors']);
+    }
+
+    public function test_can_save_fcm_token_with_client_alias(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/fcm-token', [
+                'fcm_token' => 'alias-token-1',
+            ]);
+
+        $response->assertStatus(200)
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseHas('fcm_tokens', [
+            'user_id' => $user->id,
+            'token' => 'alias-token-1',
+        ]);
     }
 
     public function test_can_remove_fcm_token(): void

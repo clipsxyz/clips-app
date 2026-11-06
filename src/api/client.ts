@@ -36,6 +36,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/search/places/details',
     '/search/places/summary',
     '/notifications/fcm-token',
+    '/fcm-token',
     '/collections',
     '/chat-groups',
     '/messages/send',
@@ -50,6 +51,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/feed-content-preferences',
     '/user/phone',
     '/user/settings',
+    '/boosts/create-checkout-session',
 ]);
 
 /** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
@@ -65,6 +67,7 @@ const LIVE_API_PATH_PREFIXES = [
     '/stories/',
     '/collections/',
     '/boost/',
+    '/boosts/',
     '/render-jobs/',
     '/public/posts/',
     '/public/stories',
@@ -1614,7 +1617,12 @@ export async function activateBoostApi(params: {
 
 /** Get active boosted post IDs for a feed type. */
 export async function getActiveBoostedPostIdsApi(feedType: 'local' | 'regional' | 'national'): Promise<string[]> {
-    const data = await apiRequest(`/boost/active-ids?feedType=${encodeURIComponent(feedType)}`) as { postIds?: string[] };
+    const data = await apiRequest(`/boost/active-ids?feedType=${encodeURIComponent(feedType)}`) as {
+        postIds?: string[];
+        boostIdsByPost?: Record<string, number>;
+    };
+    const { rememberBoostIds } = await import('../utils/boostFeedTracking');
+    rememberBoostIds(data.boostIdsByPost);
     return data.postIds ?? [];
 }
 
@@ -1625,6 +1633,7 @@ export async function getBoostStatusApi(postId: string): Promise<{
     feedType: string | null;
     activatedAt: string | null;
     expiresAt: string | null;
+    spendEur?: number;
 }> {
     const data = await apiRequest(`/boost/status/${encodeURIComponent(postId)}`) as {
         isActive: boolean;
@@ -1632,6 +1641,7 @@ export async function getBoostStatusApi(postId: string): Promise<{
         feedType: string | null;
         activatedAt: string | null;
         expiresAt: string | null;
+        spendEur?: number;
     };
     return data;
 }
@@ -1645,6 +1655,7 @@ export async function getBoostAnalyticsApi(postId: string, range: '24h' | '7d' |
     feedType?: 'local' | 'regional' | 'national' | null;
     activatedAt?: string | null;
     expiresAt?: string | null;
+    spend?: number;
     spendEur?: number;
     analytics: {
         impressions: number;
@@ -1666,6 +1677,55 @@ export async function getBoostAnalyticsApi(postId: string, range: '24h' | '7d' |
     } | null;
 }> {
     return apiRequest(`/boost/analytics/${encodeURIComponent(postId)}?range=${encodeURIComponent(range)}`);
+}
+
+export type BoostPerformanceDaily = {
+    date: string;
+    impressions: number;
+    reach: number;
+    clicks: number;
+    ctr: number;
+};
+
+export type BoostPerformance = {
+    boostId: number;
+    postTitle: string;
+    status: 'active' | 'expired';
+    spend: number;
+    summary: { impressions: number; reach: number; clicks: number; ctr: number };
+    daily: BoostPerformanceDaily[];
+};
+
+/** Daily boost performance for the signed-in owner. `days` is 7 or 30. */
+export async function getBoostPerformanceApi(boostId: number | string, days: 7 | 30 = 7): Promise<BoostPerformance> {
+    const payload = await apiRequest(
+        `/boosts/${encodeURIComponent(String(boostId))}/analytics?days=${days}`,
+    ) as {
+        success?: boolean;
+        data?: {
+            boost_id: number;
+            post_title?: string;
+            status: 'active' | 'expired';
+            spend?: number | string;
+            summary: BoostPerformance['summary'];
+            daily?: BoostPerformanceDaily[];
+        };
+    };
+    const data = payload?.data;
+    const spend = Number(data?.spend);
+    return {
+        boostId: Number(data?.boost_id ?? boostId),
+        postTitle: String(data?.post_title || '').trim(),
+        status: data?.status === 'active' ? 'active' : 'expired',
+        spend: Number.isFinite(spend) && spend > 0 ? spend : 0,
+        summary: {
+            impressions: Number(data?.summary?.impressions ?? 0),
+            reach: Number(data?.summary?.reach ?? 0),
+            clicks: Number(data?.summary?.clicks ?? 0),
+            ctr: Number(data?.summary?.ctr ?? 0),
+        },
+        daily: data?.daily ?? [],
+    };
 }
 
 // Upload API (with timeout and clearer errors for phone/network)

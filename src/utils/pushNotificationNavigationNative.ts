@@ -59,6 +59,63 @@ export function navigateFromPushNotificationData(nav: NavLike, data: PushNotific
     const commentId = pickString(data, 'commentId', 'comment_id');
     const conversationId = pickString(data, 'conversation_id', 'conversationId');
     const senderId = pickString(data, 'sender_id', 'senderId');
+    const route = String(pickString(data, 'route', 'screen') || '').trim().toLowerCase();
+
+    if (route === 'feed' || route === 'home') {
+        navigateMainTab(nav, 'Home', postId ? { postId } : undefined);
+        return true;
+    }
+
+    if (route === 'post' || route === 'postdetail' || route === 'post_detail') {
+        if (postId) {
+            nav.navigate('PostDetail', { postId });
+            return true;
+        }
+        navigateMainTab(nav, 'Home');
+        return true;
+    }
+
+    if (route === 'story' || route === 'stories') {
+        if (storyId) {
+            nav.navigate('StoryViewer', { storyId });
+            return true;
+        }
+        navigateMainTab(nav, 'Home');
+        return true;
+    }
+
+    if (route === 'inbox' || route === 'notifications') {
+        navigateMainTab(nav, 'Inbox', {
+            initialTab: route === 'notifications' ? 'notifications' : undefined,
+        });
+        return true;
+    }
+
+    if (route === 'messages' || route === 'message') {
+        const handle = fromHandle || userId || peerHandleFromConversationId(conversationId);
+        if (chatGroupId) {
+            nav.navigate('Messages', {
+                chatGroupId,
+                kind: 'group',
+                groupName: pickString(data, 'groupName', 'group_name'),
+            });
+            return true;
+        }
+        if (handle || conversationId) {
+            nav.navigate('Messages', {
+                handle,
+                conversation_id: conversationId,
+                conversationId,
+                sender_id: senderId,
+            });
+            return true;
+        }
+    }
+
+    if (route === 'profile' && (fromHandle || userId)) {
+        nav.navigate('ViewProfile', { handle: fromHandle || userId, sourcePostId: postId });
+        return true;
+    }
 
     if (type === 'group_invite') {
         navigateMainTab(nav, 'Inbox', {

@@ -7,6 +7,8 @@ use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 
 class Kernel extends ConsoleKernel
 {
+    private bool $scheduleBootstrapped = false;
+
     /**
      * Define the application's command schedule.
      */
@@ -15,6 +17,25 @@ class Kernel extends ConsoleKernel
         $schedule->command('engagement:send-inactive-digests')
             ->dailyAt('09:00')
             ->withoutOverlapping();
+    }
+
+    /**
+     * Use the schedule built while routes/console.php was loaded, so
+     * Schedule::command() registrations are the ones artisan runs.
+     */
+    public function resolveConsoleSchedule()
+    {
+        if ($this->app->resolved(Schedule::class)) {
+            $schedule = $this->app->make(Schedule::class);
+            if (! $this->scheduleBootstrapped) {
+                $this->schedule($schedule->useCache($this->scheduleCache()));
+                $this->scheduleBootstrapped = true;
+            }
+
+            return $schedule;
+        }
+
+        return parent::resolveConsoleSchedule();
     }
 
     /**

@@ -137,7 +137,8 @@ class NotificationController extends Controller
     public function saveFCMToken(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'token' => 'required|string',
+            'token' => 'required_without:fcm_token|string',
+            'fcm_token' => 'required_without:token|string',
             'userId' => 'nullable|string',
             'userHandle' => 'nullable|string',
             'remove' => 'sometimes|boolean',
@@ -154,7 +155,7 @@ class NotificationController extends Controller
             $authUser = Auth::user();
             $userId = trim((string) ($authUser?->id ?? $request->input('userId', '')));
             $userHandle = trim((string) ($authUser?->handle ?? $request->input('userHandle', '')));
-            $token = trim((string) $request->input('token', ''));
+            $token = trim((string) ($request->input('token') ?: $request->input('fcm_token', '')));
 
             if ($token === '') {
                 return response()->json(['success' => false, 'message' => 'token required'], 422);
@@ -187,6 +188,18 @@ class NotificationController extends Controller
                     'success' => false,
                     'message' => 'Authenticated user required to register FCM token',
                 ], 401);
+            }
+
+            $currentToken = DB::table('fcm_tokens')
+                ->where('user_id', $userId)
+                ->where('token', $token)
+                ->value('token');
+
+            if ($currentToken === $token) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Token already up-to-date',
+                ]);
             }
 
             DB::table('fcm_tokens')->updateOrInsert(

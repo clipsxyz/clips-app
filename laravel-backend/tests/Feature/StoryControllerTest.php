@@ -217,6 +217,43 @@ class StoryControllerTest extends TestCase
             ->assertJsonPath('0.viewers.1.username', 'ava');
     }
 
+    public function test_owner_insights_ignore_self_views_and_self_reactions(): void
+    {
+        $owner = User::factory()->create();
+        $viewer = User::factory()->create();
+        $story = Story::factory()->forUser($owner)->create();
+
+        $this->actingAs($owner, 'sanctum')
+            ->postJson("/api/stories/{$story->id}/view")
+            ->assertOk();
+
+        $this->actingAs($owner, 'sanctum')
+            ->postJson("/api/stories/{$story->id}/reaction", ['emoji' => '❤️'])
+            ->assertStatus(201);
+
+        $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/stories/insights')
+            ->assertOk()
+            ->assertJsonPath('insights', []);
+
+        $this->assertDatabaseMissing('story_views', [
+            'story_id' => $story->id,
+            'user_id' => $owner->id,
+        ]);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/stories/{$story->id}/view")
+            ->assertOk();
+
+        $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/stories/insights')
+            ->assertOk()
+            ->assertJsonCount(1, 'insights')
+            ->assertJsonPath('insights.0.views', 1)
+            ->assertJsonPath('insights.0.unique_viewers', 1)
+            ->assertJsonPath('insights.0.viewer_handles.0', $viewer->handle);
+    }
+
     public function test_cannot_view_expired_story(): void
     {
         $user = User::factory()->create();
