@@ -1,4 +1,9 @@
 import type { Post } from '../types';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
+
+function phoneMediaUrl(url: string): string {
+    return resolvePublicMediaUrl(url) || url;
+}
 
 const VIDEO_URL_RE = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
 
@@ -69,8 +74,8 @@ export function collectFeedFullscreenSlides(post: Post): FullscreenSlide[] {
                 item.type === 'video'
                     ? {
                           kind: 'video',
-                          url: item.url,
-                          posterUrl: poster,
+                          url: phoneMediaUrl(item.url),
+                          posterUrl: poster ? phoneMediaUrl(poster) : poster,
                           ...(hasDims ? { width: itemWidth, height: itemHeight } : {}),
                       }
                     : {
@@ -97,8 +102,8 @@ export function collectFeedFullscreenSlides(post: Post): FullscreenSlide[] {
                 isVideo
                     ? {
                           kind: 'video',
-                          url,
-                          posterUrl: poster,
+                          url: phoneMediaUrl(url),
+                          posterUrl: poster ? phoneMediaUrl(poster) : poster,
                           ...(hasDims ? { width: postWidth, height: postHeight } : {}),
                       }
                     : {

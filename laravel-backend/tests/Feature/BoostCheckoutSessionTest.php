@@ -57,6 +57,28 @@ class BoostCheckoutSessionTest extends TestCase
             ->assertJsonPath('error', 'You do not own this post');
     }
 
+    public function test_store_gateway_returns_the_play_and_app_store_amount(): void
+    {
+        $this->app['env'] = 'local';
+        $user = User::factory()->create();
+        $post = Post::factory()->create(['user_id' => $user->id, 'user_handle' => $user->handle]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/boosts/create-checkout-session', [
+                'post_id' => $post->id,
+                'radius' => 5,
+                'tier' => 'standard',
+                'duration' => 6,
+                'gateway' => 'store',
+            ])
+            ->assertOk()
+            ->assertJsonPath('gateway', 'store')
+            ->assertJsonPath('amount_cents', 188)
+            ->assertJsonPath('product_id', 'gazetteer.boost.6h')
+            ->assertJsonPath('metadata.gateway', 'store')
+            ->assertJsonMissingPath('checkout_url');
+    }
+
     public function test_checkout_returns_to_the_local_app_url(): void
     {
         config(['app.url' => 'http://192.168.1.15:8000']);
@@ -78,9 +100,9 @@ class BoostCheckoutSessionTest extends TestCase
         $controller = new BoostCheckoutController();
 
         $this->assertSame(499, $method->invoke($controller, 'standard', 6));
-        $this->assertSame(873, $method->invoke($controller, 'standard', 12));
-        $this->assertSame(2797, $method->invoke($controller, 'premium', 24));
-        $this->assertSame(12394, $method->invoke($controller, 'featured', 72));
+        $this->assertSame(749, $method->invoke($controller, 'standard', 12));
+        $this->assertSame(2198, $method->invoke($controller, 'premium', 24));
+        $this->assertSame(7996, $method->invoke($controller, 'featured', 72));
     }
 
     public function test_local_quote_uses_the_audience_budget_shown_in_the_boost_sheet(): void
@@ -90,6 +112,8 @@ class BoostCheckoutSessionTest extends TestCase
 
         $cents = app(BoostController::class)->audiencePriceCents((string) $user->id, 'local', 2, 6);
 
-        $this->assertSame(750, $cents);
+        $this->assertSame(150, $cents);
+        $store = app(BoostController::class)->audiencePriceCents((string) $user->id, 'local', 2, 6, 'store');
+        $this->assertSame(188, $store);
     }
 }

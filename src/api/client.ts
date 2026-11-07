@@ -360,6 +360,10 @@ export async function loginUser(email: string, password: string): Promise<{
 export async function getCurrentUser() {
     const me = await apiRequest('/auth/me');
     applyRemoteCommentControls(me);
+    if (me && typeof me === 'object') {
+        const { writeCachedUserProfile } = await import('../utils/userProfileCache');
+        void writeCachedUserProfile(me as Record<string, unknown>);
+    }
     return me;
 }
 

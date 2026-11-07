@@ -1422,14 +1422,17 @@ export function transformLaravelPost(response: any): Post {
         rawPoster && typeof rawPoster === 'string'
           ? rewriteMediaUrlForNetwork(String(rawPoster))
           : undefined;
-      if (item.url) {
-        return {
-          ...item,
-          url: rewriteMediaUrlForNetwork(String(item.url)),
-          ...(posterUrl ? { posterUrl, thumbnailUrl: posterUrl, thumbnail_url: posterUrl } : {}),
-        };
+      const rewritten: Record<string, unknown> = { ...item };
+      for (const key of ['url', 'video_url', 'videoUrl', 'media_url'] as const) {
+        const value = item[key];
+        if (typeof value === 'string' && value.trim()) {
+          rewritten[key] = rewriteMediaUrlForNetwork(value.trim());
+        }
       }
-      return posterUrl ? { ...item, posterUrl, thumbnailUrl: posterUrl, thumbnail_url: posterUrl } : item;
+      return {
+        ...rewritten,
+        ...(posterUrl ? { posterUrl, thumbnailUrl: posterUrl, thumbnail_url: posterUrl } : {}),
+      };
     });
   }
 

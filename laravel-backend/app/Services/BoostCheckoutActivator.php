@@ -107,6 +107,67 @@ class BoostCheckoutActivator
     }
 
     /**
+     * Turn a store receipt that Google or Apple already accepted into an active boost.
+     * The reference is a hash of the purchase token, so a replay does not create a second boost.
+     *
+     * @return array{status: string, created: bool, post_id: string, feed_type: string}
+     */
+    public function activateVerifiedStorePurchase(
+        string $userId,
+        string $postId,
+        string $tier,
+        int $duration,
+        float $radius,
+        int $amountCents,
+        string $platform,
+        string $purchaseToken,
+    ): array {
+        $reference = $platform.':'.hash('sha256', $purchaseToken);
+        if ($existing = BoostTransaction::query()->where('stripe_session_id', $reference)->first()) {
+            return [
+                'status' => 'success',
+                'created' => $this->ensureLiveBoost($existing, null),
+                'post_id' => (string) $existing->post_id,
+                'feed_type' => $this->feedTypeForTier((string) $existing->tier),
+            ];
+        }
+
+        $post = Post::findOrFail($postId);
+        $boostedUntil = now()->addHours(max(1, $duration));
+        $feedType = $this->feedTypeForTier($tier);
+
+        DB::transaction(function () use ($post, $boostedUntil, $radius, $tier, $reference, $userId, $duration, $amountCents) {
+            $post->fill([
+                'is_boosted' => true,
+                'boosted_until' => $boostedUntil,
+                'boost_radius' => $radius,
+                'boost_tier' => $tier,
+            ])->save();
+
+            $transaction = BoostTransaction::query()->create([
+                'stripe_session_id' => $reference,
+                'post_id' => $post->id,
+                'user_id' => $userId,
+                'radius' => $radius,
+                'tier' => $tier,
+                'duration' => $duration,
+                'amount_cents' => $amountCents,
+                'currency' => 'eur',
+                'paid_at' => now(),
+            ]);
+
+            $this->ensureLiveBoost($transaction, null);
+        });
+
+        return [
+            'status' => 'success',
+            'created' => true,
+            'post_id' => (string) $post->id,
+            'feed_type' => $feedType,
+        ];
+    }
+
+    /**
      * The payment row can exist without a boost when an earlier insert failed.
      * Returns true only when this call creates the live boost.
      */

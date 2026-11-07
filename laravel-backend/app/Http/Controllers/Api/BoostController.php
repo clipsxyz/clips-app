@@ -18,7 +18,7 @@ class BoostController extends Controller
 {
     /** Boost duration in hours */
     const BOOST_DURATION_HOURS = 6;
-    const BOOST_UNIT_PRICE_EUR_CENTS = 5; // €0.05 per eligible user
+    const BOOST_UNIT_PRICE_EUR_CENTS = 1; // €0.010 per eligible user on the card rate
 
     /** Stand-in audience when a local database has nobody inside the radius. */
     private const LOCAL_MIN_AUDIENCE = 150;
@@ -29,13 +29,7 @@ class BoostController extends Controller
      */
     private function durationMultiplier(int $durationHours): float
     {
-        return match ($durationHours) {
-            6 => 1,
-            12 => 1.75,
-            24 => 2.8,
-            72 => 6.2,
-            default => 1,
-        };
+        return \App\Services\BoostPricing::durationMultiplier($durationHours);
     }
 
     private function haversineKm(float $lat1, float $lon1, float $lat2, float $lon2): float
@@ -139,16 +133,15 @@ class BoostController extends Controller
      * Production always keeps the real spatial count, including zero.
      */
     /**
-     * The ad budget shown in the boost sheet: €0.05 per eligible user, times duration.
+     * The ad budget for one gateway: card is €0.010 per person, store is €0.0125, times duration.
      */
-    public function audiencePriceCents(string $userId, string $feedType, float $radiusKm, int $durationHours): int
+    public function audiencePriceCents(string $userId, string $feedType, float $radiusKm, int $durationHours, string $gateway = 'stripe'): int
     {
-        $multiplier = $this->durationMultiplier($durationHours);
         $eligibleUsers = $this->audienceCountForEnvironment(
             $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
         );
 
-        return (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
+        return \App\Services\BoostPricing::audienceCents($eligibleUsers, $durationHours, $gateway);
     }
 
     private function audienceCountForEnvironment(int $eligibleUsers): int
@@ -184,12 +177,11 @@ class BoostController extends Controller
         $userId = (string) $request->input('userId');
         $radiusKm = (float) $request->input('radiusKm');
         $durationHours = (int) $request->input('durationHours');
-        $multiplier = $this->durationMultiplier($durationHours);
 
         $eligibleUsers = $this->audienceCountForEnvironment(
             $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
         );
-        $priceCents = (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
+        $priceCents = \App\Services\BoostPricing::audienceCents($eligibleUsers, $durationHours);
 
         if ($priceCents <= 0) {
             return response()->json([
@@ -228,8 +220,8 @@ class BoostController extends Controller
     }
 
     /**
-     * Estimate boost price based on radius targeting and duration multiplier.
-     * Audience-size pricing: €0.05 (5 cents) per eligible user.
+     * Estimate both gateway prices from the audience and the duration multiplier.
+     * Card is €0.010 per person. Store is €0.0125 per person.
      */
     public function estimate(Request $request): JsonResponse
     {
@@ -249,7 +241,8 @@ class BoostController extends Controller
         $eligibleUsers = $this->audienceCountForEnvironment(
             $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
         );
-        $priceCents = (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
+        $stripeCents = \App\Services\BoostPricing::audienceCents($eligibleUsers, $durationHours, 'stripe');
+        $storeCents = \App\Services\BoostPricing::audienceCents($eligibleUsers, $durationHours, 'store');
 
         return response()->json([
             'currency' => config('boost.currency', 'eur'),
@@ -259,8 +252,20 @@ class BoostController extends Controller
             'feedType' => $feedType,
             'radiusKm' => $radiusKm,
             'eligibleUsersCount' => $eligibleUsers,
-            'priceCents' => $priceCents,
-            'priceEur' => $priceCents / 100,
+            'priceCents' => $stripeCents,
+            'priceEur' => $stripeCents / 100,
+            'gateways' => [
+                'stripe' => [
+                    'unitPriceEur' => \App\Services\BoostPricing::STRIPE_UNIT_PRICE_EUR,
+                    'priceCents' => $stripeCents,
+                    'priceEur' => $stripeCents / 100,
+                ],
+                'store' => [
+                    'unitPriceEur' => \App\Services\BoostPricing::STORE_UNIT_PRICE_EUR,
+                    'priceCents' => $storeCents,
+                    'priceEur' => $storeCents / 100,
+                ],
+            ],
         ]);
     }
 

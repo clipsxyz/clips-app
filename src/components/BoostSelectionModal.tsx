@@ -34,9 +34,9 @@ const goalOptions: Array<{ id: BoostGoal; label: string; description: string }> 
 
 const durationOptions: Array<{ hours: BoostDuration; label: string; multiplier: number }> = [
     { hours: 6, label: '6h', multiplier: 1 },
-    { hours: 12, label: '12h', multiplier: 1.75 },
-    { hours: 24, label: '24h', multiplier: 2.8 },
-    { hours: 72, label: '3d', multiplier: 6.2 },
+    { hours: 12, label: '12h', multiplier: 1.5 },
+    { hours: 24, label: '24h', multiplier: 2.2 },
+    { hours: 72, label: '3d', multiplier: 4 },
 ];
 const MIN_ELIGIBLE_AUDIENCE = 100;
 const DEFAULT_LOCAL_BOUNDARY_KM = 2;
@@ -237,7 +237,7 @@ export default function BoostSelectionModal({
                     };
                     const multiplier = durationOptions.find((d) => d.hours === selectedDuration)?.multiplier ?? 1;
                     const eligible = Math.max(0, Math.round(baseByFeed[debouncedSelectedOption] * (debouncedRadiusKm / 2)));
-                    const price = Number((eligible * 0.05 * multiplier).toFixed(2));
+                    const price = Number((eligible * 0.01 * multiplier).toFixed(2));
                     if (cancelled) return;
                     setEligibleUsersCount(eligible);
                     setEstimatedTotalPrice(price);

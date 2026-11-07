@@ -1,13 +1,16 @@
 import React from 'react';
 import {
     ActivityIndicator,
+    Alert,
     DeviceEventEmitter,
     Modal,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
+    ToastAndroid,
     View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,6 +22,9 @@ import { estimateBoostPriceApi, updateAuthProfile, apiRequest } from '../api/cli
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { confirmBoostCheckout } from '../api/boost';
 import { openStripeCheckout } from '../utils/stripeCheckoutNative';
+import { boostQuoteCents, BOOST_UNIT_PRICE_EUR, type BoostGateway } from '../utils/boostQuote';
+import { boostStoreSku } from '../config/boostStoreProducts';
+import { purchaseBoostWithStore } from '../services/storeBilling';
 import { BOOST_ACTIVATED_EVENT } from './BoostActivatedModal.native';
 import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
 import BoostWizardBottomSheet from './BoostWizardBottomSheet.native';
@@ -47,12 +53,45 @@ interface BoostSelectionModalProps {
 
 const durationOptions: Array<{ hours: BoostDuration; label: string; multiplier: number }> = [
     { hours: 6, label: '6h', multiplier: 1 },
-    { hours: 12, label: '12h', multiplier: 1.75 },
-    { hours: 24, label: '24h', multiplier: 2.8 },
-    { hours: 72, label: '3d', multiplier: 6.2 },
+    { hours: 12, label: '12h', multiplier: 1.5 },
+    { hours: 24, label: '24h', multiplier: 2.2 },
+    { hours: 72, label: '3d', multiplier: 4 },
 ];
 
 const MIN_ELIGIBLE_AUDIENCE = 100;
+
+const EXTERNAL_CHECKOUT_MESSAGE = 'You are leaving Gazetteer to make a purchase on external web checkout. Gazetteer Direct offers discounted rates.';
+
+function confirmExternalWebCheckout(): Promise<boolean> {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (accepted: boolean) => {
+            if (settled) return;
+            settled = true;
+            resolve(accepted);
+        };
+        Alert.alert(
+            'Gazetteer Direct',
+            EXTERNAL_CHECKOUT_MESSAGE,
+            [
+                { text: 'Cancel', style: 'cancel', onPress: () => finish(false) },
+                { text: 'Continue to Web', onPress: () => finish(true) },
+            ],
+            { cancelable: true, onDismiss: () => finish(false) },
+        );
+    });
+}
+
+function storeBillingBanner(error: unknown): string {
+    const tagged = error as { cancelled?: boolean; unavailable?: boolean; message?: string };
+    if (tagged?.cancelled) return 'Payment cancelled. No charge was made.';
+    if (tagged?.unavailable) return 'Store billing is unavailable right now.';
+    const message = error instanceof Error ? error.message : 'Payment could not be completed.';
+    if (/declin/i.test(message)) return 'Payment was declined. No charge was made.';
+    if (/cancel/i.test(message)) return 'Payment cancelled. No charge was made.';
+    if (/unavailable|not available|could not start/i.test(message)) return 'Store billing is unavailable right now.';
+    return message;
+}
 const DEFAULT_LOCAL_BOUNDARY_KM = 2;
 const DEFAULT_REGIONAL_BOUNDARY_KM = 6;
 
@@ -71,10 +110,12 @@ export default function BoostSelectionModal({
     const [regionalBoundaryKm, setRegionalBoundaryKm] = React.useState<number>(DEFAULT_REGIONAL_BOUNDARY_KM);
     const [showAdvancedBoundaries, setShowAdvancedBoundaries] = React.useState(false);
     const [eligibleUsersCount, setEligibleUsersCount] = React.useState<number | null>(null);
-    const [estimatedTotalPrice, setEstimatedTotalPrice] = React.useState<number | null>(null);
+    const [gateway, setGateway] = React.useState<BoostGateway>('stripe');
     const [estimateLoading, setEstimateLoading] = React.useState(false);
     const [isProcessing, setIsProcessing] = React.useState(false);
     const [payError, setPayError] = React.useState<string | null>(null);
+    const [payNotice, setPayNotice] = React.useState<string | null>(null);
+    const [payBanner, setPayBanner] = React.useState<string | null>(null);
     const [estimateError, setEstimateError] = React.useState<string | null>(null);
     const [debouncedRadiusKm, setDebouncedRadiusKm] = React.useState<number>(2);
     const [sliderRadiusKm, setSliderRadiusKm] = React.useState<number>(2);
@@ -101,6 +142,17 @@ export default function BoostSelectionModal({
     const derivedAudienceLabel =
         selectedOption === 'local' ? 'Local audience' : selectedOption === 'regional' ? 'Regional audience' : 'National audience';
     const selectedDurationMeta = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
+    const multiplier = selectedDurationMeta.multiplier;
+    const stripeCents = eligibleUsersCount == null ? null : boostQuoteCents(eligibleUsersCount, multiplier, 'stripe');
+    const storeCents = eligibleUsersCount == null ? null : boostQuoteCents(eligibleUsersCount, multiplier, 'store');
+    const selectedCents = gateway === 'store' ? storeCents : stripeCents;
+    const estimatedTotalPrice = selectedCents == null ? null : selectedCents / 100;
+    const savingsCents = stripeCents != null && storeCents != null ? storeCents - stripeCents : 0;
+    const storeName = Platform.OS === 'ios' ? 'Apple App Store' : 'Google Play';
+    const storePayLabel = Platform.OS === 'ios' ? 'Pay with Apple' : 'Pay with Google Play';
+    const savePercent = storeCents != null && storeCents > 0 && savingsCents > 0
+        ? Math.round((savingsCents / storeCents) * 100)
+        : 20;
     const estimatedReach = eligibleUsersCount != null ? `${eligibleUsersCount.toLocaleString()} users` : '--';
     const eligibleTooLow =
         typeof eligibleUsersCount === 'number' &&
@@ -192,7 +244,6 @@ export default function BoostSelectionModal({
         async function run() {
             if (!user?.id || !debouncedRadiusKm || debouncedRadiusKm <= 0) {
                 setEligibleUsersCount(null);
-                setEstimatedTotalPrice(null);
                 setEstimateError(null);
                 return;
             }
@@ -211,21 +262,16 @@ export default function BoostSelectionModal({
                     });
                     if (cancelled) return;
                     setEligibleUsersCount(typeof res.eligibleUsersCount === 'number' ? res.eligibleUsersCount : null);
-                    setEstimatedTotalPrice(typeof res.priceEur === 'number' ? res.priceEur : null);
                 } else {
                     const baseByFeed: Record<BoostFeedType, number> = { local: 1200, regional: 2600, national: 5400 };
-                    const multiplier = durationOptions.find((d) => d.hours === selectedDuration)?.multiplier ?? 1;
                     const eligible = Math.max(0, Math.round(baseByFeed[debouncedSelectedOption] * (debouncedRadiusKm / 2)));
-                    const price = Number((eligible * 0.05 * multiplier).toFixed(2));
                     if (cancelled) return;
                     setEligibleUsersCount(eligible);
-                    setEstimatedTotalPrice(price);
                 }
             } catch (e: any) {
                 if (cancelled) return;
                 setEstimateError(e?.message ?? 'Could not estimate boost');
                 setEligibleUsersCount(null);
-                setEstimatedTotalPrice(null);
             } finally {
                 if (!cancelled) setEstimateLoading(false);
             }
@@ -252,8 +298,14 @@ export default function BoostSelectionModal({
     const handleContinueToPayment = async () => {
         const postId = activePost.id;
         if (!postId || eligibleUsersCount == null || estimatedTotalPrice == null || estimatedTotalPrice <= 0 || isProcessing) return;
+        if (gateway === 'stripe' && Platform.OS === 'ios') {
+            const proceed = await confirmExternalWebCheckout();
+            if (!proceed) return;
+        }
         setIsProcessing(true);
         setPayError(null);
+        setPayNotice(null);
+        setPayBanner(null);
         try {
             const data = await apiRequest('/boosts/create-checkout-session', {
                 method: 'POST',
@@ -262,9 +314,35 @@ export default function BoostSelectionModal({
                     radius,
                     tier,
                     duration,
+                    gateway,
                 }),
-            }) as { checkout_url?: string; session_id?: string; error?: string };
+            }) as {
+                gateway?: string;
+                checkout_url?: string;
+                session_id?: string;
+                error?: string;
+                amount_cents?: number;
+                currency?: string;
+                product_id?: string;
+                metadata?: Record<string, string>;
+            };
             if (data?.error) throw new Error(data.error);
+            if (gateway === 'store') {
+                const sku = boostStoreSku(duration);
+                if (!sku || data.product_id !== sku) {
+                    throw new Error('This boost length is not available in the store');
+                }
+                await purchaseBoostWithStore({
+                    sku,
+                    postId,
+                    radius,
+                    tier,
+                    durationHours: duration,
+                });
+                Alert.alert('Boost is live', 'Your post is now boosted.');
+                onClose();
+                return;
+            }
             const checkoutUrl = String(data?.checkout_url || '').trim();
             if (!checkoutUrl) throw new Error('Checkout link was not returned');
             const outcome = await openStripeCheckout(checkoutUrl);
@@ -281,8 +359,17 @@ export default function BoostSelectionModal({
                 DeviceEventEmitter.emit(BOOST_ACTIVATED_EVENT);
             }
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Could not start checkout';
-            setPayError(message);
+            const message = storeBillingBanner(error);
+            if (gateway === 'store') {
+                setPayError(null);
+                setPayBanner(message);
+                if (Platform.OS === 'android') {
+                    ToastAndroid.show(message, ToastAndroid.SHORT);
+                }
+            } else {
+                setPayBanner(null);
+                setPayError(message);
+            }
         } finally {
             setIsProcessing(false);
         }
@@ -296,7 +383,7 @@ export default function BoostSelectionModal({
         <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
             <View style={styles.backdrop}>
                 <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-                <View style={styles.sheet}>
+                <View style={[styles.sheet, activeStep === 3 && styles.sheetCheckout]}>
                     <View style={styles.header}>
                         <Text style={styles.title}>Boost post</Text>
                         <BoostWizardBottomSheet selectedPost={activePost} />
@@ -308,7 +395,11 @@ export default function BoostSelectionModal({
                         </View>
                     </View>
 
-                    <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
+                    <ScrollView
+                        style={[styles.body, activeStep === 3 && styles.bodyStepThree]}
+                        contentContainerStyle={[styles.bodyContent, activeStep === 3 && styles.bodyContentCompact]}
+                        showsVerticalScrollIndicator={activeStep !== 3}
+                    >
                         {activeStep === 1 && (
                             <View style={styles.card}>
                                 <Text style={styles.sectionTitle}>Boost overview</Text>
@@ -397,29 +488,82 @@ export default function BoostSelectionModal({
                         )}
 
                         {activeStep === 3 && (
-                            <View style={styles.card}>
-                                <Text style={styles.sectionTitle}>Budget and duration</Text>
-                                <View style={styles.rowWrap}>
-                                    {durationOptions.map((opt) => {
-                                        const active = selectedDuration === opt.hours;
-                                        return (
-                                            <Pressable
-                                                key={opt.hours}
-                                                style={[styles.durationBtn, active && styles.durationBtnActive]}
-                                                onPress={() => setSelectedDuration(opt.hours)}
-                                            >
-                                                <Text style={[styles.durationBtnText, active && styles.durationBtnTextActive]}>{opt.label}</Text>
-                                            </Pressable>
-                                        );
-                                    })}
+                            <ScrollView
+                                style={styles.stepThreeScroll}
+                                contentContainerStyle={styles.stepThreeContent}
+                                showsVerticalScrollIndicator={false}
+                                nestedScrollEnabled
+                            >
+                                <View style={styles.stepThreeCard}>
+                                    <Text style={styles.stepThreeTitle}>Budget and duration</Text>
+                                    <View style={styles.priceTable}>
+                                        <View style={styles.priceRow}>
+                                            <Text style={styles.priceHead}>Length</Text>
+                                            <Text style={styles.priceHead}>Per person</Text>
+                                            <Text style={[styles.priceHead, styles.priceTotal]}>Total</Text>
+                                        </View>
+                                        {durationOptions.map((opt) => {
+                                            const active = selectedDuration === opt.hours;
+                                            const rowCents = eligibleUsersCount == null
+                                                ? null
+                                                : boostQuoteCents(eligibleUsersCount, opt.multiplier, gateway);
+                                            return (
+                                                <Pressable
+                                                    key={opt.hours}
+                                                    style={[styles.priceRow, active && styles.priceRowActive]}
+                                                    onPress={() => setSelectedDuration(opt.hours)}
+                                                >
+                                                    <Text style={[styles.priceCell, active && styles.priceCellActive]}>{opt.label}</Text>
+                                                    <Text style={[styles.priceCell, active && styles.priceCellActive]}>
+                                                        €{(BOOST_UNIT_PRICE_EUR[gateway] * opt.multiplier).toFixed(4)}
+                                                    </Text>
+                                                    <Text style={[styles.priceCell, styles.priceTotal, active && styles.priceCellActive]}>
+                                                        {rowCents == null ? '--' : `€${(rowCents / 100).toFixed(2)}`}
+                                                    </Text>
+                                                </Pressable>
+                                            );
+                                        })}
+                                    </View>
+                                    <Text style={styles.stepThreeTitle}>Choose how to pay</Text>
+                                    <View style={styles.gatewayRow}>
+                                        <Pressable
+                                            style={[styles.gatewayCard, gateway === 'stripe' && styles.gatewayCardActive]}
+                                            onPress={() => setGateway('stripe')}
+                                        >
+                                            {savingsCents > 0 ? (
+                                                <View style={styles.savePillSlot}>
+                                                    <Text style={styles.savePill}>{`SAVE €${(savingsCents / 100).toFixed(2)}`}</Text>
+                                                </View>
+                                            ) : (
+                                                <View style={styles.savePillSlot}>
+                                                    <Text style={styles.savePill}>SAVE 20%</Text>
+                                                </View>
+                                            )}
+                                            <Text style={[styles.gatewayName, gateway === 'stripe' && styles.gatewayNameActive]}>Gazetteer Direct</Text>
+                                            <Text style={styles.gatewayPrice}>{stripeCents == null ? '--' : `€${(stripeCents / 100).toFixed(2)}`}</Text>
+                                            <Text style={styles.gatewayHint}>{`Credit / Debit Card • Save ${savePercent}%`}</Text>
+                                        </Pressable>
+                                        <Pressable
+                                            style={[styles.gatewayCard, gateway === 'store' && styles.gatewayCardActive]}
+                                            onPress={() => setGateway('store')}
+                                        >
+                                            <View style={styles.savePillSlot} />
+                                            <Text style={[styles.gatewayName, gateway === 'store' && styles.gatewayNameActive]}>{storeName}</Text>
+                                            <Text style={styles.gatewayPrice}>{storeCents == null ? '--' : `€${(storeCents / 100).toFixed(2)}`}</Text>
+                                            <Text style={styles.gatewayHint}>Standard Store Billing</Text>
+                                        </Pressable>
+                                    </View>
                                 </View>
-                            </View>
+                            </ScrollView>
                         )}
                     </ScrollView>
 
                     <View style={styles.footer}>
                         <Text style={styles.footerLine}>Audience: {estimatedReach}</Text>
                         <Text style={styles.footerLine}>Duration: {selectedDurationMeta.hours}h</Text>
+                        <Text style={styles.footerLine}>
+                            Per person: EUR {(BOOST_UNIT_PRICE_EUR[gateway] * multiplier).toFixed(4)}
+                        </Text>
                         <Text style={styles.footerLine}>
                             Ad budget: {estimatedTotalPrice != null ? `EUR ${estimatedTotalPrice.toFixed(2)}` : '--'}
                         </Text>
@@ -431,6 +575,12 @@ export default function BoostSelectionModal({
                         )}
                         {!!estimateError && <Text style={styles.errorText}>{estimateError}</Text>}
                         {!!payError && <Text style={styles.errorText}>{payError}</Text>}
+                        {!!payBanner && (
+                            <View style={styles.payBanner}>
+                                <Text style={styles.payBannerText}>{payBanner}</Text>
+                            </View>
+                        )}
+                        {!!payNotice && <Text style={styles.footerMuted}>{payNotice}</Text>}
                         {eligibleTooLow && (
                             <Text style={styles.warnText}>
                                 Audience is below minimum ({MIN_ELIGIBLE_AUDIENCE} users). Increase radius.
@@ -459,7 +609,9 @@ export default function BoostSelectionModal({
                                         {isProcessing ? (
                                             <ActivityIndicator color="#FFFFFF" />
                                         ) : (
-                                            <Text style={styles.primaryBtnText}>Continue to Payment</Text>
+                                            <Text style={styles.primaryBtnText}>
+                                                {gateway === 'store' ? storePayLabel : 'Continue with Gazetteer Direct'}
+                                            </Text>
                                         )}
                                     </LinearGradient>
                                 </Pressable>
@@ -487,6 +639,7 @@ const styles = StyleSheet.create({
         borderTopWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
     },
+    sheetCheckout: { height: '92%' },
     header: {
         paddingHorizontal: 16,
         paddingTop: 14,
@@ -510,7 +663,21 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.16)',
     },
     body: { flexGrow: 0 },
+    bodyStepThree: { flexGrow: 1, flexShrink: 1 },
     bodyContent: { padding: 14, gap: 10 },
+    bodyContentCompact: { padding: 8, gap: 0, flexGrow: 1 },
+    stepThreeScroll: { flexGrow: 1 },
+    stepThreeContent: { flexGrow: 1 },
+    stepThreeCard: {
+        borderRadius: 12,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        gap: 4,
+    },
+    stepThreeTitle: { color: '#F3F4F6', fontSize: 14, fontWeight: '700' },
     card: {
         borderRadius: 12,
         padding: 12,
@@ -525,6 +692,47 @@ const styles = StyleSheet.create({
     metric: { color: '#F9FAFB', fontSize: 18, fontWeight: '700' },
     row: { flexDirection: 'row', gap: 8 },
     rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    priceTable: { gap: 0 },
+    priceRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 2,
+        paddingHorizontal: 4,
+        borderRadius: 8,
+    },
+    priceRowActive: { backgroundColor: 'rgba(255,255,255,0.12)' },
+    priceHead: { flex: 1, color: '#9CA3AF', fontSize: 11, fontWeight: '700' },
+    priceCell: { flex: 1, color: '#E5E7EB', fontSize: 12 },
+    priceCellActive: { color: '#FFFFFF', fontWeight: '700' },
+    priceTotal: { textAlign: 'right' },
+    gatewayRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+    gatewayCard: {
+        flex: 1,
+        borderRadius: 12,
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.18)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        paddingVertical: 8,
+        paddingHorizontal: 8,
+        gap: 2,
+    },
+    gatewayCardActive: { borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.12)' },
+    savePillSlot: { minHeight: 18, justifyContent: 'center' },
+    savePill: {
+        alignSelf: 'flex-start',
+        overflow: 'hidden',
+        backgroundColor: '#10B981',
+        color: '#052E1C',
+        fontSize: 10,
+        fontWeight: '800',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 999,
+    },
+    gatewayName: { color: '#E5E7EB', fontSize: 13, fontWeight: '700' },
+    gatewayNameActive: { color: '#FFFFFF' },
+    gatewayPrice: { color: '#F9FAFB', fontSize: 16, fontWeight: '700' },
+    gatewayHint: { color: '#9CA3AF', fontSize: 11, lineHeight: 14 },
     smallBtn: {
         flex: 1,
         alignItems: 'center',
@@ -580,6 +788,16 @@ const styles = StyleSheet.create({
     footerMuted: { color: '#9CA3AF', fontSize: 12 },
     loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
     errorText: { color: '#FCA5A5', fontSize: 12, marginTop: 4 },
+    payBanner: {
+        marginTop: 6,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.16)',
+    },
+    payBannerText: { color: '#F3F4F6', fontSize: 12, lineHeight: 16 },
     warnText: { color: '#FCD34D', fontSize: 12, marginTop: 4 },
     actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
     navBtn: {
@@ -613,6 +831,6 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     primaryBtnDisabled: { opacity: 0.45 },
-    primaryBtnText: { color: '#FFFFFF', fontWeight: '700' },
+    primaryBtnText: { color: '#FFFFFF', fontWeight: '700', textAlign: 'center' },
 });
 

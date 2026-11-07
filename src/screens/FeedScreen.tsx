@@ -55,6 +55,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import type { HeaderFeedScope } from '../utils/headerGlassPalette';
 import { useAuth } from '../context/Auth';
+import HeaderPassportButton from '../components/HeaderPassportButton.native';
 import { describeFetchError } from '../api/httpClient';
 import { searchLocations } from '../api/locations';
 import {
@@ -163,8 +164,6 @@ import FeedPageLayout, {
     FEED_HEADER_LOCATION_PILL,
     FEED_HEADER_LOCATION_TITLE,
     FEED_HEADER_PASSPORT_AVATAR,
-    FEED_HEADER_PASSPORT_AVATAR_RING,
-    FEED_HEADER_PASSPORT_INITIALS,
     FEED_HEADER_PICKER_ROW,
     FEED_HEADER_RIGHT_ACTIONS,
     FEED_HEADER_SIDE_ACTION,
@@ -411,12 +410,6 @@ function PillTabs({
     /** Feed the screen is actually showing. Personal and business accounts use the same list. */
     feedScope?: 'following' | 'local' | 'regional' | 'national' | null;
 }) {
-    const { user } = useAuth();
-    const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
-    const [passportAvatarFailed, setPassportAvatarFailed] = React.useState(false);
-    React.useEffect(() => {
-        setPassportAvatarFailed(false);
-    }, [user?.avatarUrl]);
     const onHeaderPlacePickRef = useRef(onHeaderPlacePick);
     const onSearchLocationRef = useRef(onSearchLocation);
     onHeaderPlacePickRef.current = onHeaderPlacePick;
@@ -1115,34 +1108,7 @@ function PillTabs({
                             />
                         </View>
                     ) : null}
-                    <TouchableOpacity
-                        onPress={onOpenPassport}
-                        style={FEED_HEADER_SIDE_ACTION}
-                        accessibilityLabel="My Passport"
-                    >
-                        <View style={styles.feedHeaderNotifWrap}>
-                            <View style={FEED_HEADER_PASSPORT_AVATAR}>
-                                {user?.avatarUrl && !passportAvatarFailed ? (
-                                    <Image
-                                        source={{
-                                            uri:
-                                                resolvePublicMediaUrl(user.avatarUrl) ||
-                                                user.avatarUrl,
-                                        }}
-                                        style={styles.feedHeaderPassportAvatarImage}
-                                        onError={() => setPassportAvatarFailed(true)}
-                                    />
-                                ) : (
-                                    <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
-                                )}
-                                <View
-                                    pointerEvents="none"
-                                    style={FEED_HEADER_PASSPORT_AVATAR_RING}
-                                />
-                            </View>
-                            <Text style={FEED_HEADER_SIDE_LABEL}>Passport</Text>
-                        </View>
-                    </TouchableOpacity>
+                    <HeaderPassportButton onPress={onOpenPassport} />
                 </View>
             </View>
         </View>

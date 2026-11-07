@@ -46,6 +46,7 @@ import {
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
 import { resolvePostPlaybackUri } from '../utils/postMedia';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import {
     feedAspectRatio,
     feedCardAspectRatio,
@@ -832,8 +833,11 @@ const FeedPostMedia = React.memo(
         if (videoUrlFallbackByRaw[raw]) return videoUrlFallbackByRaw[raw];
         // Device uploads / temp storage — never run through demo remapping.
         if (isPlayableLocalMediaUri(raw)) return raw;
-        if (/^https?:\/\//i.test(raw) && !isMockDemoVideoPath(raw)) return raw;
-        return resolveMockFeedVideoUrl(raw);
+        const remote = /^https?:\/\//i.test(raw) && !isMockDemoVideoPath(raw)
+            ? raw
+            : resolveMockFeedVideoUrl(raw);
+        // 127.0.0.1 is the phone. Point storage MP4s at the Mac the API is on.
+        return resolvePublicMediaUrl(remote) || remote;
     };
     const mediaUrl = rawMediaUrl;
     const activeIsVideo = activeItem?.type === 'video' || (!activeItem && isVideoPost(post));

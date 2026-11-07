@@ -63,6 +63,7 @@ import Story24ComposerScreen from './src/screens/Story24ComposerScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
 import ImageFullscreenScreen from './src/screens/ImageFullscreenScreen.native';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
+import { startStoreBilling } from './src/services/storeBilling';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
 import { resetGlobalVideoMutedForNewSession } from './src/utils/globalVideoMuteNative';
 import UploadProgressToast from './src/components/UploadProgressToast.native';
@@ -330,6 +331,23 @@ function App(): React.JSX.Element {
       resetGlobalVideoMutedForNewSession();
     }
     void hydrateAuthTokenFromStorage();
+  }, []);
+
+  React.useEffect(() => {
+    let dispose = () => {};
+    let cancelled = false;
+    void startStoreBilling()
+      .then((stop) => {
+        if (cancelled) stop();
+        else dispose = stop;
+      })
+      .catch((error) => {
+        console.warn('Store billing did not start:', error);
+      });
+    return () => {
+      cancelled = true;
+      dispose();
+    };
   }, []);
 
   React.useEffect(() => {

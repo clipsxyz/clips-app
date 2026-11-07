@@ -27,7 +27,9 @@ class BoostAudienceEstimateTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('eligibleUsersCount', 150)
-            ->assertJsonPath('priceCents', 750);
+            ->assertJsonPath('priceCents', 150)
+            ->assertJsonPath('gateways.stripe.priceCents', 150)
+            ->assertJsonPath('gateways.store.priceCents', 188);
     }
 
     public function test_production_keeps_a_real_zero_audience(): void

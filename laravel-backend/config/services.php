@@ -91,4 +91,14 @@ return [
         'graph_version' => env('FACEBOOK_GRAPH_VERSION', 'v20.0'),
     ],
 
+    'google_play' => [
+        'package_name' => env('GOOGLE_PLAY_PACKAGE_NAME', 'com.clipsapp'),
+        'service_account' => env('GOOGLE_PLAY_SERVICE_ACCOUNT'),
+        'access_token' => env('GOOGLE_PLAY_ACCESS_TOKEN'),
+    ],
+
+    'app_store' => [
+        'shared_secret' => env('APPLE_IAP_SHARED_SECRET'),
+    ],
+
 ];

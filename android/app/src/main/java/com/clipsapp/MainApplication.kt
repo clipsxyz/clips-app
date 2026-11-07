@@ -6,6 +6,7 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
+import com.clipsapp.billing.GazetteerStoreBillingPackage
 import com.reactnativecompressor.CompressorPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -19,6 +20,9 @@ class MainApplication : Application(), ReactApplication {
           // so a clean build still includes the native compressor without a duplicate module.
           if (none { it is CompressorPackage }) {
             add(CompressorPackage())
+          }
+          if (none { it is GazetteerStoreBillingPackage }) {
+            add(GazetteerStoreBillingPackage())
           }
         },
     )

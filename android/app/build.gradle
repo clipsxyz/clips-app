@@ -128,6 +128,8 @@ dependencies {
     // Native compressor binary (CompressorPackage). Autolinking includes the
     // same project; this keeps it on the app classpath for a clean build.
     implementation project(':react-native-compressor')
+
+    implementation("com.android.billingclient:billing-ktx:7.1.1")
 }
 
 apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")

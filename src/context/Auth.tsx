@@ -13,6 +13,12 @@ import {
 } from '../utils/authTokenBridge';
 import { onUnauthorized } from '../utils/authSessionEvents';
 import { bindStoryViewedUser } from '../utils/storyViewedStore';
+import {
+    avatarFromProfileRecord,
+    readCachedUserProfile,
+    userFromProfileCache,
+    writeCachedUserProfile,
+} from '../utils/userProfileCache';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 const USER_STORAGE_KEY = 'user';
@@ -51,6 +57,31 @@ async function persistUserToNativeStorage(userJson: string | null): Promise<void
   }
 }
 
+function withCachedAvatar(user: User, cache: Record<string, unknown> | null): User {
+  if (user.avatarUrl || !cache) return user;
+  if (cache.id != null && String(cache.id) !== user.id) return user;
+  const avatarUrl = avatarFromProfileRecord(cache);
+  return avatarUrl ? { ...user, avatarUrl } : user;
+}
+
+/** Copy fetched profile fields without letting a blank avatar replace a saved photo. */
+function mergeFetchedUser(base: User, fromApi: Record<string, unknown>): User {
+  const updated: User = { ...base };
+  for (const [key, val] of Object.entries(fromApi)) {
+    if (val === undefined || val === null) continue;
+    if (key === 'avatarUrl' && (typeof val !== 'string' || val.trim() === '')) continue;
+    if (key === 'placesTraveled' && Array.isArray(val)) {
+      updated.placesTraveled = val.length > 0 ? val : undefined;
+      continue;
+    }
+    (updated as Record<string, unknown>)[key] = val;
+  }
+  if (!updated.avatarUrl && base.avatarUrl) {
+    updated.avatarUrl = base.avatarUrl;
+  }
+  return updated;
+}
+
 function setSentryUser(user: { id: string; username?: string } | null) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -80,6 +111,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       try {
       await hydrateAuthTokenFromStorage();
+      const cachedProfile = await readCachedUserProfile();
+      const earlyUser = userFromProfileCache(cachedProfile);
+      if (!cancelled && earlyUser) {
+        setUser(earlyUser);
+      }
       await Promise.all([hydratePrivacyStorage(), hydrateUserFromNativeStorage()]);
       if (cancelled) return;
 
@@ -146,6 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             is_private: migratedPrivate,
           };
           if (cancelled) return;
+          userToSet = withCachedAvatar(userToSet, cachedProfile);
           setUser(userToSet);
           if (userToSet.handle) {
             setProfilePrivacy(userToSet.handle, !!userToSet.is_private);
@@ -167,6 +204,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             countryFlag: normalizedFlag || undefined,
           };
           if (cancelled) return;
+          userToSet = withCachedAvatar(userToSet, cachedProfile);
           setUser(userToSet);
           if (normalizedFlag && normalizedFlag !== parsed.countryFlag) {
             try {
@@ -214,16 +252,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   void getAuthTokenAsync().then((stillToken) => {
                     if (cancelled || refreshGen !== authRefreshGenRef.current || !stillToken) return;
                     const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
-                    const updated: User = { ...userToSet };
-                    for (const [key, val] of Object.entries(fromApi)) {
-                      if (val === undefined || val === null) continue;
-                      if (key === 'placesTraveled' && Array.isArray(val)) {
-                        updated.placesTraveled = val.length > 0 ? val : undefined;
-                        continue;
-                      }
-                      (updated as Record<string, unknown>)[key] = val;
-                    }
+                    const updated = mergeFetchedUser(userToSet, fromApi);
                     setUser(updated);
+                    void writeCachedUserProfile(updated);
                     const updatedJson = JSON.stringify(updated);
                     localStorage.setItem(USER_STORAGE_KEY, updatedJson);
                     persistUserToNativeStorage(updatedJson);
@@ -276,6 +307,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const persistAuthUser = React.useCallback((next: User) => {
+    void writeCachedUserProfile(next);
     const toStore = { ...next };
     if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 2000) {
       void db.set(AVATAR_KEY(next.id), toStore.avatarUrl).catch(() => {});
@@ -301,19 +333,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             getCurrentUser().then((apiUser: any) => {
               if (refreshGen !== authRefreshGenRef.current) return;
               const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
-              const updated: User = { ...base };
-              for (const [key, val] of Object.entries(fromApi)) {
-                if (val === undefined || val === null) continue;
-                if (key === 'placesTraveled' && Array.isArray(val)) {
-                  updated.placesTraveled = val.length > 0 ? val : undefined;
-                  continue;
-                }
-                (updated as Record<string, unknown>)[key] = val;
-              }
-              // Keep a freshly uploaded local/data avatar if /auth/me has not caught up yet.
-              if (!updated.avatarUrl && base.avatarUrl) {
-                updated.avatarUrl = base.avatarUrl;
-              }
+              const updated = mergeFetchedUser(base, fromApi);
               setUser(updated);
               persistAuthUser(updated);
               if (updated.handle && typeof updated.is_private === 'boolean') {
@@ -435,6 +455,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (_) {}
     setSentryUser(null);
     void persistUserToNativeStorage(null);
+    void writeCachedUserProfile(null);
     void clearAuthToken();
     void (async () => {
       try {
