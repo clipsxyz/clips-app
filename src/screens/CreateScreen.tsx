@@ -58,7 +58,7 @@ import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 import { filterValidVideoAssets } from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
-import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
+import PlaceAutocompleteField, { dismissPlaceSuggestions } from '../components/PlaceAutocompleteField.native';
 import type { LocationSuggestion } from '../api/locations';
 import { geoFieldsFromSuggestion } from '../api/locations';
 import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
@@ -749,6 +749,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 keyboardShouldPersistTaps="handled"
                 onScrollBeginDrag={() => {
                     Keyboard.dismiss();
+                    dismissPlaceSuggestions();
                     setSelectedStickerOverlay(null);
                 }}
             >
@@ -925,7 +926,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
                 {/* Media Preview */}
                 {selectedMedia && (
-                    <View style={styles.mediaPreview}>
+                    <Pressable style={styles.mediaPreview} onPress={dismissPlaceSuggestions}>
                         {isCarousel ? (
                             <View style={styles.carouselBadge}>
                                 <Icon name="images" size={ox(12)} color="#FBCFE8" />
@@ -1065,7 +1066,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         >
                             <Icon name="close-circle" size={ox(32)} color="#EF4444" />
                         </TouchableOpacity>
-                    </View>
+                    </Pressable>
                 )}
                 {selectedMedia && (
                     <View style={styles.composerTools}>

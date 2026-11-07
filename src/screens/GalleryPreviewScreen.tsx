@@ -20,6 +20,7 @@ import { getKnownUserHandles } from '../api/users';
 import GalleryPreviewComposerPanel, {
     type GalleryPickerTab,
 } from '../components/gallery/GalleryPreviewComposerPanel.native';
+import { dismissPlaceSuggestions } from '../components/PlaceAutocompleteField.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import StickerPickerNative from '../components/StickerPicker.native';
 import StickerOverlayNative from '../components/StickerOverlay.native';
@@ -27,11 +28,6 @@ import TextStickerModalNative from '../components/TextStickerModal.native';
 import UserTaggingModalNative from '../components/UserTaggingModal.native';
 import type { Sticker, StickerOverlay } from '../types';
 import { TEXT_POST_BODY_MAX_LENGTH, CAROUSEL_MAX_ITEMS as CAROUSEL_MAX } from '../constants';
-import {
-    buildFilterInfo,
-    getFilterOverlayStyle,
-    type InstantFilterName,
-} from '../utils/instantFiltersNative';
 import { clampStickerY } from '../utils/stickerLayoutNative';
 import { hapticLight } from '../utils/hapticsNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
@@ -138,11 +134,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers : [],
     );
     const [showTagUserModal, setShowTagUserModal] = useState(false);
-    const [imageFilterName, setImageFilterName] = useState<InstantFilterName>(
-        route.params?.draftFilterActive && route.params.draftFilterActive !== 'None'
-            ? route.params.draftFilterActive
-            : 'None',
-    );
     const [stickers, setStickers] = useState<StickerOverlay[]>(
         Array.isArray(route.params?.draftStickers) ? route.params.draftStickers : [],
     );
@@ -164,13 +155,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     const previewType = activeSlide?.type;
     const previewCoverTime =
         activeSlide?.type === 'video' ? activeSlide.videoCoverTime ?? 0 : 0;
-
-    const filterOverlayStyle = useMemo(
-        () => getFilterOverlayStyle(imageFilterName),
-        [imageFilterName],
-    );
-    const hasAppliedFilter = imageFilterName !== 'None';
-    const filterForExport = hasAppliedFilter ? buildFilterInfo(imageFilterName) : null;
 
     const mentionHandles = useMemo(() => getKnownUserHandles(), []);
     const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -196,8 +180,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers : [],
         );
         setStickers(Array.isArray(route.params?.draftStickers) ? route.params.draftStickers : []);
-        const filter = route.params?.draftFilterActive as InstantFilterName | undefined;
-        setImageFilterName(filter && filter !== 'None' ? filter : 'None');
         setCardTab(initialItems.length > 1 ? 'carousel' : 'caption');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [draftResumeKey]);
@@ -374,7 +356,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
                 mediaType: first.type,
                 videoCoverTime: first.type === 'video' ? first.videoCoverTime : undefined,
-                filterActive: hasAppliedFilter ? imageFilterName : undefined,
                 stickers: stickers.length > 0 ? stickers : undefined,
                 mediaItems: carouselItems.map((item) => ({
                     url: item.uri,
@@ -441,8 +422,8 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             videoCoverTime:
                 first.type === 'video'
                     ? first.videoCoverTime ?? 0
-                    : carouselItems.find((i) => i.type === 'video')?.videoCoverTime ?? 0,
-            filterForExport,
+                    :                     carouselItems.find((i) => i.type === 'video')?.videoCoverTime ?? 0,
+            filterForExport: null,
             userLocal: user.local,
             userRegional: user.regional,
             userNational: user.national,
@@ -494,7 +475,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
     return (
         <View style={styles.root}>
-            <View style={styles.previewSection}>
+            <Pressable style={styles.previewSection} onPress={dismissPlaceSuggestions}>
                 <View style={styles.previewWrap} onLayout={handlePreviewLayout}>
                     <View ref={previewCaptureRef} style={styles.previewCapture} collapsable={false}>
                         {previewType === 'video' && previewUri ? (
@@ -521,11 +502,14 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                                 <Text style={styles.emptyPickText}>Choose photos or videos</Text>
                             </TouchableOpacity>
                         )}
-                        {filterOverlayStyle ? (
-                            <View pointerEvents="none" style={[styles.filterOverlay, filterOverlayStyle]} />
-                        ) : null}
                     </View>
-                    <Pressable style={styles.stickerDeselect} onPress={() => setSelectedStickerOverlay(null)} />
+                    <Pressable
+                        style={styles.stickerDeselect}
+                        onPress={() => {
+                            setSelectedStickerOverlay(null);
+                            dismissPlaceSuggestions();
+                        }}
+                    />
                     {previewSize.width > 0 &&
                         stickers.map((overlay) => (
                             <StickerOverlayNative
@@ -620,7 +604,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                         </View>
                     </View>
                 </View>
-            </View>
+            </Pressable>
 
             <GalleryPreviewComposerPanel
                 cardTab={cardTab}
@@ -639,10 +623,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 onLandmarkChange={setLandmark}
                 taggedUsers={taggedUsers}
                 onOpenTagModal={() => setShowTagUserModal(true)}
-                imageFilterName={imageFilterName}
-                onFilterChange={setImageFilterName}
-                previewUri={previewUri}
-                previewType={previewType}
                 carouselItems={carouselItems}
                 carouselActiveIndex={carouselActiveIndex}
                 onCarouselIndexChange={setCarouselActiveIndex}
@@ -753,9 +733,6 @@ const styles = StyleSheet.create({
     previewMedia: {
         width: '100%',
         height: '100%',
-    },
-    filterOverlay: {
-        ...StyleSheet.absoluteFill,
     },
     stickerDeselect: {
         ...StyleSheet.absoluteFill,

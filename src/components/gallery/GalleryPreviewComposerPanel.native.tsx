@@ -1,30 +1,28 @@
 import React, { useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Image,
     PanResponder,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
+    Pressable,
     View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
-import PlaceAutocompleteField from '../PlaceAutocompleteField.native';
+import PlaceAutocompleteField, { dismissPlaceSuggestions } from '../PlaceAutocompleteField.native';
 import CarouselSlideThumb from '../CarouselSlideThumb.native';
-import { INSTANT_FILTER_NAMES, getFilterOverlayStyle, type InstantFilterName } from '../../utils/instantFiltersNative';
 import type { LocalCarouselItem } from '../../utils/prepareCarouselMediaForPostNative';
 import { TEXT_POST_BODY_MAX_LENGTH, CAROUSEL_MAX_ITEMS as CAROUSEL_MAX } from '../../constants';
 
-export type GalleryPickerTab = 'caption' | 'location' | 'carousel' | 'filters';
+export type GalleryPickerTab = 'caption' | 'location' | 'carousel';
 
 const PICKER_TABS: Array<{ id: GalleryPickerTab; icon: string; title: string }> = [
     { id: 'caption', icon: 'text', title: 'Caption' },
     { id: 'location', icon: 'location', title: 'Location, venue, tag user' },
     { id: 'carousel', icon: 'albums', title: 'Add photos or videos' },
-    { id: 'filters', icon: 'color-filter-outline', title: 'Filters' },
 ];
 
 function GradientField({
@@ -63,10 +61,6 @@ type Props = {
     onLandmarkChange: (v: string) => void;
     taggedUsers: string[];
     onOpenTagModal: () => void;
-    imageFilterName: InstantFilterName;
-    onFilterChange: (name: InstantFilterName) => void;
-    previewUri?: string;
-    previewType?: 'image' | 'video';
     carouselItems: LocalCarouselItem[];
     carouselActiveIndex: number;
     onCarouselIndexChange: (index: number) => void;
@@ -80,7 +74,7 @@ type Props = {
     canSave: boolean;
 };
 
-/** Web GalleryPreviewPage bottom sheet: snap picker + caption/location/carousel/filters. */
+/** Web GalleryPreviewPage bottom sheet: snap picker + caption/location/carousel. */
 export default function GalleryPreviewComposerPanel({
     cardTab,
     onCardTabChange,
@@ -98,10 +92,6 @@ export default function GalleryPreviewComposerPanel({
     onLandmarkChange,
     taggedUsers,
     onOpenTagModal,
-    imageFilterName,
-    onFilterChange,
-    previewUri,
-    previewType,
     carouselItems,
     carouselActiveIndex,
     onCarouselIndexChange,
@@ -216,6 +206,7 @@ export default function GalleryPreviewComposerPanel({
                     contentContainerStyle={styles.bodyContent}
                     keyboardShouldPersistTaps="handled"
                     nestedScrollEnabled
+                    onScrollBeginDrag={dismissPlaceSuggestions}
                 >
                     {cardTab === 'caption' ? (
                         <View style={styles.section}>
@@ -254,11 +245,21 @@ export default function GalleryPreviewComposerPanel({
                             <Text style={styles.charCount}>
                                 {caption.length}/{TEXT_POST_BODY_MAX_LENGTH}
                             </Text>
+                            <View style={styles.stickerRow}>
+                                <TouchableOpacity style={styles.stickerBtn} onPress={onOpenStickerPicker}>
+                                    <Icon name="happy-outline" size={18} color="#FBCFE8" />
+                                    <Text style={styles.stickerBtnText}>Add sticker</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.stickerBtn} onPress={onOpenTextSticker}>
+                                    <Icon name="text" size={18} color="#FBCFE8" />
+                                    <Text style={styles.stickerBtnText}>Add text</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     ) : null}
 
                     {cardTab === 'location' ? (
-                        <View style={styles.section}>
+                        <Pressable style={styles.section} onPress={dismissPlaceSuggestions}>
                             <GradientField colors={['#3b82f6', '#a855f7']} label="STORY LOCATION">
                                 <PlaceAutocompleteField
                                     bare
@@ -307,7 +308,7 @@ export default function GalleryPreviewComposerPanel({
                                     </Text>
                                 </TouchableOpacity>
                             </GradientField>
-                        </View>
+                        </Pressable>
                     ) : null}
 
                     {cardTab === 'carousel' ? (
@@ -380,57 +381,6 @@ export default function GalleryPreviewComposerPanel({
                                         ) : null}
                                     </View>
                                 ))}
-                            </View>
-                        </View>
-                    ) : null}
-
-                    {cardTab === 'filters' ? (
-                        <View style={styles.section}>
-                            {INSTANT_FILTER_NAMES.map((name) => {
-                                const isSelected = imageFilterName === name;
-                                const thumbStyle = getFilterOverlayStyle(name);
-                                return (
-                                    <TouchableOpacity
-                                        key={name}
-                                        style={[styles.filterRow, isSelected && styles.filterRowActive]}
-                                        onPress={() => onFilterChange(name)}
-                                    >
-                                        <View style={styles.filterThumb}>
-                                            {previewUri && previewType === 'image' ? (
-                                                <>
-                                                    <Image
-                                                        source={{ uri: previewUri }}
-                                                        style={styles.filterThumbImg}
-                                                    />
-                                                    {thumbStyle ? (
-                                                        <View
-                                                            pointerEvents="none"
-                                                            style={[styles.filterThumbOverlay, thumbStyle]}
-                                                        />
-                                                    ) : null}
-                                                </>
-                                            ) : (
-                                                <View
-                                                    style={[
-                                                        styles.filterThumbFallback,
-                                                        thumbStyle,
-                                                    ]}
-                                                />
-                                            )}
-                                        </View>
-                                        <Text style={styles.filterName}>{name}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                            <View style={styles.stickerRow}>
-                                <TouchableOpacity style={styles.stickerBtn} onPress={onOpenStickerPicker}>
-                                    <Icon name="happy-outline" size={18} color="#FBCFE8" />
-                                    <Text style={styles.stickerBtnText}>Add sticker</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.stickerBtn} onPress={onOpenTextSticker}>
-                                    <Icon name="text" size={18} color="#FBCFE8" />
-                                    <Text style={styles.stickerBtnText}>Add text</Text>
-                                </TouchableOpacity>
                             </View>
                         </View>
                     ) : null}
@@ -651,33 +601,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    filterRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        padding: 8,
-        borderRadius: 12,
-    },
-    filterRowActive: {
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
-    },
-    filterThumb: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        overflow: 'hidden',
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.3)',
-    },
-    filterThumbImg: { width: '100%', height: '100%' },
-    filterThumbOverlay: { ...StyleSheet.absoluteFill },
-    filterThumbFallback: {
-        flex: 1,
-        backgroundColor: '#374151',
-    },
-    filterName: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
     stickerRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
     stickerBtn: {
         flex: 1,

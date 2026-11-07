@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   StyleSheet,
+  DeviceEventEmitter,
   type TextInputProps,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -30,6 +31,13 @@ type Props = {
   /** Transparent input for bottom-sheet rows (web parity). */
   bare?: boolean;
 };
+
+const PLACE_SUGGESTIONS_DISMISS = 'gazetteer.placeSuggestions.dismiss';
+
+/** Close every open place suggestion list. The typed text stays as it is. */
+export function dismissPlaceSuggestions() {
+  DeviceEventEmitter.emit(PLACE_SUGGESTIONS_DISMISS);
+}
 
 function labelForPostField(s: LocationSuggestion, mode: PlaceFieldMode): string {
   if (mode === 'all' || mode === 'venue') {
@@ -61,6 +69,17 @@ export default function PlaceAutocompleteField({
   const pickedRef = React.useRef(false);
   /** Bumps on re-focus so the same location can be searched/picked again. */
   const [searchEpoch, setSearchEpoch] = React.useState(0);
+
+  const dismissSuggestions = React.useCallback(() => {
+    setOpen(false);
+    setSuggestions([]);
+    setLoading(false);
+  }, []);
+
+  React.useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(PLACE_SUGGESTIONS_DISMISS, dismissSuggestions);
+    return () => sub.remove();
+  }, [dismissSuggestions]);
 
   React.useEffect(() => {
     if (pickedRef.current) {
@@ -155,7 +174,7 @@ export default function PlaceAutocompleteField({
             <TouchableOpacity
               key={`${s.type}-${s.name}-${idx}`}
               style={styles.item}
-              onPress={() => pick(s)}
+              onPressIn={() => pick(s)}
               activeOpacity={0.7}
             >
               <Text style={styles.itemTitle}>{s.display_name || s.name.split(',')[0]}</Text>

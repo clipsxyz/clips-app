@@ -91,7 +91,7 @@ export function showUploadOverlayNative(opts: {
             setTimeout(() => {
                 emit(null);
                 jobControllers.delete(id);
-            }, 2400);
+            }, 2800);
         },
         error(message = 'Could not post. Please try again.') {
             update('error', message, errorTitle);

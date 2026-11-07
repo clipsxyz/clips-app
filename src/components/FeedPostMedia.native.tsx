@@ -239,16 +239,16 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
      * Both directions are synchronous now; the scoped subscription keeps the work to a
      * single leaf, which is what made that affordable.
      */
-    const videoStyle =
-        opaqueSurface && hasValidVideoFrame(frameWidth ?? 0, frameHeight ?? 0)
-            ? {
-                  position: 'absolute' as const,
-                  top: 0,
-                  left: 0,
-                  width: frameWidth,
-                  height: frameHeight,
-              }
-            : styles.videoFill;
+    const videoStyle = hasValidVideoFrame(frameWidth ?? 0, frameHeight ?? 0)
+        ? {
+              position: 'absolute' as const,
+              top: 0,
+              left: 0,
+              width: frameWidth,
+              height: frameHeight,
+              overflow: 'hidden' as const,
+          }
+        : styles.videoFill;
     return (
         <Video
             key={videoKey}
@@ -1079,10 +1079,14 @@ const FeedPostMedia = React.memo(
         // Failing fast once the finger travels past the touch slop hands the gesture straight to
         // the feed's vertical pan with no perceptible lag. Both taps need it — the composition is
         // Simultaneous, so the touch stays held while *either* recognizer is still BEGAN.
+        // A still waits only long enough to tell a double tap from a single tap.
+        // Video keeps a wider window. A drag past maxDistance still fails immediately.
+        const stillFrame = !video;
+        const doubleTapWindow = stillFrame ? 180 : 300;
         const doubleTap = Gesture.Tap()
             .numberOfTaps(2)
-            .maxDuration(400)
-            .maxDelay(300)
+            .maxDuration(stillFrame ? 220 : 400)
+            .maxDelay(doubleTapWindow)
             .maxDistance(10)
             .onEnd((e, success) => {
                 'worklet';
@@ -1098,20 +1102,16 @@ const FeedPostMedia = React.memo(
                 if (!success) return;
                 runOnJS(handleFullscreen)();
             });
-        // `Gesture.Exclusive` is implemented as singleTap.requireExternalGestureToFail(doubleTap)
-        // (gestureComposition.ts:98-118), so the single tap was gated behind the double tap's
-        // ~300ms maxDelay — the full-screen open felt laggy. Simultaneous() drops that
-        // dependency: the single tap resolves on release at 0ms, which is the priority.
-        // Deliberate trade-off: a double tap's FIRST tap opens the viewer, so the feed never
-        // sees the second tap — the double-tap like therefore lives on the opened viewer
-        // (Scenes for video; the still viewer now has the same parity). Do not reintroduce
-        // Exclusive here: it is exactly the delay we removed.
-        const combined = Gesture.Simultaneous(doubleTap, singleTap);
+        // Double tap must win on the card. Simultaneous let the first tap open the
+        // viewer before the second tap arrived, so the like animation only ran in
+        // fullscreen. Exclusive holds the single tap until this window closes.
+        // Text-only cards and the viewer keep their own gestures.
+        const combined = Gesture.Exclusive(doubleTap, singleTap);
         if (hasCarousel) {
             return Gesture.Simultaneous(Gesture.Native(), combined);
         }
         return combined;
-    }, [handleFullscreen, handleLikeAt, hasCarousel]);
+    }, [handleFullscreen, handleLikeAt, hasCarousel, video]);
 
     useEffect(
         () => () => {

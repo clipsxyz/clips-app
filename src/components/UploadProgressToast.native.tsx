@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
     Animated,
-    ImageBackground,
+    Easing,
+    Image,
     Pressable,
     StyleSheet,
     Text,
     View,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
+import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { glassPanel } from '../theme/gazetteerAmbientNative';
@@ -17,159 +18,283 @@ import {
 } from '../utils/uploadOverlayNative';
 import { cancelActiveVideoCompression } from '../utils/compressVideoForUploadNative';
 
-function FlowingUploadIcon() {
-    const shimmer = useRef(new Animated.Value(0)).current;
+const RING = 46;
+const STROKE = 2.5;
+const RING_R = (RING - STROKE) / 2;
+const RING_C = 2 * Math.PI * RING_R;
 
-    useEffect(() => {
-        const shineLoop = Animated.loop(
-            Animated.timing(shimmer, {
-                toValue: 1,
-                duration: 1200,
-                useNativeDriver: true,
-            }),
-        );
-        shineLoop.start();
-        return () => shineLoop.stop();
-    }, [shimmer]);
-
-    const shineX = shimmer.interpolate({
-        inputRange: [0, 1],
-        outputRange: [-28, 28],
-    });
-
-    return (
-        <View style={styles.iconClip}>
-            <Icon name="cloud-upload-outline" size={30} color="#FFFFFF" />
-            <Animated.View
-                pointerEvents="none"
-                style={[styles.shimmer, { transform: [{ translateX: shineX }, { rotate: '18deg' }] }]}
-            >
-                <LinearGradient
-                    colors={['transparent', '#5EEAD4', '#FFFFFF', '#5EEAD4', 'transparent']}
-                    start={{ x: 0, y: 0.5 }}
-                    end={{ x: 1, y: 0.5 }}
-                    style={styles.shimmerFill}
-                />
-            </Animated.View>
-        </View>
-    );
+function percentFromMessage(message: string): boolean {
+    return /\d+\s*%/.test(message);
 }
 
 /**
- * Compact left upload tile + fade-away live popup — mount once at app root.
+ * One floating upload card. Optimizing, posting, and the live confirmation
+ * stay in this shell so the feed underneath never reflows.
  */
 export default function UploadProgressToast() {
     const insets = useSafeAreaInsets();
     const [state, setState] = useState<UploadOverlayState | null>(null);
-    const boxOpacity = useRef(new Animated.Value(0)).current;
-    const popupOpacity = useRef(new Animated.Value(0)).current;
-    const popupShownForId = useRef<string | null>(null);
+    const [displayPct, setDisplayPct] = useState(0);
+    const cardOpacity = useRef(new Animated.Value(0)).current;
+    const cardY = useRef(new Animated.Value(8)).current;
+    const contentOpacity = useRef(new Animated.Value(1)).current;
+    const fractionAnim = useRef(new Animated.Value(0)).current;
+    const indeterminate = useRef(new Animated.Value(0)).current;
+    const shownPct = useRef(0);
+    const enteredId = useRef<string | null>(null);
+    const finishedId = useRef<string | null>(null);
 
     useEffect(() => subscribeUploadOverlay(setState), []);
 
     useEffect(() => {
+        const sub = fractionAnim.addListener(({ value }) => {
+            const next = Math.round(Math.max(0, Math.min(1, value)) * 100);
+            if (next === shownPct.current) return;
+            shownPct.current = next;
+            setDisplayPct(next);
+        });
+        return () => fractionAnim.removeListener(sub);
+    }, [fractionAnim]);
+
+    useEffect(() => {
+        if (!state || state.status !== 'uploading' || typeof state.fraction !== 'number') return;
+        Animated.timing(fractionAnim, {
+            toValue: state.fraction,
+            duration: 320,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+        }).start();
+    }, [fractionAnim, state?.fraction, state?.id, state?.status]);
+
+    const showDeterminate = state?.status === 'uploading' && typeof state.fraction === 'number';
+
+    useEffect(() => {
+        if (!showDeterminate) return undefined;
+        indeterminate.setValue(0);
+        return undefined;
+    }, [indeterminate, showDeterminate]);
+
+    useEffect(() => {
+        if (state?.status !== 'uploading' || showDeterminate) return undefined;
+        indeterminate.setValue(0);
+        const loop = Animated.loop(
+            Animated.timing(indeterminate, {
+                toValue: 1,
+                duration: 1100,
+                easing: Easing.inOut(Easing.quad),
+                useNativeDriver: true,
+            }),
+        );
+        loop.start();
+        return () => loop.stop();
+    }, [indeterminate, showDeterminate, state?.status, state?.id]);
+
+    useEffect(() => {
         if (!state) {
-            popupShownForId.current = null;
-            boxOpacity.setValue(0);
-            popupOpacity.setValue(0);
+            enteredId.current = null;
+            finishedId.current = null;
+            shownPct.current = 0;
+            setDisplayPct(0);
+            fractionAnim.setValue(0);
             return;
         }
 
         if (state.status === 'uploading') {
-            popupShownForId.current = null;
-            popupOpacity.setValue(0);
-            Animated.timing(boxOpacity, {
-                toValue: 1,
-                duration: 180,
-                useNativeDriver: true,
-            }).start();
+            finishedId.current = null;
+            if (enteredId.current === state.id) return;
+            enteredId.current = state.id;
+            contentOpacity.setValue(1);
+            cardOpacity.setValue(0);
+            cardY.setValue(8);
+            Animated.parallel([
+                Animated.timing(cardOpacity, {
+                    toValue: 1,
+                    duration: 240,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+                Animated.timing(cardY, {
+                    toValue: 0,
+                    duration: 240,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+            ]).start();
             return;
         }
 
-        Animated.timing(boxOpacity, {
-            toValue: 0,
-            duration: 180,
-            useNativeDriver: true,
-        }).start();
-
-        if (popupShownForId.current === state.id) return;
-        popupShownForId.current = state.id;
-
-        popupOpacity.setValue(0);
+        if (finishedId.current === state.id) return;
+        finishedId.current = state.id;
+        contentOpacity.setValue(0);
+        cardOpacity.setValue(1);
+        cardY.setValue(0);
         Animated.sequence([
-            Animated.timing(popupOpacity, {
+            Animated.timing(contentOpacity, {
                 toValue: 1,
-                duration: 220,
+                duration: 280,
+                easing: Easing.out(Easing.cubic),
                 useNativeDriver: true,
             }),
-            Animated.delay(1400),
-            Animated.timing(popupOpacity, {
-                toValue: 0,
-                duration: 420,
-                useNativeDriver: true,
-            }),
+            Animated.delay(1500),
+            Animated.parallel([
+                Animated.timing(cardOpacity, {
+                    toValue: 0,
+                    duration: 520,
+                    easing: Easing.in(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+                Animated.timing(cardY, {
+                    toValue: -8,
+                    duration: 520,
+                    easing: Easing.in(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+            ]),
         ]).start();
-    }, [state, boxOpacity, popupOpacity]);
+    }, [cardOpacity, cardY, contentOpacity, fractionAnim, state]);
 
     if (!state) return null;
 
     const isUploading = state.status === 'uploading';
     const isError = state.status === 'error';
-    const popupCopy = isError
-        ? state.message || 'Could not post. Please try again.'
-        : 'Your post is now live';
-
+    const title = isUploading
+        ? state.title || 'Optimizing video…'
+        : isError
+          ? state.title || 'Post failed'
+          : 'Your post is now live';
+    const subtitle =
+        isUploading &&
+        state.message &&
+        state.message !== title &&
+        !percentFromMessage(state.message)
+            ? state.message
+            : isError
+              ? state.message || 'Could not post. Please try again.'
+              : null;
     const thumbSource = state.thumbUri ? { uri: state.thumbUri } : undefined;
+    const ringOffset = RING_C * (1 - displayPct / 100);
+    const glideX = indeterminate.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-72, 180],
+    });
 
     return (
-        <View
-            style={[styles.wrap, { top: insets.top + 10 }]}
-            pointerEvents="box-none"
-        >
-            {isUploading && typeof state.fraction === 'number' ? (
-                <Animated.View style={[styles.compressCard, { opacity: boxOpacity }]} pointerEvents="auto">
-                    <Text style={styles.compressTitle}>{state.title || 'Optimizing video…'}</Text>
-                    <Text style={styles.compressMessage}>{state.message}</Text>
-                    <View style={styles.compressTrack}>
-                        <View style={[styles.compressFill, { width: `${Math.round(state.fraction * 100)}%` }]} />
+        <View style={[styles.wrap, { top: insets.top + 8 }]} pointerEvents="box-none">
+            <Animated.View
+                pointerEvents={isUploading ? 'auto' : 'none'}
+                style={[
+                    styles.card,
+                    isError && styles.cardError,
+                    {
+                        opacity: cardOpacity,
+                        transform: [{ translateY: cardY }],
+                    },
+                ]}
+            >
+                <Animated.View style={[styles.row, { opacity: contentOpacity }]}>
+                    <View style={styles.thumbSlot}>
+                        {thumbSource ? (
+                            <Image source={thumbSource} style={styles.thumb} />
+                        ) : (
+                            <View
+                                style={[
+                                    styles.thumb,
+                                    styles.thumbFallback,
+                                    {
+                                        backgroundColor:
+                                            state.textThumbBackground || '#141018',
+                                    },
+                                ]}
+                            >
+                                <Text style={styles.thumbLetter} numberOfLines={1}>
+                                    {state.textThumbLabel?.slice(0, 1) || ''}
+                                </Text>
+                            </View>
+                        )}
+                        {isUploading && showDeterminate ? (
+                            <Svg width={RING} height={RING} style={styles.ring}>
+                                <Circle
+                                    cx={RING / 2}
+                                    cy={RING / 2}
+                                    r={RING_R}
+                                    stroke="rgba(255,255,255,0.18)"
+                                    strokeWidth={STROKE}
+                                    fill="none"
+                                />
+                                <Circle
+                                    cx={RING / 2}
+                                    cy={RING / 2}
+                                    r={RING_R}
+                                    stroke="#5EEAD4"
+                                    strokeWidth={STROKE}
+                                    fill="none"
+                                    strokeDasharray={`${RING_C} ${RING_C}`}
+                                    strokeDashoffset={ringOffset}
+                                    strokeLinecap="round"
+                                    transform={`rotate(-90 ${RING / 2} ${RING / 2})`}
+                                />
+                            </Svg>
+                        ) : (
+                            <View style={[styles.statusBadge, isError && styles.statusBadgeError]}>
+                                <Icon
+                                    name={isError ? 'alert' : isUploading ? 'cloud-upload-outline' : 'checkmark'}
+                                    size={11}
+                                    color="#FFFFFF"
+                                />
+                            </View>
+                        )}
                     </View>
-                    <Pressable
-                        onPress={() => cancelActiveVideoCompression()}
-                        style={styles.compressCancel}
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel video optimization"
-                    >
-                        <Text style={styles.compressCancelText}>Cancel</Text>
-                    </Pressable>
-                </Animated.View>
-            ) : isUploading ? (
-                <Animated.View style={[styles.box, { opacity: boxOpacity }]} pointerEvents="none">
-                    <ImageBackground
-                        source={thumbSource}
-                        style={[
-                            styles.thumbFill,
-                            !thumbSource && { backgroundColor: state.textThumbBackground || '#0b0711' },
-                        ]}
-                        imageStyle={styles.thumbImage}
-                    >
-                        <View style={styles.iconScrim}>
-                            <FlowingUploadIcon />
+
+                    <View style={styles.copy}>
+                        <View style={styles.titleRow}>
+                            <Text style={styles.title} numberOfLines={1}>
+                                {title}
+                            </Text>
+                            {showDeterminate ? (
+                                <Text style={styles.percent}>{displayPct}%</Text>
+                            ) : null}
                         </View>
-                    </ImageBackground>
+                        {subtitle ? (
+                            <Text
+                                style={[styles.subtitle, isError && styles.subtitleError]}
+                                numberOfLines={1}
+                            >
+                                {subtitle}
+                            </Text>
+                        ) : null}
+                        {isUploading ? (
+                            <View
+                                style={styles.track}
+                                accessibilityRole="progressbar"
+                                accessibilityValue={
+                                    showDeterminate
+                                        ? { min: 0, max: 100, now: displayPct }
+                                        : undefined
+                                }
+                            >
+                                {showDeterminate ? (
+                                    <View style={[styles.fill, { width: `${displayPct}%` }]} />
+                                ) : (
+                                    <Animated.View
+                                        style={[styles.glide, { transform: [{ translateX: glideX }] }]}
+                                    />
+                                )}
+                            </View>
+                        ) : null}
+                    </View>
+
+                    {showDeterminate ? (
+                        <Pressable
+                            onPress={() => cancelActiveVideoCompression()}
+                            style={styles.cancel}
+                            accessibilityRole="button"
+                            accessibilityLabel="Cancel video optimization"
+                        >
+                            <Text style={styles.cancelText}>Cancel</Text>
+                        </Pressable>
+                    ) : null}
                 </Animated.View>
-            ) : (
-                <Animated.View
-                    style={[
-                        styles.popup,
-                        isError && styles.popupError,
-                        { opacity: popupOpacity },
-                    ]}
-                >
-                    <Text style={[styles.popupText, isError && styles.popupTextError]}>
-                        {popupCopy}
-                    </Text>
-                </Animated.View>
-            )}
+            </Animated.View>
         </View>
     );
 }
@@ -177,114 +302,134 @@ export default function UploadProgressToast() {
 const styles = StyleSheet.create({
     wrap: {
         position: 'absolute',
-        left: 12,
-        right: 12,
+        left: 16,
+        right: 16,
         zIndex: 9999,
         elevation: 20,
-    },
-    box: {
-        width: 52,
-        height: 64,
-        borderRadius: 12,
-        overflow: 'hidden',
-        ...glassPanel,
-        shadowColor: '#000',
-        shadowOpacity: 0.4,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 4 },
-        elevation: 12,
-    },
-    thumbFill: {
-        flex: 1,
-    },
-    thumbImage: {
-        resizeMode: 'cover',
-    },
-    iconScrim: {
-        flex: 1,
-        backgroundColor: 'rgba(11, 7, 17, 0.55)',
         alignItems: 'center',
-        justifyContent: 'center',
     },
-    iconClip: {
-        width: 32,
-        height: 32,
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
-    },
-    shimmer: {
-        position: 'absolute',
-        width: 14,
-        height: 40,
-        top: -4,
-    },
-    shimmerFill: {
-        flex: 1,
-    },
-    popup: {
-        alignSelf: 'center',
-        maxWidth: '86%',
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 999,
-        backgroundColor: 'rgba(26, 21, 36, 0.94)',
-        borderWidth: 1,
-        borderColor: 'rgba(94, 234, 212, 0.35)',
-    },
-    popupError: {
-        borderColor: 'rgba(248, 113, 113, 0.45)',
-    },
-    popupText: {
-        color: '#E5E7EB',
-        fontSize: 13,
-        fontWeight: '600',
-        textAlign: 'center',
-    },
-    popupTextError: {
-        color: '#FECACA',
-    },
-    compressCard: {
-        alignSelf: 'center',
+    card: {
         width: '100%',
         maxWidth: 360,
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-        borderRadius: 16,
-        backgroundColor: 'rgba(11, 14, 20, 0.96)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.14)',
+        minHeight: 68,
+        borderRadius: 18,
+        paddingVertical: 10,
+        paddingLeft: 10,
+        paddingRight: 12,
+        justifyContent: 'center',
+        ...glassPanel,
+        shadowColor: '#000',
+        shadowOpacity: 0.35,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 12,
     },
-    compressTitle: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '700',
+    cardError: {
+        borderColor: 'rgba(248, 113, 113, 0.45)',
     },
-    compressMessage: {
-        color: '#8B949E',
-        fontSize: 13,
-        marginTop: 4,
+    row: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
-    compressTrack: {
-        height: 4,
-        borderRadius: 999,
-        backgroundColor: '#21262D',
-        marginTop: 12,
-        overflow: 'hidden',
+    thumbSlot: {
+        width: RING,
+        height: RING,
+        marginRight: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    compressFill: {
-        height: '100%',
-        backgroundColor: '#FFFFFF',
+    thumb: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        backgroundColor: '#141018',
     },
-    compressCancel: {
-        marginTop: 12,
-        alignSelf: 'flex-end',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
+    thumbFallback: {
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    compressCancelText: {
+    thumbLetter: {
         color: '#FFFFFF',
         fontSize: 14,
+        fontWeight: '700',
+    },
+    ring: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+    },
+    statusBadge: {
+        position: 'absolute',
+        right: -2,
+        bottom: -2,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#0F766E',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#1A1524',
+    },
+    statusBadgeError: {
+        backgroundColor: '#B91C1C',
+    },
+    copy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    title: {
+        flex: 1,
+        color: '#F4F4F5',
+        fontSize: 14,
+        fontWeight: '600',
+        marginRight: 8,
+    },
+    percent: {
+        color: '#5EEAD4',
+        fontSize: 13,
+        fontWeight: '700',
+        fontVariant: ['tabular-nums'],
+    },
+    subtitle: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginTop: 2,
+    },
+    subtitleError: {
+        color: '#FECACA',
+    },
+    track: {
+        height: 3,
+        borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        marginTop: 8,
+        overflow: 'hidden',
+    },
+    fill: {
+        height: '100%',
+        borderRadius: 999,
+        backgroundColor: '#5EEAD4',
+    },
+    glide: {
+        width: 72,
+        height: '100%',
+        borderRadius: 999,
+        backgroundColor: '#5EEAD4',
+    },
+    cancel: {
+        marginLeft: 10,
+        paddingVertical: 6,
+        paddingHorizontal: 2,
+    },
+    cancelText: {
+        color: '#E5E7EB',
+        fontSize: 13,
         fontWeight: '600',
     },
 });

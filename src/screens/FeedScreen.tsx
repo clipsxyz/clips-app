@@ -1239,16 +1239,13 @@ const FeedCard = React.memo(function FeedCard({
         return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
     }, [activeMediaItem?.width, activeMediaItem?.height, post.width, post.height]);
 
+    const measuredCacheKey = `${String(post.id)}:${carouselIndex}`;
+
     /**
-     * Live measured size, tagged by post AND slide.
-     *
-     * When ExoPlayer `naturalSize` / Image `onLoad` reports the true dimensions, the
-     * card adopts them IMMEDIATELY (state update -> re-render -> new height) instead of
-     * freezing the first — often fallback — box for the life of the post and only
-     * correcting it after the cell is recycled. The post+slide tag means a recycled
-     * cell can never apply a neighbour's (or a sibling slide's) measurement: a stale
-     * tag simply does not match, and the module cache below is keyed the same way so a
-     * remount of the same slide paints at its measured height from frame 0.
+     * The media box follows the clip. API dimensions size the first paint.
+     * A decoder measurement updates the same box so the frame matches the
+     * video (portrait capped at 4:5, landscape at its own ratio). The cache
+     * is keyed by post and slide so a recycled cell cannot inherit a neighbour.
      */
     const [measuredMedia, setMeasuredMedia] = React.useState<{
         postId: string;
@@ -1257,15 +1254,12 @@ const FeedCard = React.memo(function FeedCard({
         height: number;
     } | null>(null);
 
-    const measuredCacheKey = `${String(post.id)}:${carouselIndex}`;
-
     const handleIntrinsicMedia = React.useCallback(
         (size: { width: number; height: number }) => {
             if (intrinsicRatio(size.width, size.height) == null) return;
             const key = `${String(post.id)}:${carouselIndex}`;
             const prev = measuredMediaSizeByPostId.get(key);
             if (!prev || prev.width !== size.width || prev.height !== size.height) {
-                // Hoisted to module scope so the size survives cell recycling.
                 measuredMediaSizeByPostId.set(key, size);
             }
             setMeasuredMedia((prevState) =>
@@ -1311,11 +1305,9 @@ const FeedCard = React.memo(function FeedCard({
      * `feedCardAspectRatio`, portrait clamped to 4:5), and only then capped to the viewport
      * so a tall post cannot push the engagement row off screen.
      *
-     * It recomputes whenever the resolved size changes: an API dimension arriving, the
-     * active carousel slide changing, or a runtime measurement landing all update the
-     * mounted card in the same commit instead of waiting for a recycle/remount. Unknown
-     * media seeds at the neutral 16:9 feed box via `fitLandscape`, so an unmeasured
-     * widescreen clip never starts life in a tall portrait frame.
+     * Unknown media starts at the neutral 16:9 box, then adopts the measured
+     * ratio in the same commit as the player so the clip fills the frame
+     * instead of sitting in a box of the wrong shape.
      */
     const mediaFrameHeight = React.useMemo(() => {
         const contentHeight = feedMediaHeight(
@@ -1585,7 +1577,9 @@ const FeedCard = React.memo(function FeedCard({
                                 FEED_CARD_MEDIA_WRAP,
                                 {
                                     height: mediaFrameHeight,
+                                    minHeight: mediaFrameHeight,
                                     maxHeight: mediaFrameHeight,
+                                    flexShrink: 0,
                                 },
                             ]}
                             collapsable={false}
