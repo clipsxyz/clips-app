@@ -22,6 +22,7 @@ export type User = {
     podcast?: string;
   };
   placesTraveled?: string[]; // Places the user has traveled to
+  favouritePlaces?: string[]; // Places the user marks as favourites
   is_verified?: boolean; // Backend field
   is_private?: boolean; // Backend field - profile privacy setting
   emailDigestEnabled?: boolean; // Inactive "what you missed" digest emails

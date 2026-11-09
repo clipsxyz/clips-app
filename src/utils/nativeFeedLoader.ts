@@ -7,6 +7,7 @@ import {
     type FeedContentPrefs,
 } from './feedContentPrefsMobile';
 import { getArchivedFeedPostIdsMobile } from './feedEngagementPrefsMobile';
+import { isAbortLikeError } from './abortSafe';
 
 export type NativeFeedFetchParams = {
     filter: string;
@@ -79,7 +80,11 @@ export async function fetchVisibleFeedPage(
         });
         return { items, nextCursor: page.nextCursor ?? null };
     } catch (err) {
-        console.error('fetchVisibleFeedPage failed:', err);
+        if (isAbortLikeError(err)) {
+            console.warn('fetchVisibleFeedPage cancelled:', err);
+        } else {
+            console.error('fetchVisibleFeedPage failed:', err);
+        }
         throw err;
     }
 }

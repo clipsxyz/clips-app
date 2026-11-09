@@ -11,6 +11,7 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar.native';
 import FeedPostMedia from './FeedPostMedia.native';
 import type { Post } from '../types';
@@ -21,6 +22,7 @@ import {
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
 import { getEffectiveTextStyleForPost } from '../utils/effectiveTextPostStyle';
+import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
 import { formatProfileDisplayHandle } from '../utils/profileShareUrl';
 import { FEED_CARD_MEDIA_BG } from './FeedPageLayout.native';
 
@@ -35,6 +37,50 @@ type PeekAction = {
     disabled?: boolean;
     destructive?: boolean;
 };
+
+function TextCardPeek({
+    post,
+    caption,
+    height,
+    fallbackColor,
+    fontSize,
+}: {
+    post: Post;
+    caption: string;
+    height: number;
+    fallbackColor?: string;
+    fontSize: number;
+}) {
+    const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
+    const text = (
+        <Text
+            style={[
+                styles.textPreviewBody,
+                { color: card?.textColor || fallbackColor || '#111827', fontSize },
+            ]}
+            numberOfLines={8}
+        >
+            {caption || 'Post'}
+        </Text>
+    );
+    const frame = [
+        styles.textPreview,
+        { minHeight: height },
+        card?.bordered ? { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' } : null,
+    ];
+    if (card && card.colors.length >= 2) {
+        return (
+            <LinearGradient colors={card.colors as [string, string, ...string[]]} style={frame}>
+                {text}
+            </LinearGradient>
+        );
+    }
+    return (
+        <View style={[...frame, { backgroundColor: card?.colors[0] || getTextOnlyBackgroundColor(post) }]}>
+            {text}
+        </View>
+    );
+}
 
 type Props = {
     visible: boolean;
@@ -138,33 +184,19 @@ export default function ProfileGridPeekSheet({
 
                             <View style={[styles.previewMedia, { height: previewMediaHeight }]}>
                                 {isTextOnlyPost(post) ? (
-                                    <View
-                                        style={[
-                                            styles.textPreview,
-                                            {
-                                                backgroundColor: getTextOnlyBackgroundColor(post),
-                                                minHeight: previewMediaHeight,
-                                            },
-                                        ]}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.textPreviewBody,
-                                                {
-                                                    color: textStyle?.color || '#111827',
-                                                    fontSize:
-                                                        textStyle?.size === 'large'
-                                                            ? 22
-                                                            : textStyle?.size === 'small'
-                                                              ? 14
-                                                              : 18,
-                                                },
-                                            ]}
-                                            numberOfLines={8}
-                                        >
-                                            {caption || 'Post'}
-                                        </Text>
-                                    </View>
+                                    <TextCardPeek
+                                        post={post}
+                                        caption={caption}
+                                        height={previewMediaHeight}
+                                        fallbackColor={textStyle?.color}
+                                        fontSize={
+                                            textStyle?.size === 'large'
+                                                ? 22
+                                                : textStyle?.size === 'small'
+                                                  ? 14
+                                                  : 18
+                                        }
+                                    />
                                 ) : post.mediaUrl ? (
                                     <>
                                         {isVideoPost(post) ? (

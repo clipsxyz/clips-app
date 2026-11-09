@@ -373,6 +373,8 @@ class AuthController extends Controller
             'bio' => 'sometimes|nullable|string|max:5000',
             'places_traveled' => 'sometimes|nullable|array|max:80',
             'places_traveled.*' => 'string|max:200',
+            'favourite_places' => 'sometimes|nullable|array|max:80',
+            'favourite_places.*' => 'string|max:200',
             'location_local' => 'sometimes|nullable|string|max:100',
             'location_regional' => 'sometimes|nullable|string|max:100',
             'location_national' => 'sometimes|nullable|string|max:100',
@@ -400,7 +402,7 @@ class AuthController extends Controller
         $newHandle = array_key_exists('handle', $data) ? (string) $data['handle'] : $oldHandle;
         $handleChanging = $newHandle !== '' && strcasecmp($oldHandle, $newHandle) !== 0;
 
-        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled', 'is_private'];
+        $fillable = ['display_name', 'bio', 'places_traveled', 'favourite_places', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled', 'is_private'];
         foreach ($fillable as $field) {
             if (array_key_exists($field, $data)) {
                 $user->{$field} = $data[$field];

@@ -13,6 +13,7 @@ import { resolvePostThumbnail } from '../api/collections';
 import { mediaItemsEqual } from '../utils/feedPostCompareNative';
 import { formatViewCount } from '../utils/feedPostNewsTicker';
 import { siblingJpegFromVideoUrl } from '../utils/postMedia';
+import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
 import LinearGradient from 'react-native-linear-gradient';
 import CachedImage from './CachedImage.native';
 import {
@@ -138,16 +139,38 @@ function ProfileGridThumb({ post, overlay = 'views' }: Props) {
     }
 
     if (isTextOnlyPost(post) || bodyText) {
-        return (
-            <View style={[styles.cell, { backgroundColor: getTextOnlyBackgroundColor(post) }]}>
-                <Text
-                    style={[styles.textThumb, { color: getTextOnlyTextColor(post) }]}
-                    numberOfLines={4}
-                >
+        const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
+        const textColor = card?.textColor || getTextOnlyTextColor(post);
+        const copy = (
+            <>
+                <Text style={[styles.textThumb, { color: textColor }]} numberOfLines={4}>
                     {bodyText || 'Post'}
                 </Text>
                 {bottomFade}
                 <ViewsBadge post={post} overlay={overlay} />
+            </>
+        );
+        if (card && card.colors.length >= 2) {
+            return (
+                <LinearGradient
+                    colors={card.colors as [string, string, ...string[]]}
+                    style={styles.cell}
+                >
+                    {copy}
+                </LinearGradient>
+            );
+        }
+        return (
+            <View
+                style={[
+                    styles.cell,
+                    {
+                        backgroundColor: card?.colors[0] || getTextOnlyBackgroundColor(post),
+                    },
+                    card?.bordered ? styles.charcoalEdge : null,
+                ]}
+            >
+                {copy}
             </View>
         );
     }
@@ -181,6 +204,7 @@ function profileGridThumbsEqual(prev: Props, next: Props): boolean {
         a.views_count === b.views_count &&
         a.text === b.text &&
         a.caption === b.caption &&
+        a.cardStyle === b.cardStyle &&
         mediaItemsEqual(a.mediaItems, b.mediaItems)
     );
 }
@@ -202,6 +226,10 @@ const styles = StyleSheet.create({
     placeholder: {
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    charcoalEdge: {
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
     },
     textThumb: {
         fontSize: 10,

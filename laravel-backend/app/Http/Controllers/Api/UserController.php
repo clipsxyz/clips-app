@@ -659,6 +659,7 @@ class UserController extends Controller
                 'posts.caption',
                 'posts.image_text',
                 'posts.text_style',
+                'posts.card_style',
                 'posts.video_captions_enabled',
                 'posts.video_caption_text',
                 'posts.subtitles_enabled',

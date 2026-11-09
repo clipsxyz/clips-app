@@ -2070,6 +2070,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Icon name="location-outline" size={ox(18)} color="#FFFFFF" />
                                 <Text style={styles.editSheetOptionText}>Location</Text>
                             </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => setOpenPassportCardRequest('places')}
+                            >
+                                <Icon name="map-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Places</Text>
+                            </TouchableOpacity>
                             <ProfilePassportCards
                                 navigation={navigation}
                                 isPrivate={isPrivate}

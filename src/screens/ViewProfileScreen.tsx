@@ -17,7 +17,9 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import VerifiedBadge from '../components/VerifiedBadge.native';
 import {
@@ -52,7 +54,6 @@ import {
     saveDismissedSuggestions,
 } from '../utils/suggestedConnections';
 import { FEED_UI } from '../constants/feedUiTokens';
-import { FEED_GRID_TILE_RADIUS } from '../components/FeedPageLayout.native';
 import type { Post } from '../types';
 import Flag from '../components/Flag.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
@@ -72,6 +73,8 @@ import ProfileCoverActionsModal from '../components/ProfileCoverActionsModal.nat
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import { getEffectivePlacesTraveled, formatProfileStatCount } from '../utils/effectivePlacesTraveled';
+import { writePendingLocationFeed } from '../utils/pendingLocationNative';
+import { navigateMainTab } from '../navigation/mainTabs';
 import { getStableUserId } from '../utils/userId';
 import type { ProfilePostNotifyLevel } from '../utils/profilePostNotifyPrefs';
 import { ox } from '../constants/nativeOpticalScale';
@@ -84,6 +87,7 @@ import {
 export default function ViewProfileScreen({ route, navigation }: any) {
     const { handle, sourcePostId, isFollowing: routeIsFollowing } = route.params ?? {};
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
     // The feed knows the author's follow state from the very post whose quick menu
     // was tapped. Seed with it so the action pill never flashes "Follow" on open
     // while the authoritative profile fetch is in flight.
@@ -174,6 +178,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         () => getEffectivePlacesTraveled(profileUser, isOwnProfile ? user : undefined),
         [profileUser, user, isOwnProfile]
     );
+    const favouritePlaces = React.useMemo(() => {
+        const fromProfile = Array.isArray(profileUser?.favouritePlaces) ? profileUser.favouritePlaces : [];
+        const fromAuth = isOwnProfile && Array.isArray(user?.favouritePlaces) ? user.favouritePlaces : [];
+        const source = fromProfile.length > 0 ? fromProfile : fromAuth;
+        return source.filter((place: unknown) => typeof place === 'string' && place.trim().length > 0);
+    }, [profileUser, isOwnProfile, user]);
 
     const applyPostNotifyLevel = (level: ProfilePostNotifyLevel) => {
         if (!user?.id || !user?.handle) return;
@@ -314,6 +324,9 @@ if (isLaravelApiEnabled()) {
                 const pt = apiData?.placesTraveled ?? apiData?.places_traveled;
                 const placesTraveled =
                     Array.isArray(pt) ? pt.filter((s: unknown) => typeof s === 'string') : undefined;
+                const fp = apiData?.favouritePlaces ?? apiData?.favourite_places ?? (isOwn ? user?.favouritePlaces : undefined);
+                const favouritePlaces =
+                    Array.isArray(fp) ? fp.filter((s: unknown) => typeof s === 'string') : undefined;
                 const avatarUrl =
                     apiData?.avatarUrl ||
                     apiData?.avatar_url ||
@@ -372,6 +385,8 @@ if (isLaravelApiEnabled()) {
                         (isOwn ? user?.profileBackgroundUrl : undefined),
                     placesTraveled:
                         placesTraveled && placesTraveled.length > 0 ? placesTraveled : undefined,
+                    favouritePlaces:
+                        favouritePlaces && favouritePlaces.length > 0 ? favouritePlaces : undefined,
                     ...(apiData || {}),
                     accountType: resolvedAccountType,
                 });
@@ -931,11 +946,35 @@ const result = await followOrRequest({
     };
 
     const handlePlacesPress = () => {
-        if (effectivePlaces.length === 0) {
+        if (effectivePlaces.length === 0 && favouritePlaces.length === 0) {
             setShowNoPlacesAlert(true);
             return;
         }
         setShowTraveledModal(true);
+    };
+
+    const openPlaceNewsfeed = (place: string) => {
+        const label = place.trim();
+        if (!label) return;
+        setShowTraveledModal(false);
+        void (async () => {
+            await writePendingLocationFeed({
+                filter: label,
+                label,
+                scope: 'regional',
+                filterType: 'location',
+            });
+            navigateMainTab(navigation, 'Home', {
+                screen: 'Feed',
+                params: {
+                    location: label,
+                    locationLabel: label,
+                    locationScope: 'regional',
+                    filterType: 'location',
+                    resetHomeFeedAt: null,
+                },
+            });
+        })();
     };
 
     const renderProfileGridItem = useCallback(
@@ -946,9 +985,7 @@ const result = await followOrRequest({
                 delayLongPress={260}
                 style={styles.gridTile}
             >
-                <View style={styles.gridTileInner} pointerEvents="none">
-                    <ProfileGridThumb post={item} />
-                </View>
+                <ProfileGridThumb post={item} />
             </Pressable>
         ),
         [openPostDetail],
@@ -1363,16 +1400,26 @@ const result = await followOrRequest({
             <Modal
                 visible={showTraveledModal}
                 animationType="slide"
-                transparent={true}
+                transparent
+                statusBarTranslucent
                 onRequestClose={() => setShowTraveledModal(false)}
             >
                 <View style={styles.modalOverlay}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowTraveledModal(false)} />
                     <View style={styles.modalContent}>
+                        <PassportSheetCanvas tone="ucl" contentStyle={{ paddingBottom: insets.bottom + 12 }}>
                         <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Places Traveled</Text>
-                            <TouchableOpacity onPress={() => setShowTraveledModal(false)}>
-                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
-                            </TouchableOpacity>
+                            <View style={styles.placesHandle} />
+                            <Text style={styles.placesKicker}>Gazetteer says</Text>
+                            <View style={styles.placesTitleRow}>
+                                <Text style={styles.modalTitle}>Places</Text>
+                                <TouchableOpacity
+                                    onPress={() => setShowTraveledModal(false)}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                >
+                                    <Icon name="close" size={ox(22)} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
                         <ScrollView
                             style={styles.modalBody}
@@ -1382,42 +1429,46 @@ const result = await followOrRequest({
                                     onRefresh={() => {
                                         void loadProfile();
                                     }}
-                                    tintColor="#3d9b8f"
+                                    tintColor="#FFFFFF"
                                 />
                             }
                         >
+                            <Text style={styles.placeSectionTitle}>Places traveled</Text>
                             {effectivePlaces.length > 0 ? (
-                                effectivePlaces.map((place: string, index: number) => (
+                                effectivePlaces.map((place: string) => (
                                     <TouchableOpacity
-                                        key={index}
+                                        key={`traveled-${place}`}
                                         style={styles.placeItem}
-                                        onPress={() => {
-                                            setShowTraveledModal(false);
-                                            navigation.navigate('Feed', { location: place });
-                                        }}
+                                        onPress={() => openPlaceNewsfeed(place)}
                                     >
                                         <View style={styles.placeIcon}>
                                             <Icon name="location" size={ox(20)} color="#FFFFFF" />
                                         </View>
                                         <Text style={styles.placeName}>{place}</Text>
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                setShowTraveledModal(false);
-                                                navigation.navigate('Feed', { location: place });
-                                            }}
-                                        >
-                                            <Icon name="eye" size={ox(20)} color="#9CA3AF" />
-                                        </TouchableOpacity>
                                     </TouchableOpacity>
                                 ))
                             ) : (
-                                <Text style={styles.emptyText}>
-                                    {isOwnProfile
-                                        ? 'Add places in your profile settings under Travel Info or your bio.'
-                                        : 'No places traveled yet.'}
-                                </Text>
+                                <Text style={styles.emptyText}>No places traveled yet.</Text>
+                            )}
+                            <Text style={styles.placeSectionTitle}>Favourite places</Text>
+                            {favouritePlaces.length > 0 ? (
+                                favouritePlaces.map((place: string) => (
+                                    <TouchableOpacity
+                                        key={`favourite-${place}`}
+                                        style={styles.placeItem}
+                                        onPress={() => openPlaceNewsfeed(place)}
+                                    >
+                                        <View style={styles.placeIcon}>
+                                            <Icon name="heart" size={ox(18)} color="#FFFFFF" />
+                                        </View>
+                                        <Text style={styles.placeName}>{place}</Text>
+                                    </TouchableOpacity>
+                                ))
+                            ) : (
+                                <Text style={styles.emptyText}>No favourite places yet.</Text>
                             )}
                         </ScrollView>
+                        </PassportSheetCanvas>
                     </View>
                 </View>
             </Modal>
@@ -1542,8 +1593,8 @@ const result = await followOrRequest({
 
             <GazetteerAlertSheet
                 visible={showNoPlacesAlert}
-                title="No Places Traveled"
-                message={`${decodedHandle || 'This user'} hasn't added any places they've traveled to their profile yet.`}
+                title="No places yet"
+                message={`${decodedHandle || 'This user'} hasn't added places traveled or favourite places yet.`}
                 icon="alert"
                 confirmButtonText="Done"
                 onConfirm={() => setShowNoPlacesAlert(false)}
@@ -1929,18 +1980,9 @@ followButton: {
         flexWrap: 'wrap',
     },
     gridTile: {
-        width: '33.33%',
-        aspectRatio: 1,
-        overflow: 'hidden',
-        borderRadius: FEED_GRID_TILE_RADIUS,
-        position: 'relative',
-        padding: FEED_UI.spacing.hairlineGap,
-    },
-    gridTileInner: {
-        flex: 1,
-        overflow: 'hidden',
-        borderRadius: FEED_GRID_TILE_RADIUS,
-        position: 'relative',
+        width: '33.3333%',
+        aspectRatio: 3 / 4,
+        padding: 1.5,
     },
     emptyGrid: {
         alignItems: 'center',
@@ -2031,35 +2073,55 @@ followButton: {
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(6, 13, 22, 0.82)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: ox(16),
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(0,0,0,0.72)',
     },
     modalContent: {
-        borderRadius: ox(16),
-        maxWidth: 400,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
         width: '100%',
-        maxHeight: '80%',
+        maxHeight: '78%',
         overflow: 'hidden',
-        backgroundColor: 'rgba(15, 36, 48, 0.94)',
+        backgroundColor: '#03091B',
         borderWidth: 1,
-        borderColor: 'rgba(159, 212, 203, 0.18)',
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.08)',
     },
     modalHeader: {
+        paddingHorizontal: ox(20),
+        paddingTop: ox(10),
+        paddingBottom: ox(4),
+    },
+    placesHandle: {
+        alignSelf: 'center',
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.3)',
+        marginBottom: ox(12),
+    },
+    placesKicker: {
+        fontSize: ox(12),
+        fontWeight: '600',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        color: '#FFFFFF',
+        textAlign: 'center',
+        marginBottom: ox(10),
+    },
+    placesTitleRow: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        padding: ox(16),
-        ...gazetteerHeader,
+        justifyContent: 'space-between',
     },
     modalTitle: {
-        fontSize: ox(20),
-        fontWeight: 'bold',
+        fontSize: ox(18),
+        fontWeight: '600',
         color: '#FFFFFF',
     },
     modalBody: {
-        padding: ox(16),
+        paddingHorizontal: ox(20),
+        paddingBottom: ox(8),
     },
     connectionsModalContent: {
         borderRadius: ox(16),
@@ -2198,19 +2260,31 @@ followButton: {
     placeItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: ox(16),
-        borderRadius: ox(12),
-        marginBottom: ox(12),
-        ...glassSurface,
+        paddingVertical: ox(12),
+        paddingHorizontal: ox(12),
+        borderRadius: ox(14),
+        marginBottom: ox(8),
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     placeIcon: {
-        width: ox(40),
-        height: ox(40),
-        borderRadius: ox(20),
-        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
+        backgroundColor: 'rgba(255,255,255,0.1)',
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
+    },
+    placeSectionTitle: {
+        color: '#FFFFFF',
+        fontSize: ox(13),
+        fontWeight: '700',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+        marginTop: ox(8),
+        marginBottom: ox(4),
     },
     placeName: {
         flex: 1,

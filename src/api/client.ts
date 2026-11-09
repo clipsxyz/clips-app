@@ -654,6 +654,7 @@ export async function resetPasswordWithCode(
 /** Map Laravel `/auth/me` or `/auth/profile` JSON into partial app `User` fields. */
 export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Record<string, unknown> {
     const pt = apiUser.places_traveled ?? apiUser.placesTraveled;
+    const fp = apiUser.favourite_places ?? apiUser.favouritePlaces;
     const rawAccountType = (apiUser.account_type ?? apiUser.accountType) as string | undefined;
     const accountType =
         rawAccountType === 'business' || rawAccountType === 'personal'
@@ -669,6 +670,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         handle: apiUser.handle as string | undefined,
         bio: apiUser.bio as string | undefined,
         placesTraveled: Array.isArray(pt) ? (pt as string[]).filter((s) => typeof s === 'string') : undefined,
+        favouritePlaces: Array.isArray(fp) ? (fp as string[]).filter((s) => typeof s === 'string') : undefined,
         avatarUrl: (apiUser.avatar_url ?? apiUser.avatarUrl) as string | undefined,
         profileBackgroundUrl: (apiUser.profile_background_url ?? apiUser.profileBackgroundUrl) as string | undefined,
         socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
@@ -708,6 +710,7 @@ export async function updateAuthProfile(data: {
     avatar_url?: string | null;
     bio?: string | null;
     places_traveled?: string[];
+    favourite_places?: string[];
     location_local?: string | null;
     location_regional?: string | null;
     location_national?: string | null;
@@ -724,7 +727,8 @@ export async function updateAuthProfile(data: {
     });
 }
 
-// Posts API (6s timeout for faster fallback on slow mobile networks)
+// Posts API. A 6s abort was surfacing as "Error loading feed: AbortError" and
+// the feed then replaced itself with only the newest pinned post.
 export async function fetchPostsPage(
     cursor: number | string | null = 0,
     limit: number = 10,
@@ -760,7 +764,7 @@ export async function fetchPostsPage(
         const response = await fetchWithApiFallback(path, {
             method: 'GET',
             headers,
-            timeoutMs: 6000,
+            timeoutMs: 20000,
         });
         console.log('[fetchPostsPage/client] request URL=', response.url);
 

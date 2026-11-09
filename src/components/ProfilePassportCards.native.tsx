@@ -42,6 +42,7 @@ export type ProfileCardId =
     | 'bio'
     | 'social'
     | 'personal'
+    | 'places'
     | 'location'
     | 'interests'
     | 'flag'
@@ -278,6 +279,8 @@ export default function ProfilePassportCards({
 
     const [preferredLocations, setPreferredLocations] = useState<string[]>(user?.placesTraveled ?? []);
     const [preferredLocationQuery, setPreferredLocationQuery] = useState('');
+    const [favouritePlaces, setFavouritePlaces] = useState<string[]>(user?.favouritePlaces ?? []);
+    const [favouritePlaceQuery, setFavouritePlaceQuery] = useState('');
     const [accountType, setAccountType] = useState<'personal' | 'business'>(
         user?.accountType === 'business' ? 'business' : 'personal',
     );
@@ -306,6 +309,7 @@ export default function ProfilePassportCards({
         setRegional(user?.regional || '');
         setLocal(user?.local || '');
         setPreferredLocations(user?.placesTraveled ?? []);
+        setFavouritePlaces(user?.favouritePlaces ?? []);
         setAccountType(user?.accountType === 'business' ? 'business' : 'personal');
     }, [user]);
 
@@ -326,6 +330,10 @@ export default function ProfilePassportCards({
                     if (val === undefined || val === null) continue;
                     if (key === 'placesTraveled' && Array.isArray(val)) {
                         next.placesTraveled = val.length > 0 ? val : undefined;
+                        continue;
+                    }
+                    if (key === 'favouritePlaces' && Array.isArray(val)) {
+                        next.favouritePlaces = val.length > 0 ? val : undefined;
                         continue;
                     }
                     (next as Record<string, unknown>)[key] = val;
@@ -451,16 +459,30 @@ export default function ProfilePassportCards({
         }
     }, [selectedCard, refreshFollowers, refreshFollowing]);
 
-    const addPreferredLocation = (suggestion: LocationSuggestion) => {
+    const addNamedPlace = (
+        suggestion: LocationSuggestion,
+        current: string[],
+        setList: React.Dispatch<React.SetStateAction<string[]>>,
+        clearQuery: () => void,
+    ) => {
         const parsed = parsedPlaceFeedFromSuggestion(suggestion);
         const label = parsed.displayName || parsed.local || suggestion.name.split(',')[0].trim();
         if (!label) return;
-        setPreferredLocations((prev) => {
+        setList((prev) => {
             if (prev.some((p) => p.toLowerCase() === label.toLowerCase())) return prev;
             if (prev.length >= 12) return prev;
             return [...prev, label];
         });
-        setPreferredLocationQuery('');
+        clearQuery();
+        void current;
+    };
+
+    const addPreferredLocation = (suggestion: LocationSuggestion) => {
+        addNamedPlace(suggestion, preferredLocations, setPreferredLocations, () => setPreferredLocationQuery(''));
+    };
+
+    const addFavouritePlace = (suggestion: LocationSuggestion) => {
+        addNamedPlace(suggestion, favouritePlaces, setFavouritePlaces, () => setFavouritePlaceQuery(''));
     };
 
     const openProfile = (handle: string) => {
@@ -478,6 +500,8 @@ export default function ProfilePassportCards({
                 return 'Social Links';
             case 'personal':
                 return 'Account & preferred locations';
+            case 'places':
+                return 'Places';
             case 'location':
                 return 'Location Settings';
             case 'interests':
@@ -599,6 +623,33 @@ export default function ProfilePassportCards({
                 ...user,
                 placesTraveled: places.length ? places : undefined,
                 accountType,
+            });
+        } finally {
+            setSaving(false);
+            setSelectedCard(null);
+        }
+    };
+
+    const savePlaces = async () => {
+        if (!user) return;
+        setSaving(true);
+        const traveled = preferredLocations.slice(0, 12);
+        const favourites = favouritePlaces.slice(0, 12);
+        try {
+            await persistLaravelProfile({
+                places_traveled: traveled,
+                favourite_places: favourites,
+            });
+            login({
+                ...user,
+                placesTraveled: traveled.length ? traveled : undefined,
+                favouritePlaces: favourites.length ? favourites : undefined,
+            });
+        } catch {
+            login({
+                ...user,
+                placesTraveled: traveled.length ? traveled : undefined,
+                favouritePlaces: favourites.length ? favourites : undefined,
             });
         } finally {
             setSaving(false);
@@ -782,6 +833,77 @@ export default function ProfilePassportCards({
                             <ActivityIndicator color="#111827" />
                         ) : (
                             <Text style={styles.saveBtnText}>Save Social Links</Text>
+                        )}
+                    </TouchableOpacity>
+                </>
+            );
+        }
+
+        if (selectedCard === 'places') {
+            const placeGroup = (
+                title: string,
+                hint: string,
+                query: string,
+                onQuery: (value: string) => void,
+                onPick: (suggestion: LocationSuggestion) => void,
+                items: string[],
+                onRemove: (place: string) => void,
+            ) => (
+                <View style={styles.fieldBlock}>
+                    <Text style={styles.fieldLabel}>{title}</Text>
+                    <Text style={styles.fieldHint}>{hint}</Text>
+                    <PlaceAutocompleteField
+                        value={query}
+                        onChange={onQuery}
+                        onSelectSuggestion={onPick}
+                        mode="location"
+                        showIcon
+                        placeholder="Search a city or place"
+                        inputStyle={styles.wordInput}
+                    />
+                    {items.length > 0 ? (
+                        <View style={styles.chipRow}>
+                            {items.map((place) => (
+                                <View key={place} style={styles.chip}>
+                                    <Text style={styles.chipText}>{place}</Text>
+                                    <TouchableOpacity
+                                        onPress={() => onRemove(place)}
+                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                    >
+                                        <Icon name="close" size={14} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                        </View>
+                    ) : null}
+                    <Text style={styles.fieldHint}>{items.length}/12 added.</Text>
+                </View>
+            );
+            return (
+                <>
+                    {placeGroup(
+                        'Places traveled',
+                        'Cities and places you have been. Visitors see this list on your Places pill.',
+                        preferredLocationQuery,
+                        setPreferredLocationQuery,
+                        addPreferredLocation,
+                        preferredLocations,
+                        (place) => setPreferredLocations((prev) => prev.filter((p) => p !== place)),
+                    )}
+                    {placeGroup(
+                        'Favourite places',
+                        'Places you want to highlight. Visitors see these under the same Places pill.',
+                        favouritePlaceQuery,
+                        setFavouritePlaceQuery,
+                        addFavouritePlace,
+                        favouritePlaces,
+                        (place) => setFavouritePlaces((prev) => prev.filter((p) => p !== place)),
+                    )}
+                    <TouchableOpacity style={styles.saveBtn} onPress={() => void savePlaces()} disabled={saving}>
+                        {saving ? (
+                            <ActivityIndicator color="#111827" />
+                        ) : (
+                            <Text style={styles.saveBtnText}>Save places</Text>
                         )}
                     </TouchableOpacity>
                 </>

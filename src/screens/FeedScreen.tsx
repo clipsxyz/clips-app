@@ -97,6 +97,7 @@ import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
+import { isAbortLikeError } from '../utils/abortSafe';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, {
     type FeedPostMediaHandle,
@@ -3749,6 +3750,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [userId],
     );
 
+    // A cancelled or failed reload must not throw away cards already on screen.
+    // The text post is pinned in memory; the clip was loaded earlier and would vanish.
+    const retainLoadedFeed = React.useCallback(() => {
+        const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
+        const recent = recentCreatedPostsRef.current
+            .map((p) => decorateForUser(userId, p))
+            .filter((p) => {
+                if (!feedTab || feedTab.toLowerCase() === 'discover') return true;
+                return postMatchesLocationTab(p, feedTab);
+            });
+        const recentIds = new Set(recent.map((p) => String(p.id)));
+        setPages((prev) => {
+            const existing = prev.flat().filter((p) => !recentIds.has(String(p.id)));
+            const merged = recent.length > 0 ? [...recent, ...existing] : existing;
+            if (merged.length === 0) return prev;
+            return [merged];
+        });
+    }, [userId]);
+
     const reloadFeedFromStart = React.useCallback(async (opts?: { quiet?: boolean }) => {
         const gen = ++feedLoadGenRef.current;
         setEnd(false);
@@ -3778,7 +3798,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             applyFeedPageResult(result.items, result.nextCursor);
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
-            console.error('Error loading feed:', err);
+            const aborted = isAbortLikeError(err);
+            if (aborted) {
+                console.warn('Feed load cancelled:', err);
+            } else {
+                console.error('Error loading feed:', err);
+            }
             const errMsg = err instanceof Error ? err.message : String(err ?? '');
             const looksLikeCorruptJson =
                 err instanceof SyntaxError ||
@@ -3813,10 +3838,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 applyFeedPageResult(retryResult.items, retryResult.nextCursor);
                 return;
             } catch (retryErr) {
-                console.error('Feed recover retry failed:', retryErr);
+                if (isAbortLikeError(retryErr)) {
+                    console.warn('Feed recover retry cancelled:', retryErr);
+                } else {
+                    console.error('Feed recover retry failed:', retryErr);
+                }
             } finally {
                 retryTimeout.clear();
             }
+
+            if (gen !== feedLoadGenRef.current) return;
+            // Leave the clip (and anything else already painted) in place, and keep
+            // the post that just finished on top.
+            retainLoadedFeed();
+            if (aborted) return;
 
             const msg = err instanceof Error ? err.message : '';
             setError(
@@ -3824,15 +3859,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ? 'Feed load timed out — pull to refresh'
                     : describeFetchError(err),
             );
-            // Keep just-created posts visible even when the feed fetch fails/times out.
-            applyFeedPageResult([], null);
         } finally {
             firstTimeout.clear();
             if (gen === feedLoadGenRef.current) {
                 setInitialLoading(false);
             }
         }
-    }, [applyFeedPageResult, buildFeedFetchParams]);
+    }, [applyFeedPageResult, buildFeedFetchParams, retainLoadedFeed]);
 
     reloadFeedFromStartRef.current = reloadFeedFromStart;
 
@@ -3885,8 +3918,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
-            console.error('Error loading feed:', err);
-            setError('Failed to load feed');
+            if (isAbortLikeError(err)) {
+                console.warn('Feed page load cancelled:', err);
+            } else {
+                console.error('Error loading feed:', err);
+                setError('Failed to load feed');
+            }
         } finally {
             loadingMoreRef.current = false;
             setLoadingMore(false);
