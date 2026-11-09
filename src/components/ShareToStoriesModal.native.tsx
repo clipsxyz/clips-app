@@ -20,6 +20,8 @@ import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import ShareTextStoryCapture, {
     type ShareTextStoryCaptureHandle,
 } from './ShareTextStoryCapture.native';
+import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
+import { gradientColorsFromCss } from '../utils/storyTextStyleNative';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import { UCL_CANVAS_NAVY, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 
@@ -45,13 +47,25 @@ export default function ShareToStoriesModal({
     const [isSharing, setIsSharing] = useState(false);
     const textCaptureRef = useRef<ShareTextStoryCaptureHandle>(null);
 
-    const resolveOverlayThumbUri = (targetPost: Post, payloadMediaUrl?: string, payloadMediaType?: 'image' | 'video') => {
+    const resolveOverlayThumbUri = (targetPost: Post, payloadMediaUrl?: string, payloadMediaType?: 'image' | 'video', posterUrl?: string) => {
+        if (posterUrl) return posterUrl;
         const firstImageItem = (targetPost.mediaItems || []).find((m) => m?.type === 'image' && m.url)?.url;
         if (payloadMediaType === 'video') {
             return targetPost.videoPosterUrl || firstImageItem;
         }
         if (payloadMediaUrl) return payloadMediaUrl;
         return firstImageItem || targetPost.videoPosterUrl;
+    };
+
+    const postcardLook = (targetPost: Post) => {
+        if (isTextCardStyleId(targetPost.cardStyle)) {
+            const spec = TEXT_CARD_STYLES[targetPost.cardStyle];
+            return { colors: spec.colors, textColor: spec.textColor, bordered: spec.bordered };
+        }
+        return {
+            colors: gradientColorsFromCss(targetPost.textStyle?.background),
+            textColor: targetPost.textStyle?.color || '#FFFFFF',
+        };
     };
 
     /**
@@ -66,8 +80,10 @@ export default function ShareToStoriesModal({
     ): Promise<string | undefined> => {
         if (!uri) return uri;
         if (!/^(file|content|ph|blob|data):/i.test(uri)) return uri;
-        const ext = mimeType === 'video' ? 'mp4' : 'jpg';
-        const uploaded = await uploadFileFromUri(uri, `${mimeType}/${ext}`, `story-share-${Date.now()}.${ext}`);
+        const png = /\.png($|\?)/i.test(uri);
+        const ext = mimeType === 'video' ? 'mp4' : png ? 'png' : 'jpg';
+        const contentType = mimeType === 'video' ? 'video/mp4' : png ? 'image/png' : 'image/jpeg';
+        const uploaded = await uploadFileFromUri(uri, contentType, `story-share-${Date.now()}.${ext}`);
         return uploaded.fileUrl || uploaded.url || undefined;
     };
 
@@ -100,7 +116,20 @@ export default function ShareToStoriesModal({
                 }
             }
 
-            if (!payload.mediaUrl && !payload.isTextOnlyShare) {
+            if (payload.isTextOnlyShare) {
+                const generated = await textCaptureRef.current?.capture(
+                    payload.shareText || '',
+                    postcardLook(post),
+                );
+                if (!generated) {
+                    gazetteerAlert(
+                        'Stories',
+                        'Could not prepare an image for this post. Please try again.',
+                    );
+                    return;
+                }
+                payload = { ...payload, videoPosterUrl: generated };
+            } else if (!payload.mediaUrl) {
                 const generated = await textCaptureRef.current?.capture(payload.shareText || '');
                 if (!generated) {
                     gazetteerAlert(
@@ -120,7 +149,7 @@ export default function ShareToStoriesModal({
             };
 
             overlay = showUploadOverlayNative({
-                thumbUri: resolveOverlayThumbUri(post, payload.mediaUrl, payload.mediaType),
+                thumbUri: resolveOverlayThumbUri(post, payload.mediaUrl, payload.mediaType, payload.videoPosterUrl),
                 thumbType: payload.mediaType === 'video' ? 'video' : 'image',
                 initialMessage: 'Sharing to Stories 24...',
                 uploadingTitle: 'Preparing story...',

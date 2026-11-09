@@ -69,8 +69,6 @@ type Props = {
     onReorderCarouselItems: (fromIndex: number, toIndex: number) => void;
     isSavingDraft: boolean;
     onSaveDraft: () => void;
-    onOpenStickerPicker: () => void;
-    onOpenTextSticker: () => void;
     canSave: boolean;
 };
 
@@ -100,8 +98,6 @@ export default function GalleryPreviewComposerPanel({
     onReorderCarouselItems,
     isSavingDraft,
     onSaveDraft,
-    onOpenStickerPicker,
-    onOpenTextSticker,
     canSave,
 }: Props) {
     const thumbRectsRef = useRef<Array<{ x: number; width: number }>>([]);
@@ -245,16 +241,6 @@ export default function GalleryPreviewComposerPanel({
                             <Text style={styles.charCount}>
                                 {caption.length}/{TEXT_POST_BODY_MAX_LENGTH}
                             </Text>
-                            <View style={styles.stickerRow}>
-                                <TouchableOpacity style={styles.stickerBtn} onPress={onOpenStickerPicker}>
-                                    <Icon name="happy-outline" size={18} color="#FBCFE8" />
-                                    <Text style={styles.stickerBtnText}>Add sticker</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.stickerBtn} onPress={onOpenTextSticker}>
-                                    <Icon name="text" size={18} color="#FBCFE8" />
-                                    <Text style={styles.stickerBtnText}>Add text</Text>
-                                </TouchableOpacity>
-                            </View>
                         </View>
                     ) : null}
 
@@ -601,16 +587,4 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    stickerRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-    stickerBtn: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        paddingVertical: 10,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-    },
-    stickerBtnText: { color: '#FBCFE8', fontSize: 13, fontWeight: '600' },
 });

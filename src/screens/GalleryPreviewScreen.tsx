@@ -22,13 +22,10 @@ import GalleryPreviewComposerPanel, {
 } from '../components/gallery/GalleryPreviewComposerPanel.native';
 import { dismissPlaceSuggestions } from '../components/PlaceAutocompleteField.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
-import StickerPickerNative from '../components/StickerPicker.native';
 import StickerOverlayNative from '../components/StickerOverlay.native';
-import TextStickerModalNative from '../components/TextStickerModal.native';
 import UserTaggingModalNative from '../components/UserTaggingModal.native';
-import type { Sticker, StickerOverlay } from '../types';
+import type { StickerOverlay } from '../types';
 import { TEXT_POST_BODY_MAX_LENGTH, CAROUSEL_MAX_ITEMS as CAROUSEL_MAX } from '../constants';
-import { clampStickerY } from '../utils/stickerLayoutNative';
 import { hapticLight } from '../utils/hapticsNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
@@ -137,8 +134,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     const [stickers, setStickers] = useState<StickerOverlay[]>(
         Array.isArray(route.params?.draftStickers) ? route.params.draftStickers : [],
     );
-    const [showStickerPicker, setShowStickerPicker] = useState(false);
-    const [showTextStickerModal, setShowTextStickerModal] = useState(false);
     const [selectedStickerOverlay, setSelectedStickerOverlay] = useState<string | null>(null);
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
     const [isMuted, setIsMuted] = useState(true);
@@ -422,7 +417,11 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             videoCoverTime:
                 first.type === 'video'
                     ? first.videoCoverTime ?? 0
-                    :                     carouselItems.find((i) => i.type === 'video')?.videoCoverTime ?? 0,
+                    : carouselItems.find((i) => i.type === 'video')?.videoCoverTime ?? 0,
+            videoDurationSec:
+                first.type === 'video'
+                    ? first.durationSec
+                    : carouselItems.find((i) => i.type === 'video')?.durationSec,
             filterForExport: null,
             userLocal: user.local,
             userRegional: user.regional,
@@ -631,56 +630,9 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 onReorderCarouselItems={reorderCarouselItems}
                 isSavingDraft={isSavingDraft}
                 onSaveDraft={() => void handleSaveDraft()}
-                onOpenStickerPicker={() => setShowStickerPicker(true)}
-                onOpenTextSticker={() => setShowTextStickerModal(true)}
                 canSave={carouselItems.length > 0}
             />
 
-            <StickerPickerNative
-                visible={showStickerPicker}
-                onClose={() => setShowStickerPicker(false)}
-                onSelectSticker={(sticker: Sticker) => {
-                    const overlay: StickerOverlay = {
-                        id: `sticker-${Date.now()}`,
-                        stickerId: sticker.id,
-                        sticker,
-                        x: 50,
-                        y: clampStickerY(50),
-                        scale: 1,
-                        rotation: 0,
-                        opacity: 1,
-                    };
-                    setStickers((prev) => [...prev, overlay]);
-                    setSelectedStickerOverlay(overlay.id);
-                    setShowStickerPicker(false);
-                }}
-            />
-            <TextStickerModalNative
-                visible={showTextStickerModal}
-                onClose={() => setShowTextStickerModal(false)}
-                onConfirm={(textValue, fontSize, color) => {
-                    const textSticker: Sticker = {
-                        id: `text-${Date.now()}`,
-                        name: textValue,
-                        category: 'Text',
-                    };
-                    const overlay: StickerOverlay = {
-                        id: `sticker-${Date.now()}`,
-                        stickerId: textSticker.id,
-                        sticker: textSticker,
-                        x: 50,
-                        y: clampStickerY(50),
-                        scale: fontSize === 'small' ? 0.8 : fontSize === 'large' ? 1.2 : 1,
-                        rotation: 0,
-                        opacity: 1,
-                        textContent: textValue,
-                        textColor: color,
-                        fontSize,
-                    };
-                    setStickers((prev) => [...prev, overlay]);
-                    setShowTextStickerModal(false);
-                }}
-            />
             <UserTaggingModalNative
                 visible={showTagUserModal}
                 onClose={() => setShowTagUserModal(false)}

@@ -1,14 +1,51 @@
+type FfmpegSession = {
+    getReturnCode: () => Promise<unknown>;
+    getAllLogsAsString: () => Promise<string>;
+    getSessionId?: () => number;
+};
+
+type FfmpegStatistics = {
+    getTime?: () => number;
+};
+
 type FfmpegModule = {
     FFmpegKit: {
-        execute: (command: string) => Promise<{
-            getReturnCode: () => Promise<unknown>;
-            getAllLogsAsString: () => Promise<string>;
-        }>;
+        execute: (command: string) => Promise<FfmpegSession>;
+        executeAsync?: (
+            command: string,
+            completeCallback?: (session: FfmpegSession) => void,
+            logCallback?: undefined,
+            statisticsCallback?: (statistics: FfmpegStatistics) => void,
+        ) => Promise<FfmpegSession>;
+        cancel?: (sessionId?: number) => Promise<void>;
+    };
+    FFmpegKitConfig?: {
+        enableStatistics?: () => Promise<void>;
     };
     ReturnCode: {
         isSuccess: (code: unknown) => boolean;
+        isCancel?: (code: unknown) => boolean;
     };
 };
+
+export type FfmpegRunOptions = {
+    /** 0–1 while FFmpeg is encoding. Requires durationSec. */
+    onProgress?: (fraction: number) => void;
+    /** Output length the progress timestamp is measured against. */
+    durationSec?: number;
+};
+
+let statisticsReady = false;
+let activeSessionId: number | undefined;
+
+/** Stop the in-flight FFmpeg encode started with progress reporting. */
+export function cancelActiveFfmpeg(): void {
+    const sessionId = activeSessionId;
+    if (sessionId == null) return;
+    void loadFfmpeg()
+        .then(({ FFmpegKit }) => FFmpegKit.cancel?.(sessionId))
+        .catch(() => undefined);
+}
 
 let ffmpegModulePromise: Promise<FfmpegModule> | null = null;
 
@@ -90,21 +127,84 @@ async function readSessionField(
     }
 }
 
+function ffmpegTimeSeconds(statistics: FfmpegStatistics, durationSec: number): number {
+    const raw = Number(statistics?.getTime?.() ?? 0);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    // ffmpeg-kit reports milliseconds. A value far past the clip is microseconds.
+    if (durationSec > 0 && raw > durationSec * 1000 * 4) return raw / 1_000_000;
+    return raw / 1000;
+}
+
 /**
  * Run an FFmpeg CLI string with full Metro session logging.
  * On failure throws — never returns success for a non-zero ReturnCode.
+ * Pass onProgress to run asynchronously so the UI can move during the encode.
  */
-export async function executeFfmpeg(command: string): Promise<void> {
+export async function executeFfmpeg(command: string, options: FfmpegRunOptions = {}): Promise<void> {
     console.log('[FFmpeg Log] command:', command);
 
-    const { FFmpegKit, ReturnCode } = await loadFfmpeg();
+    const loaded = await loadFfmpeg();
+    const { FFmpegKit, ReturnCode } = loaded;
     if (typeof FFmpegKit?.execute !== 'function') {
         throw new Error(
             'FFmpeg is not available in this build. Rebuild the app with ffmpeg-kit-react-native-alt linked.',
         );
     }
 
-    const session = await FFmpegKit.execute(command);
+    const durationSec = Number(options.durationSec);
+    const onProgress = options.onProgress;
+    const reportProgress =
+        typeof onProgress === 'function' && Number.isFinite(durationSec) && durationSec > 0;
+
+    let session: FfmpegSession;
+    if (reportProgress && typeof FFmpegKit.executeAsync === 'function') {
+        if (!statisticsReady && typeof loaded.FFmpegKitConfig?.enableStatistics === 'function') {
+            await loaded.FFmpegKitConfig.enableStatistics();
+            statisticsReady = true;
+        }
+        let lastFraction = 0;
+        const report = (fraction: number) => {
+            const next = Math.max(lastFraction, Math.min(0.99, fraction));
+            if (next - lastFraction < 0.01) return;
+            lastFraction = next;
+            onProgress(next);
+        };
+        report(0.01);
+        try {
+        session = await new Promise<FfmpegSession>((resolve, reject) => {
+            let settled = false;
+            const finish = (value: FfmpegSession) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+            FFmpegKit.executeAsync!(
+                command,
+                (completed) => finish(completed),
+                undefined,
+                (statistics) => {
+                    const seconds = ffmpegTimeSeconds(statistics, durationSec);
+                    if (seconds <= 0) return;
+                    report(seconds / durationSec);
+                },
+            )
+                .then((early) => {
+                    const id = early?.getSessionId?.();
+                    if (typeof id === 'number') activeSessionId = id;
+                })
+                .catch((err: unknown) => {
+                    if (!settled) {
+                        settled = true;
+                        reject(err);
+                    }
+                });
+        });
+        } finally {
+            activeSessionId = undefined;
+        }
+    } else {
+        session = await FFmpegKit.execute(command);
+    }
 
     const returnCode =
         typeof session?.getReturnCode === 'function' ? await session.getReturnCode() : null;
@@ -134,15 +234,22 @@ export async function executeFfmpeg(command: string): Promise<void> {
             : false;
 
     if (!isSuccess) {
+        if (typeof ReturnCode?.isCancel === 'function' && ReturnCode.isCancel(returnCode)) {
+            const cancelled = new Error('Video compression cancelled');
+            cancelled.name = 'FfmpegCancelled';
+            throw cancelled;
+        }
         const detail =
             failStack ||
             allLogs ||
             output ||
             (returnCode != null ? `returnCode=${String(returnCode)}` : 'unknown failure');
-        console.error('[FFmpeg] trim failed', { command, detail });
+        console.warn('[FFmpeg] trim failed', { command, detail });
         const error = new Error('FFmpeg failed to trim video');
         (error as Error & { detail?: string; command?: string }).detail = detail;
         (error as Error & { command?: string }).command = command;
         throw error;
     }
+
+    if (reportProgress) onProgress(1);
 }

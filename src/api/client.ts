@@ -898,7 +898,7 @@ export async function createPost(postData: {
     templateId?: string;
     mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; width?: number; height?: number; posterUrl?: string; text?: string; textStyle?: any }>;
     textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
-    card_style?: 'gradient-sunset' | 'gradient-midnight' | 'minimal-charcoal';
+    card_style?: import('../utils/textCardStyles').TextCardStyleId;
     taggedUsers?: string[];
     videoCaptionsEnabled?: boolean;
     videoCaptionText?: string;

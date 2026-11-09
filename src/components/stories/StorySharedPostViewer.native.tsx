@@ -6,9 +6,12 @@ import {
     TouchableOpacity,
     StyleSheet,
     ActivityIndicator,
+    ScrollView,
     Platform,
+    useWindowDimensions,
     type ImageSourcePropType,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
@@ -25,6 +28,7 @@ import {
     storyVideoSource,
 } from '../../utils/storyMediaNative';
 import { getTextStoryStyle } from '../../utils/storyTextStyleNative';
+import { isTextCardStyleId } from '../../utils/textCardStyles';
 import { getAvatarForHandle } from '../../api/users';
 import { timeAgo } from '../../utils/timeAgo';
 import { ox } from '../../constants/nativeOpticalScale';
@@ -220,6 +224,83 @@ type Props = {
     onOpenProfile: (handle: string) => void;
 };
 
+function InsetCardColumn({ children }: { children: React.ReactNode }) {
+    const insets = useSafeAreaInsets();
+    return (
+        <View
+            pointerEvents="box-none"
+            style={[
+                styles.cardColumn,
+                { paddingTop: insets.top + ox(78), paddingBottom: insets.bottom + ox(92) },
+            ]}
+        >
+            {children}
+        </View>
+    );
+}
+
+function FittedTextCard({
+    colors,
+    color,
+    bordered,
+    text,
+    handle,
+    onPress,
+}: {
+    colors: string[];
+    color: string;
+    fontSize: number;
+    bordered: boolean;
+    text: string;
+    handle: string;
+    onPress: () => void;
+}) {
+    const insets = useSafeAreaInsets();
+    const { height } = useWindowDimensions();
+    const topGap = insets.top + ox(84);
+    const bottomGap = insets.bottom + ox(96);
+    const maxBodyHeight = Math.max(ox(160), height - topGap - bottomGap - ox(72));
+
+    return (
+        <View
+            style={[styles.fittedHost, { paddingTop: topGap, paddingBottom: bottomGap }]}
+            pointerEvents="box-none"
+        >
+            <TouchableOpacity
+                activeOpacity={0.96}
+                onPress={onPress}
+                style={styles.postLikeBlock}
+            >
+                <View style={styles.postLikeHeader}>
+                    <Avatar
+                        src={getAvatarForHandle(handle)}
+                        name={handle.split('@')[0] || handle}
+                        size={ox(40)}
+                    />
+                    <Text style={styles.postLikeHandle} numberOfLines={1}>
+                        {handle.startsWith('@') ? handle : `@${handle}`}
+                    </Text>
+                </View>
+                <LinearGradient
+                    colors={colors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[styles.postLikeCard, bordered ? styles.fittedCardBorder : null]}
+                >
+                    <ScrollView
+                        style={{ maxHeight: maxBodyHeight }}
+                        contentContainerStyle={styles.postLikeBody}
+                        showsVerticalScrollIndicator={false}
+                        nestedScrollEnabled
+                    >
+                        <Text style={[styles.postLikeText, { color }]}>{text}</Text>
+                    </ScrollView>
+                </LinearGradient>
+            </TouchableOpacity>
+        </View>
+    );
+}
+
 export default function StorySharedPostViewer({
     story,
     originalPost,
@@ -261,7 +342,7 @@ export default function StorySharedPostViewer({
             >
                 <SharedBackdrop isVideo={isVideo} mediaUrl={fallbackUrl} posterSource={posterSource} />
                 <View style={styles.backdropDim} pointerEvents="none" />
-                <View style={styles.cardColumn} pointerEvents="box-none">
+                <InsetCardColumn>
                     <SharedPostMediaCard
                         handle={handle || story.sharedFromUser || 'post'}
                         avatarHandle={handle || story.sharedFromUser || ''}
@@ -275,7 +356,7 @@ export default function StorySharedPostViewer({
                         paused={paused}
                         onPress={onOpenModal}
                     />
-                </View>
+                </InsetCardColumn>
             </LinearGradient>
         );
     }
@@ -299,7 +380,7 @@ export default function StorySharedPostViewer({
             >
                 <SharedBackdrop isVideo={isVideo} mediaUrl={mediaUrl} posterSource={posterSource} />
                 <View style={styles.backdropDim} pointerEvents="none" />
-                <View style={styles.cardColumn} pointerEvents="box-none">
+                <InsetCardColumn>
                     <SharedPostMediaCard
                         handle={post.userHandle || handle}
                         avatarHandle={post.userHandle}
@@ -313,19 +394,37 @@ export default function StorySharedPostViewer({
                         paused={paused}
                         onPress={onOpenModal}
                     />
-                </View>
+                </InsetCardColumn>
             </LinearGradient>
         );
     }
 
     if (post.text) {
-        const { gradientColors, color, fontSize } = getTextStoryStyle(story, post);
+        const { gradientColors, color, fontSize, bordered } = getTextStoryStyle(story, post);
+        const hasCardStyle = isTextCardStyleId(post.cardStyle);
         const cleanHandle = (handle || post.userHandle || '').replace(/^@/, '');
-        const bodySize = Math.max(fontSize, ox(18));
-        const backdropColors =
-            gradientColors.length >= 2
-                ? [gradientColors[0], '#060d16', gradientColors[gradientColors.length - 1]]
-                : TEXT_SHARE_FALLBACK_BACKDROP;
+        const bodySize = Math.max(fontSize, hasCardStyle ? ox(22) : ox(18));
+        const backdropColors = hasCardStyle
+            ? gradientColors.length >= 2
+                ? gradientColors
+                : [gradientColors[0], gradientColors[0]]
+            : gradientColors.length >= 2
+              ? [gradientColors[0], '#060d16', gradientColors[gradientColors.length - 1]]
+              : TEXT_SHARE_FALLBACK_BACKDROP;
+
+        if (hasCardStyle) {
+            return (
+                <FittedTextCard
+                    colors={backdropColors}
+                    color={color}
+                    fontSize={bodySize}
+                    bordered={bordered}
+                    text={post.text}
+                    handle={cleanHandle}
+                    onPress={onOpenModal}
+                />
+            );
+        }
 
         return (
             <LinearGradient
@@ -342,7 +441,6 @@ export default function StorySharedPostViewer({
                             <Text style={styles.sharedFromBold}>@{cleanHandle}</Text>
                         </Text>
                     </View>
-
                     <TouchableOpacity
                         style={styles.textCard}
                         onPress={onOpenModal}
@@ -443,6 +541,7 @@ const styles = StyleSheet.create({
     card: {
         width: '100%',
         maxWidth: 300,
+        maxHeight: '100%',
         borderRadius: 12,
         overflow: 'hidden',
         backgroundColor: '#FFFFFF',
@@ -471,6 +570,7 @@ const styles = StyleSheet.create({
     cardMediaWrap: {
         width: '100%',
         aspectRatio: 4 / 5,
+        maxHeight: ox(340),
         backgroundColor: '#111',
         overflow: 'hidden',
         position: 'relative',
@@ -534,6 +634,49 @@ const styles = StyleSheet.create({
         maxWidth: ox(340),
         paddingHorizontal: ox(22),
         alignItems: 'center',
+    },
+    fittedHost: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+    },
+    postLikeBlock: {
+        width: '100%',
+    },
+    postLikeHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 10,
+        paddingHorizontal: 2,
+    },
+    postLikeHandle: {
+        flex: 1,
+        color: '#F8FAFC',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    postLikeCard: {
+        width: '100%',
+        borderRadius: 16,
+        overflow: 'hidden',
+    },
+    postLikeBody: {
+        paddingHorizontal: 16,
+        paddingVertical: 18,
+    },
+    postLikeText: {
+        fontSize: 17,
+        lineHeight: 24,
+        fontWeight: '400',
+    },
+    fittedCardBorder: {
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+    },
+    cardStyleBody: {
+        fontWeight: '700',
+        textAlign: 'center',
     },
     sharedFromPill: {
         flexDirection: 'row',

@@ -25,19 +25,16 @@ export const INSTAGRAM_UPLOAD_DELIVERY = {
     audioChannels: 2,
 } as const;
 
-/** FFmpegKit splits unescaped commas, including inside a quoted -vf graph. */
-export function escapeFfmpegFilterCommas(filter: string): string {
-    return filter.replace(/,/g, '\\,');
-}
-
 /**
  * Video filter chain: downscale → even dimensions → fps cap → optional color grade.
+ * The comma inside min() stays in single quotes. The comma before fps separates
+ * filters — do not backslash-escape it. FFmpeg treats `\,` as a literal comma,
+ * which glues `fps` onto the scale flags and the encode exits before writing a file.
  */
 export function buildInstagramDeliveryVideoFilterChain(colorFilter?: string | null): string {
     const max = INSTAGRAM_UPLOAD_DELIVERY.maxLongEdgePx;
     const fps = INSTAGRAM_UPLOAD_DELIVERY.maxFrameRate;
     const parts = [
-        // One comma, inside min(), so ffmpeg-kit's argument splitter stays intact.
         // Width cap at 1080 keeps vertical clips at 1080x1920 and landscape at 1080-wide.
         `scale='min(${max},iw)':-2:flags=bicubic`,
         `fps=${fps}`,

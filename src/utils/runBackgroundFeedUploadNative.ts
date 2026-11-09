@@ -188,6 +188,7 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             filterInfo: job.filterForExport,
             videoCoverTime: job.videoCoverTime,
             destination: 'feed',
+            videoDurationSec: job.videoDurationSec,
             onStage: (stage) => {
                 if (stage === 'compress') {
                     overlay?.progress('Optimizing video…', 'Optimizing video…', 0);

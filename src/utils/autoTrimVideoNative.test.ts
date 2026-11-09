@@ -54,7 +54,8 @@ describe('autoTrimVideoNative caps', () => {
         expect(cmd).toMatch(/-ss 0/);
         expect(cmd).toMatch(/-t 15/);
         expect(cmd).toMatch(/-preset veryfast/);
-        expect(cmd).toMatch(/scale='min\(1080/);
+        expect(cmd).toMatch(/scale='min\(1080,iw\)':-2:flags=bicubic,fps=30/);
+        expect(cmd).not.toMatch(/bicubic\\,/);
         expect(cmd).not.toMatch(/-i "file:/);
         expect(cmd).toMatch(/-crf 20/);
         expect(cmd).toMatch(/-maxrate 8000k/);

@@ -87,6 +87,7 @@ export async function prepareCarouselMediaForPostNative(
                     ? captureVideoPoster
                     : undefined,
             videoCoverTime: slideCoverTime,
+            videoDurationSec: item.type === 'video' ? item.durationSec : undefined,
             destination: 'feed',
             onCompressProgress: item.type === 'video' ? onCompressProgress : undefined,
         });

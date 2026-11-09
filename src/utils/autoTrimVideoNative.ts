@@ -12,7 +12,6 @@ import { statLocalFileBytes } from './localFileNative';
 import {
     buildInstagramDeliveryEncodeArgs,
     buildInstagramDeliveryVideoFilterChain,
-    escapeFfmpegFilterCommas,
     INSTAGRAM_UPLOAD_DELIVERY,
 } from './instagramVideoDeliveryNative';
 
@@ -63,6 +62,9 @@ type CompressTrimOptions = {
     audioBitrate?: string;
     videoBitrate?: string;
     suffix?: string;
+    /** Known source length. Progress uses the shorter of this and maxSeconds. */
+    sourceDurationSec?: number;
+    onProgress?: (fraction: number) => void;
 };
 
 function autoTrimToastMessage(maxSeconds: number): void {
@@ -89,6 +91,9 @@ export type HardVideoWindowOptions = {
     endTime?: number;
     maxSeconds?: number;
     notify?: boolean;
+    /** Picker duration, so the optimize bar tracks the real clip. */
+    sourceDurationSec?: number;
+    onProgress?: (fraction: number) => void;
 };
 
 /**
@@ -116,6 +121,8 @@ export async function hardTrimVideoWindowForUpload(
         maxWidth: HARD_TRIM_MAX_EDGE_PX,
         audioBitrate: HARD_TRIM_AUDIO_BITRATE,
         suffix: `hardtrim${clipSeconds}`,
+        sourceDurationSec: options.sourceDurationSec,
+        onProgress: options.onProgress,
     });
 
     if (!trimmedUri || trimmedUri === normalized) {
@@ -162,9 +169,11 @@ export async function compressTrimVideoToMaxSeconds(
             : makeSiblingOutputPath(resolved, suffix, 'mp4');
     const startSec = Math.max(0, Number(opts.startTimeSec) || 0);
     const t = Math.max(1, Math.floor(maxSeconds));
+    const knownSource = Number(opts.sourceDurationSec);
+    const progressSeconds =
+        Number.isFinite(knownSource) && knownSource > 0 ? Math.min(t, knownSource) : t;
 
-    // Long edge 1080 (4K → 1080p). Escaped commas match FFmpegKit argument parsing.
-    const vf = escapeFfmpegFilterCommas(buildInstagramDeliveryVideoFilterChain());
+    const vf = buildInstagramDeliveryVideoFilterChain();
 
     const command = [
         `-ss ${startSec}`,
@@ -180,10 +189,14 @@ export async function compressTrimVideoToMaxSeconds(
     console.log('[FFmpeg] command', command);
 
     try {
-        await executeFfmpeg(command);
+        await executeFfmpeg(command, {
+            onProgress: opts.onProgress,
+            durationSec: progressSeconds,
+        });
     } catch (err) {
+        if (err instanceof Error && err.name === 'FfmpegCancelled') throw err;
         const detail = err instanceof Error ? err.message : String(err);
-        console.error('[FFmpeg] trim command failed', { inputPath, outputPath, detail });
+        console.warn('[FFmpeg] trim command failed', { inputPath, outputPath, detail });
         if (err instanceof Error && err.message.startsWith('FFmpeg failed to trim video')) {
             throw err;
         }

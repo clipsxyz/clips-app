@@ -31,6 +31,8 @@ export type PendingFeedUploadJob = {
     localMediaItems?: PendingCarouselLocalItem[];
     mediaType: 'image' | 'video' | null;
     videoCoverTime: number;
+    /** Picker duration for the primary clip, used by the optimize progress bar. */
+    videoDurationSec?: number;
     filterForExport: InstantFilterInfo | null;
     userLocal?: string;
     userRegional?: string;
@@ -52,7 +54,7 @@ export type PendingFeedUploadJob = {
         fontFamily?: string;
     };
     templateId?: string;
-    cardStyle?: 'gradient-sunset' | 'gradient-midnight' | 'minimal-charcoal';
+    cardStyle?: import('../utils/textCardStyles').TextCardStyleId;
 };
 
 const pendingById = new Map<string, PendingFeedUploadJob>();

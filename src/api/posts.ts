@@ -3873,7 +3873,7 @@ export async function createPost(
    *  server persists width/height/aspect_ratio and the feed lays the card out on first paint. */
   mediaWidth?: number,
   mediaHeight?: number,
-  cardStyle?: 'gradient-sunset' | 'gradient-midnight' | 'minimal-charcoal',
+  cardStyle?: import('../utils/textCardStyles').TextCardStyleId,
 ): Promise<Post> {
   const currentUserAccountType = (() => {
     try {

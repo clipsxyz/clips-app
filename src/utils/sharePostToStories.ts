@@ -1,6 +1,7 @@
 import type { Post } from '../types';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { isTextOnlyPost } from './effectiveTextPostStyleNative';
+import { isTextCardStyleId, TEXT_CARD_STYLES, textCardStyleBackground } from './textCardStyles';
 
 export type SharePostToStoriesPayload = {
     mediaUrl?: string;
@@ -45,21 +46,31 @@ export function buildSharePostToStoriesPayload(post: Post): SharePostToStoriesPa
         mediaType = 'image';
     }
 
+    const cardId = isTextCardStyleId(post.cardStyle) ? post.cardStyle : undefined;
+    const cardLook = cardId ? TEXT_CARD_STYLES[cardId] : undefined;
+    const textStyle = cardLook
+        ? {
+              color: cardLook.textColor,
+              size: post.textStyle?.size || ('medium' as const),
+              background: textCardStyleBackground(cardId),
+              fontFamily: post.textStyle?.fontFamily,
+          }
+        : post.textStyle ??
+          (isTextOnlyShare
+              ? {
+                    color: '#ffffff',
+                    size: 'medium' as const,
+                    background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 50%, #8b5cf6 100%)',
+                }
+              : undefined);
+
     return {
         mediaUrl: isTextOnlyShare ? undefined : mediaUrl,
         mediaType: isTextOnlyShare ? undefined : mediaType,
         videoPosterUrl: isTextOnlyShare ? undefined : videoPosterUrl || undefined,
         shareText,
         isTextOnlyShare,
-        textStyle:
-            post.textStyle ??
-            (isTextOnlyShare
-                ? {
-                      color: '#ffffff',
-                      size: 'medium',
-                      background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 50%, #8b5cf6 100%)',
-                  }
-                : undefined),
+        textStyle,
         locationLabel: post.locationLabel,
         venue: post.venue,
         sharedFromPost: post.id,

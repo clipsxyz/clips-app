@@ -1,5 +1,6 @@
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import type { Post, Story } from '../types';
+import { isTextCardStyleId, TEXT_CARD_STYLES } from './textCardStyles';
 
 /** Pull hex colors from CSS gradient/color strings for RN LinearGradient. */
 export function gradientColorsFromCss(background: string | undefined): string[] {
@@ -30,6 +31,17 @@ export function getTextStoryStyle(story: Story, originalPost?: Post | null) {
     const template = originalPost?.templateId
         ? TEXT_STORY_TEMPLATES.find((t) => t.id === originalPost.templateId)
         : undefined;
+    const cardId = isTextCardStyleId(originalPost?.cardStyle) ? originalPost.cardStyle : undefined;
+    if (cardId) {
+        const spec = TEXT_CARD_STYLES[cardId];
+        const colors = spec.colors.length >= 2 ? spec.colors : [spec.colors[0], spec.colors[0]];
+        return {
+            gradientColors: colors,
+            color: spec.textColor,
+            fontSize: storyTextFontSize(story.textStyle?.size || originalPost?.textStyle?.size || 'medium'),
+            bordered: Boolean(spec.bordered),
+        };
+    }
     const background =
         story.textStyle?.background ||
         originalPost?.textStyle?.background ||
@@ -51,5 +63,6 @@ export function getTextStoryStyle(story: Story, originalPost?: Post | null) {
         gradientColors: gradientColorsFromCss(background),
         color,
         fontSize: storyTextFontSize(size),
+        bordered: false,
     };
 }

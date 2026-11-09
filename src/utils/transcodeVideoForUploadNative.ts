@@ -3,7 +3,6 @@ import { getFfmpegVideoFilter, type InstantFilterName } from './instantFiltersNa
 import {
     buildInstagramDeliveryEncodeArgs,
     buildInstagramDeliveryVideoFilterChain,
-    escapeFfmpegFilterCommas,
 } from './instagramVideoDeliveryNative';
 import { resolveLocalMediaUriForFfmpeg } from './resolveLocalMediaUriForFfmpegNative';
 
@@ -24,7 +23,7 @@ export async function transcodeVideoForUploadNative(
 ): Promise<string> {
     const resolvedInput = await resolveLocalMediaUriForFfmpeg(inputUri);
     const colorFilter = options.filterName ? getFfmpegVideoFilter(options.filterName) : null;
-    const vf = escapeFfmpegFilterCommas(buildInstagramDeliveryVideoFilterChain(colorFilter));
+    const vf = buildInstagramDeliveryVideoFilterChain(colorFilter);
     const inputPath = toFfmpegPath(resolvedInput);
     const outputPath = makeSiblingOutputPath(resolvedInput, 'upload', 'mp4');
     const encodeArgs = buildInstagramDeliveryEncodeArgs();

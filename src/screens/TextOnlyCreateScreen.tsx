@@ -525,10 +525,21 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
                     accessibilityRole="button"
                     accessibilityLabel={`${option.label} card style`}
                     accessibilityState={{ selected }}
-                    style={[styles.styleChip, selected && styles.styleChipSelected]}
+                    style={[
+                      styles.styleChip,
+                      selected && {
+                        borderColor: option.textColor === '#FFFFFF' ? '#FFFFFF' : '#1A1206',
+                      },
+                    ]}
                   >
                     {option.colors.length >= 2 ? (
-                      <LinearGradient colors={option.colors} style={styles.styleSwatch} />
+                      <LinearGradient
+                        colors={option.colors}
+                        style={[
+                          styles.styleSwatch,
+                          option.textColor !== '#FFFFFF' && styles.styleSwatchDarkEdge,
+                        ]}
+                      />
                     ) : (
                       <View
                         style={[
@@ -982,6 +993,10 @@ const styles = StyleSheet.create({
   styleSwatchBordered: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.28)',
+  },
+  styleSwatchDarkEdge: {
+    borderWidth: 1,
+    borderColor: 'rgba(26,18,6,0.35)',
   },
   textInput: {
     width: '100%',

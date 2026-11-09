@@ -208,7 +208,7 @@ export type Post = {
     fontFamily?: string; // Optional font family for text-only posts
   };
   /** Text-only card template chosen in the composer. */
-  cardStyle?: 'gradient-sunset' | 'gradient-midnight' | 'minimal-charcoal';
+  cardStyle?: import('./utils/textCardStyles').TextCardStyleId;
   // Tagged users
   taggedUsers?: string[]; // Array of user handles tagged in the post
   // Video captions

@@ -35,6 +35,8 @@ type PrepareNativeMediaArgs = {
      * Stories 24 → 0–15s; newsfeed → 0–90s.
      */
     destination?: VideoUploadDestination;
+    /** Picker-reported length, so optimize progress matches the clip. */
+    videoDurationSec?: number;
 };
 
 type PrepareNativeMediaResult = {
@@ -139,6 +141,7 @@ export async function prepareMediaForPostNative({
     onStage,
     onCompressProgress,
     destination = 'feed',
+    videoDurationSec,
 }: PrepareNativeMediaArgs): Promise<PrepareNativeMediaResult> {
     if (!mediaUrl || !mediaType) {
         return {};
@@ -176,6 +179,8 @@ export async function prepareMediaForPostNative({
                 startTime: 0,
                 endTime: trimEndTime,
                 notify: true,
+                sourceDurationSec: videoDurationSec,
+                onProgress: onCompressProgress,
             });
 
             if (!hardTrim.wasTrimmed || !hardTrim.uri || hardTrim.uri === workingUrl) {
@@ -191,13 +196,19 @@ export async function prepareMediaForPostNative({
                 trimmedSize,
             );
         } catch (err) {
+            if (
+                err instanceof VideoCompressCancelled ||
+                (err instanceof Error && err.name === 'FfmpegCancelled')
+            ) {
+                throw new VideoCompressCancelled();
+            }
             trimFailed = true;
             videoCompressFailed = true;
             const detail =
                 err instanceof Error
                     ? (err as Error & { detail?: string }).detail || err.message
                     : String(err);
-            console.error('[MediaPrep] FFmpeg trim failed; uploading the original video', {
+            console.warn('[MediaPrep] FFmpeg trim failed; uploading the original video', {
                 uri: workingUrl.slice(0, 160),
                 detail,
             });
@@ -244,7 +255,14 @@ export async function prepareMediaForPostNative({
         }
     }
 
-    if (mediaType === 'video' && isLocalUri(workingUrl) && !isRemoteUrl(workingUrl)) {
+    // A finished hard-trim is already the 1080p upload file. A second encode
+    // left the optimize bar at 0% for the whole first pass.
+    if (
+        mediaType === 'video' &&
+        isLocalUri(workingUrl) &&
+        !isRemoteUrl(workingUrl) &&
+        trimFailed
+    ) {
         onStage?.('compress');
         try {
             const compressed = await compressVideoForUploadNative(workingUrl, (fraction) => {

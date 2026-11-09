@@ -17,6 +17,7 @@ import {
     type UploadOverlayState,
 } from '../utils/uploadOverlayNative';
 import { cancelActiveVideoCompression } from '../utils/compressVideoForUploadNative';
+import { cancelActiveFfmpeg } from '../utils/ffmpegNative';
 
 const RING = 46;
 const STROKE = 2.5;
@@ -225,7 +226,7 @@ export default function UploadProgressToast() {
                                     cx={RING / 2}
                                     cy={RING / 2}
                                     r={RING_R}
-                                    stroke="#5EEAD4"
+                                    stroke="#FFFFFF"
                                     strokeWidth={STROKE}
                                     fill="none"
                                     strokeDasharray={`${RING_C} ${RING_C}`}
@@ -285,7 +286,10 @@ export default function UploadProgressToast() {
 
                     {showDeterminate ? (
                         <Pressable
-                            onPress={() => cancelActiveVideoCompression()}
+                            onPress={() => {
+                                cancelActiveVideoCompression();
+                                cancelActiveFfmpeg();
+                            }}
                             style={styles.cancel}
                             accessibilityRole="button"
                             accessibilityLabel="Cancel video optimization"
@@ -391,7 +395,7 @@ const styles = StyleSheet.create({
         marginRight: 8,
     },
     percent: {
-        color: '#5EEAD4',
+        color: '#FFFFFF',
         fontSize: 13,
         fontWeight: '700',
         fontVariant: ['tabular-nums'],
@@ -414,13 +418,13 @@ const styles = StyleSheet.create({
     fill: {
         height: '100%',
         borderRadius: 999,
-        backgroundColor: '#5EEAD4',
+        backgroundColor: '#FFFFFF',
     },
     glide: {
         width: 72,
         height: '100%',
         borderRadius: 999,
-        backgroundColor: '#5EEAD4',
+        backgroundColor: '#FFFFFF',
     },
     cancel: {
         marginLeft: 10,
