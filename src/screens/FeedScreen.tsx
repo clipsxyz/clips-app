@@ -655,9 +655,10 @@ function PillTabs({
 
     useEffect(() => {
         if (!menuOpen) return;
-        setLocationQuery(customLocation || '');
+        setLocationQuery('');
         setLocationSuggestions([]);
-    }, [menuOpen, customLocation]);
+        setUsingFallbackSuggestions(false);
+    }, [menuOpen]);
 
     useEffect(() => {
         if (!menuOpen) return;
