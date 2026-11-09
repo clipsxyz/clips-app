@@ -11,8 +11,8 @@ import {
     type NewsTickerSegmentKind,
 } from '../utils/feedPostNewsTicker';
 
-const TICKER_HEIGHT = 32;
-const ICON_SIZE = 10;
+const TICKER_HEIGHT = 22;
+const ICON_SIZE = 8;
 
 type Props = {
     post: Post;
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     },
     animatedTrack: {
         position: 'absolute',
-        left: 12,
+        left: 8,
         flexDirection: 'row',
         flexWrap: 'nowrap',
         alignItems: 'center',
@@ -168,14 +168,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         flexWrap: 'nowrap',
         flexShrink: 0,
-        paddingLeft: 6,
-        paddingRight: 8,
+        paddingLeft: 4,
+        paddingRight: 6,
     },
     iconWell: {
-        width: 18,
-        height: 18,
-        borderRadius: 9,
-        marginRight: 6,
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        marginRight: 4,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(255, 255, 255, 0.14)',
@@ -189,22 +189,22 @@ const styles = StyleSheet.create({
     },
     kicker: {
         color: 'rgba(255, 255, 255, 0.72)',
-        fontSize: 7,
-        lineHeight: 8,
+        fontSize: 6,
+        lineHeight: 7,
         fontWeight: '700',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
     },
     title: {
         color: '#FFFFFF',
-        fontSize: 10,
-        lineHeight: 12,
+        fontSize: 9,
+        lineHeight: 11,
         fontWeight: '700',
         flexShrink: 0,
     },
     gap: {
         color: '#FFFFFF',
-        fontSize: 10,
+        fontSize: 9,
         fontWeight: '600',
         letterSpacing: 0.3,
         flexShrink: 0,
