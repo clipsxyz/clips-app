@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
@@ -40,7 +41,7 @@ export default function PaymentScreen({ route, navigation }: any) {
 
   const handlePay = async () => {
     if (!postId || !user?.id) {
-      Alert.alert('Payment error', 'Missing payment details. Please try again from Boost.');
+      gazetteerAlert('Payment error', 'Missing payment details. Please try again from Boost.');
       return;
     }
     setIsProcessing(true);
@@ -61,7 +62,7 @@ export default function PaymentScreen({ route, navigation }: any) {
       });
     } catch (error: any) {
       console.error('RN payment failed:', error);
-      Alert.alert(
+      gazetteerAlert(
         'Payment failed',
         error?.message
           ? String(error.message)

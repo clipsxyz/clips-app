@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     Modal,
     Platform,
     Pressable,
@@ -122,7 +122,7 @@ function ConnectionFollowButton({
 
     const confirmRemove = () => {
         if (!onRemove || inFlight.current || busy) return;
-        Alert.alert('Remove follower?', `Remove @${handle.replace(/^@/, '')} from your followers?`, [
+        gazetteerAlert('Remove follower?', `Remove @${handle.replace(/^@/, '')} from your followers?`, [
             { text: 'Cancel', style: 'cancel' },
             {
                 text: 'Remove',

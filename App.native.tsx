@@ -70,6 +70,7 @@ import UploadProgressToast from './src/components/UploadProgressToast.native';
 import ForegroundPushBanner from './src/components/ForegroundPushBanner.native';
 import NotificationPermissionModal from './src/components/NotificationPermissionModal.native';
 import BoostActivatedModal from './src/components/BoostActivatedModal.native';
+import GazetteerAlertHost from './src/components/GazetteerAlertHost.native';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -379,6 +380,7 @@ function App(): React.JSX.Element {
         <ForegroundPushBanner />
         <NotificationPermissionModal />
         <BoostActivatedModal />
+        <GazetteerAlertHost />
         <View style={styles.appRoot}>
         <NavigationContainer
           ref={navigationRef}

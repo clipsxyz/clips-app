@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -38,6 +38,7 @@ import { unifiedSearch } from '../api/search';
 import { useAuth } from '../context/Auth';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { TEXT_ONLY_CANVAS_BG, TEXT_ONLY_FEED_TEMPLATES, TEXT_STORY_TEMPLATES, type TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_CARD_STYLE_OPTIONS, TEXT_CARD_STYLES, type TextCardStyleId } from '../utils/textCardStyles';
 import { publishTextStory24 } from '../utils/publishStoryNative';
 import { gradientColorsFromCss } from '../utils/storyTextStyleNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
@@ -74,6 +75,34 @@ function TemplateComposerBackground({
   );
 }
 
+function TextCardComposerBackground({
+  styleId,
+  children,
+}: {
+  styleId: TextCardStyleId;
+  children: React.ReactNode;
+}) {
+  const spec = TEXT_CARD_STYLES[styleId];
+  if (spec.colors.length >= 2) {
+    return (
+      <LinearGradient colors={spec.colors} style={styles.composerSurface}>
+        {children}
+      </LinearGradient>
+    );
+  }
+  return (
+    <View
+      style={[
+        styles.composerSurface,
+        styles.charcoalSurface,
+        { backgroundColor: spec.colors[0] },
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
 export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -92,6 +121,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     route.params?.textTemplateId || route.params?.templateId || null,
   );
+  const [textCardStyle, setTextCardStyle] = useState<TextCardStyleId>('gradient-sunset');
   const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showTemplateCue, setShowTemplateCue] = useState(false);
@@ -256,7 +286,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const handlePost = async () => {
     if (!canPost) return;
     if (!user) {
-      Alert.alert('Login required', 'Please log in to create a post.');
+      gazetteerAlert('Login required', 'Please log in to create a post.');
       return;
     }
     const textStyle = buildTextStyle();
@@ -279,7 +309,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
         hapticSuccess();
         finishToFeed();
       } catch (err: any) {
-        Alert.alert('Post failed', err?.message || 'Failed to create story. Please try again.');
+        gazetteerAlert('Post failed', err?.message || 'Failed to create story. Please try again.');
       } finally {
         setIsSubmitting(false);
       }
@@ -309,6 +339,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
       isTextOnly: true,
       textStyle,
       templateId: selectedTemplateId || undefined,
+      cardStyle: isStory24 ? undefined : textCardStyle,
     });
     showUploadOverlayNative({
       jobId: tempId,
@@ -333,7 +364,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
       navigation.goBack();
       return;
     }
-    Alert.alert('Leave composer?', 'Save your text as a draft or discard changes.', [
+    gazetteerAlert('Leave composer?', 'Save your text as a draft or discard changes.', [
       { text: 'Keep editing', style: 'cancel' },
       {
         text: 'Discard',
@@ -356,7 +387,9 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
     setTaggedUsers((prev) => prev.filter((h) => h !== handle));
   };
 
-  const inputColor = activeTemplate?.textColor || '#FFFFFF';
+  const inputColor = !isStory24
+    ? TEXT_CARD_STYLES[textCardStyle].textColor
+    : activeTemplate?.textColor || '#FFFFFF';
   const inputFontSize = 16;
   const composerHandle = (user?.handle || user?.name || 'You').replace(/^@+/, '');
 
@@ -371,6 +404,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
             <TouchableOpacity onPress={handleCancel} hitSlop={8}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
+            {isStory24 ? (
             <View style={styles.templateBtnWrap}>
               {showTemplateCue ? (
                 <Animated.View style={[styles.templateCueBubble, templateCueStyle]} pointerEvents="none">
@@ -395,6 +429,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
                 <Icon name="layers-outline" size={ox(20)} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
+            ) : null}
           </View>
           <View style={styles.headerRight}>
             <TouchableOpacity
@@ -433,6 +468,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
+          {isStory24 ? (
           <TemplateComposerBackground template={activeTemplate}>
             <View style={styles.previewAvatarRing}>
               <Avatar
@@ -474,6 +510,75 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
             />
             </View>
           </TemplateComposerBackground>
+          ) : (
+          <TextCardComposerBackground styleId={textCardStyle}>
+            <View style={styles.styleRow}>
+              {TEXT_CARD_STYLE_OPTIONS.map((option) => {
+                const selected = textCardStyle === option.id;
+                return (
+                  <TouchableOpacity
+                    key={option.id}
+                    onPress={() => {
+                      hapticLight();
+                      setTextCardStyle(option.id);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${option.label} card style`}
+                    accessibilityState={{ selected }}
+                    style={[styles.styleChip, selected && styles.styleChipSelected]}
+                  >
+                    {option.colors.length >= 2 ? (
+                      <LinearGradient colors={option.colors} style={styles.styleSwatch} />
+                    ) : (
+                      <View
+                        style={[
+                          styles.styleSwatch,
+                          styles.styleSwatchBordered,
+                          { backgroundColor: option.colors[0] },
+                        ]}
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.previewAvatarRing}>
+              <Avatar
+                src={user?.avatarUrl}
+                name={user?.name || user?.handle || 'User'}
+                handle={user?.handle}
+                size={ox(88)}
+              />
+            </View>
+            <View style={styles.previewHandleRow}>
+              <Text style={[styles.previewHandle, { color: inputColor }]} numberOfLines={1}>
+                {composerHandle}
+              </Text>
+              <VerifiedBadge accountType={resolveVerifiedAccountType(user?.accountType)} size={16} />
+            </View>
+            <View style={styles.bodyFrame}>
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              placeholder="What's up?"
+              placeholderTextColor="#9CA3AF"
+              style={[
+                styles.textInput,
+                {
+                  color: inputColor,
+                  fontSize: inputFontSize,
+                  lineHeight: Math.round(inputFontSize * 1.38),
+                },
+              ]}
+              multiline
+              maxLength={TEXT_POST_BODY_MAX_LENGTH}
+              autoFocus
+              textAlign="center"
+              textAlignVertical="top"
+            />
+            </View>
+          </TextCardComposerBackground>
+          )}
           <View style={styles.previewMeta}>
             <ComposerLinkPreview text={text} />
             {isLinkPost ? (
@@ -846,6 +951,37 @@ const styles = StyleSheet.create({
     paddingBottom: ox(32),
     minHeight: ox(280),
     overflow: 'hidden',
+  },
+  charcoalSurface: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  styleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: ox(14),
+    marginBottom: ox(18),
+  },
+  styleChip: {
+    width: ox(36),
+    height: ox(36),
+    borderRadius: ox(18),
+    padding: ox(3),
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  styleChipSelected: {
+    borderColor: '#FFFFFF',
+  },
+  styleSwatch: {
+    width: '100%',
+    height: '100%',
+    borderRadius: ox(14),
+  },
+  styleSwatchBordered: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
   },
   textInput: {
     width: '100%',

@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     Modal,
     StyleSheet,
     Text,
@@ -73,7 +73,7 @@ export default function ShareToStoriesModal({
 
     const handleShare = async () => {
         if (!user?.id || !post) {
-            Alert.alert('Sign in required', 'Please sign in to share to Stories.');
+            gazetteerAlert('Sign in required', 'Please sign in to share to Stories.');
             return;
         }
 
@@ -103,7 +103,7 @@ export default function ShareToStoriesModal({
             if (!payload.mediaUrl && !payload.isTextOnlyShare) {
                 const generated = await textCaptureRef.current?.capture(payload.shareText || '');
                 if (!generated) {
-                    Alert.alert(
+                    gazetteerAlert(
                         'Stories',
                         'Could not prepare an image for this post. Please try again.',
                     );
@@ -162,7 +162,7 @@ export default function ShareToStoriesModal({
             if (overlay) {
                 overlay.error('Failed to share to Stories 24. Please try again.');
             } else {
-                Alert.alert('Stories', 'Failed to share to Stories 24. Please try again.');
+                gazetteerAlert('Stories', 'Failed to share to Stories 24. Please try again.');
             }
         } finally {
             setIsSharing(false);

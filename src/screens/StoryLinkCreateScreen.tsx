@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -51,13 +51,13 @@ export default function StoryLinkCreateScreen({ navigation }: any) {
       const clip = await Clipboard.getString();
       const next = (clip || '').trim();
       if (!next) {
-        Alert.alert('Clipboard empty', 'Copy a link first, then tap Paste.');
+        gazetteerAlert('Clipboard empty', 'Copy a link first, then tap Paste.');
         return;
       }
       setLinkUrl(next);
       hapticLight();
     } catch {
-      Alert.alert('Paste failed', 'Could not read your clipboard.');
+      gazetteerAlert('Paste failed', 'Could not read your clipboard.');
     }
   }, []);
 
@@ -68,11 +68,11 @@ export default function StoryLinkCreateScreen({ navigation }: any) {
 
   const handleShare = useCallback(async () => {
     if (!resolvedUrl) {
-      Alert.alert('Add a link', 'Paste a YouTube, TikTok, Instagram, or web URL.');
+      gazetteerAlert('Add a link', 'Paste a YouTube, TikTok, Instagram, or web URL.');
       return;
     }
     if (!user) {
-      Alert.alert('Login required', 'Please log in to share to your story.');
+      gazetteerAlert('Login required', 'Please log in to share to your story.');
       return;
     }
     const note = caption.trim();
@@ -92,7 +92,7 @@ export default function StoryLinkCreateScreen({ navigation }: any) {
       hapticSuccess();
       navigateMainTab(navigation, 'Home', { forceRefreshAt: Date.now() });
     } catch (err: any) {
-      Alert.alert('Share failed', err?.message || 'Could not add this link to your story.');
+      gazetteerAlert('Share failed', err?.message || 'Could not add this link to your story.');
     } finally {
       setIsSubmitting(false);
     }

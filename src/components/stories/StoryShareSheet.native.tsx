@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
+import { gazetteerAlert } from '../../utils/gazetteerAlertNative';
 import {
     View,
     Text,
     TouchableOpacity,
     StyleSheet,
     Linking,
-    Alert,
     Modal,
     Share,
     ScrollView,
@@ -143,10 +143,10 @@ export default function StoryShareSheet({ visible, onClose, userHandle, storyId 
             Clipboard.setString(shareUrl);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
-            Alert.alert('Link copied', 'Story link copied to clipboard.');
+            gazetteerAlert('Link copied', 'Story link copied to clipboard.');
             onClose();
         } catch {
-            Alert.alert('Could not copy', 'Please try again.');
+            gazetteerAlert('Could not copy', 'Please try again.');
         }
     };
 

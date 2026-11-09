@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
@@ -9,7 +10,6 @@ import {
     Pressable,
     FlatList,
     ActivityIndicator,
-    Alert,
     Modal,
     Clipboard,
     RefreshControl,
@@ -448,11 +448,11 @@ if (isLaravelApiEnabled()) {
 
     const handleFollow = async () => {
         if (!user?.id || !handle) {
-            Alert.alert('Error', 'Unable to follow user. Please try again.');
+            gazetteerAlert('Error', 'Unable to follow user. Please try again.');
             return;
         }
         if (!user?.handle) {
-            Alert.alert('Error', 'Unable to send follow request. Please sign in with a full profile.');
+            gazetteerAlert('Error', 'Unable to send follow request. Please sign in with a full profile.');
             return;
         }
 
@@ -501,7 +501,7 @@ const result = await followOrRequest({
             }
         } catch (error: any) {
             console.error('Error toggling follow:', error);
-            Alert.alert('Error', error?.message || 'Failed to follow user.');
+            gazetteerAlert('Error', error?.message || 'Failed to follow user.');
         }
     };
 
@@ -525,7 +525,7 @@ const result = await followOrRequest({
         try {
             await Linking.openURL(url);
         } catch {
-            Alert.alert('Invalid link', 'Could not open this link.');
+            gazetteerAlert('Invalid link', 'Could not open this link.');
         }
     };
 
@@ -1086,10 +1086,6 @@ const result = await followOrRequest({
                 renderItem={renderProfileGridItem}
                 ListHeaderComponent={
                     <>
-                <View style={styles.passportTitleBlock}>
-                    <Text style={styles.passportTitle}>Passport</Text>
-                </View>
-
                 <ProfileCoverHero
                     coverUrl={profileCoverUrl}
                     avatarUrl={profileUser?.avatarUrl || getAvatarForHandle(decodedHandle)}
@@ -1188,7 +1184,7 @@ const result = await followOrRequest({
                                 const followedUsers = await getFollowedUsers(user.id);
                                 const follows = isFollowing ? [...followedUsers, decoded] : followedUsers;
                                 if (!canSendMessage(user.handle, decoded, follows)) {
-                                    Alert.alert('Cannot Message', 'You must follow this user to send a message.');
+                                    gazetteerAlert('Cannot Message', 'You must follow this user to send a message.');
                                     return;
                                 }
                                 navigation.navigate('Messages', { handle: decoded });
@@ -1620,18 +1616,6 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         textAlign: 'center',
         marginTop: 1,
-    },
-    passportTitleBlock: {
-        width: '100%',
-        alignItems: 'center',
-        paddingTop: ox(16),
-        paddingBottom: ox(12),
-    },
-    passportTitle: {
-        fontSize: ox(28),
-        fontWeight: '600',
-        color: '#FFFFFF',
-        letterSpacing: ox(-0.3),
     },
     content: {
         flex: 1,

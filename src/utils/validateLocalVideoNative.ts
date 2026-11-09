@@ -1,4 +1,5 @@
-import { Alert, Platform, ToastAndroid } from 'react-native';
+import { Platform, ToastAndroid } from 'react-native';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import { toFfmpegPath, loadFfmpeg } from './ffmpegNative';
 import { resolveLocalMediaUriForFfmpeg } from './resolveLocalMediaUriForFfmpegNative';
 import { normalizeNativeUploadUri } from './uploadFileNative';
@@ -53,7 +54,7 @@ export function showVideoValidationFeedback(message: string): void {
             /* fall through */
         }
     }
-    Alert.alert('Video', message);
+    gazetteerAlert('Video', message);
 }
 
 export { statLocalFileBytes } from './localFileNative';

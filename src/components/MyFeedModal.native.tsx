@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-    Alert,
     FlatList,
     Image,
     Modal,
@@ -19,6 +18,7 @@ import MyFeedPostCard from './MyFeedPostCard.native';
 import PostCommentsSheet from './PostCommentsSheet';
 import FeedShareModal from './FeedShareModal';
 import PostOverflowMenuModal from './PostOverflowMenuModal';
+import DeletePostConfirmSheet from './DeletePostConfirmSheet.native';
 import SavePostModal from './SavePostModal.native';
 import EditPostModal from './EditPostModal.native';
 import CreateGroupModal from './CreateGroupModal.native';
@@ -72,6 +72,7 @@ function MyFeedModal({
     const [sharePost, setSharePost] = useState<Post | null>(null);
     const [overflowPost, setOverflowPost] = useState<Post | null>(null);
     const [overflowVisible, setOverflowVisible] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<Post | null>(null);
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
     const [savePost, setSavePost] = useState<Post | null>(null);
@@ -312,32 +313,28 @@ function MyFeedModal({
                     await setPostNotificationsPrefMobile(user.id, overflowPost.id, next);
                     setOverflowNotify(next);
                 }}
-                onDelete={() =>
-                    new Promise<void>((resolve) => {
-                        if (!overflowPost || !user?.handle) {
-                            resolve();
-                            return;
+                onDelete={async () => {
+                    if (!overflowPost || !user?.handle) return;
+                    setDeleteTarget(overflowPost);
+                }}
+            />
+
+            <DeletePostConfirmSheet
+                visible={deleteTarget != null}
+                onDismiss={() => setDeleteTarget(null)}
+                onConfirm={() => {
+                    const target = deleteTarget;
+                    setDeleteTarget(null);
+                    if (!target || !user?.id || !user.handle) return;
+                    void (async () => {
+                        try {
+                            await deletePost(user.id, target.id, user.handle);
+                            removeLocalPost(target.id);
+                        } catch (e) {
+                            console.error('Delete post failed:', e);
                         }
-                        const target = overflowPost;
-                        Alert.alert('Delete post?', 'This cannot be undone.', [
-                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
-                            {
-                                text: 'Delete',
-                                style: 'destructive',
-                                onPress: () => {
-                                    void (async () => {
-                                        try {
-                                            await deletePost(user.id, target.id, user.handle);
-                                            removeLocalPost(target.id);
-                                        } finally {
-                                            resolve();
-                                        }
-                                    })();
-                                },
-                            },
-                        ]);
-                    })
-                }
+                    })();
+                }}
             />
 
             {savePost ? (

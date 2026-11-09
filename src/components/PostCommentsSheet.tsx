@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
@@ -8,7 +9,6 @@ import {
     Image,
     ActivityIndicator,
     TextInput,
-    Alert,
     Dimensions,
     KeyboardAvoidingView,
     Keyboard,
@@ -674,7 +674,7 @@ export default function PostCommentsSheet({
 
     const confirmModerationPost = (level: 'warn' | 'hide'): Promise<boolean> =>
         new Promise((resolve) => {
-            Alert.alert(
+            gazetteerAlert(
                 'Post comment?',
                 level === 'hide'
                     ? 'This comment may violate safety filters and will be hidden from others. Post anyway?'
@@ -689,7 +689,7 @@ export default function PostCommentsSheet({
     const handleAddComment = async (text: string) => {
         const handle = String(commentAuthorHandle || user?.handle || currentUserHandle || viewerHandle || '').trim();
         if (!handle) {
-            Alert.alert('Sign in required', 'You need a profile handle to comment.');
+            gazetteerAlert('Sign in required', 'You need a profile handle to comment.');
             return;
         }
         const moderation = evaluateCommentModeration(text, getCommentModerationPreferences());
@@ -719,7 +719,7 @@ export default function PostCommentsSheet({
             console.error('Failed to add comment:', err);
             setComments((prev) => prev.filter((c) => c.id !== optimisticComment.id));
             publishCommentCount(countRef.current - 1);
-            Alert.alert('Error', 'Failed to add comment');
+            gazetteerAlert('Error', 'Failed to add comment');
         } finally {
             setSubmitting(false);
         }
@@ -828,7 +828,7 @@ export default function PostCommentsSheet({
     const handleReplyToComment = async (parentId: string, text: string): Promise<boolean> => {
         const handle = String(commentAuthorHandle || user?.handle || '').trim();
         if (!handle) {
-            Alert.alert('Sign in required', 'You need a profile handle to reply.');
+            gazetteerAlert('Sign in required', 'You need a profile handle to reply.');
             return false;
         }
         const moderation = evaluateCommentModeration(text, getCommentModerationPreferences());
@@ -1001,7 +1001,7 @@ export default function PostCommentsSheet({
                     const ok = await handleReplyToComment(replyingTo.id, text);
                     if (ok) setReplyingTo(null);
                 } catch {
-                    Alert.alert('Error', 'Failed to add reply');
+                    gazetteerAlert('Error', 'Failed to add reply');
                 } finally {
                     setSubmittingReply(false);
                 }

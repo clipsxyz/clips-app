@@ -52,6 +52,7 @@ export type PendingFeedUploadJob = {
         fontFamily?: string;
     };
     templateId?: string;
+    cardStyle?: 'gradient-sunset' | 'gradient-midnight' | 'minimal-charcoal';
 };
 
 const pendingById = new Map<string, PendingFeedUploadJob>();
@@ -141,6 +142,7 @@ export function pendingUploadToPost(job: PendingFeedUploadJob): Post {
             text: job.text || undefined,
             caption: job.text || undefined,
             textStyle: job.textStyle,
+            cardStyle: job.cardStyle,
             templateId: job.templateId,
             taggedUsers: job.taggedUsers,
             userLocal: job.userLocal,

@@ -207,6 +207,8 @@ export type Post = {
     background?: string; // Background gradient or color
     fontFamily?: string; // Optional font family for text-only posts
   };
+  /** Text-only card template chosen in the composer. */
+  cardStyle?: 'gradient-sunset' | 'gradient-midnight' | 'minimal-charcoal';
   // Tagged users
   taggedUsers?: string[]; // Array of user handles tagged in the post
   // Video captions

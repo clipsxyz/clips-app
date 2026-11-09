@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
@@ -41,7 +41,7 @@ export default function ChangePhoneNumberScreen({ navigation }: { navigation: { 
         if (busy) return;
         const phone = toE164(countryCode, phoneInput);
         if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-            Alert.alert('Invalid number', 'Enter a valid phone number, including the country code.');
+            gazetteerAlert('Invalid number', 'Enter a valid phone number, including the country code.');
             return;
         }
         setBusy(true);
@@ -52,7 +52,7 @@ export default function ChangePhoneNumberScreen({ navigation }: { navigation: { 
             setOtpInput(sent.code && /^\d{6}$/.test(sent.code) ? sent.code : '');
             setStep('code');
         } catch (error) {
-            Alert.alert('Send failed', firebasePhoneErrorMessage(error));
+            gazetteerAlert('Send failed', firebasePhoneErrorMessage(error));
         } finally {
             setBusy(false);
         }
@@ -62,7 +62,7 @@ export default function ChangePhoneNumberScreen({ navigation }: { navigation: { 
         if (busy) return;
         const code = otpInput.replace(/\D+/g, '');
         if (code.length !== 6 || !verificationId) {
-            Alert.alert('Invalid code', 'Enter the 6-digit code.');
+            gazetteerAlert('Invalid code', 'Enter the 6-digit code.');
             return;
         }
         setBusy(true);
@@ -70,11 +70,11 @@ export default function ChangePhoneNumberScreen({ navigation }: { navigation: { 
             const idToken = await applyFirebasePhoneUpdate(verificationId, code);
             const saved = await updateAccountPhone(pendingPhone, idToken);
             const shown = saved.phone_number || pendingPhone;
-            Alert.alert('Phone updated', `Your number is now ${shown}.`, [
+            gazetteerAlert('Phone updated', `Your number is now ${shown}.`, [
                 { text: 'OK', onPress: () => navigation.goBack() },
             ]);
         } catch (error) {
-            Alert.alert('Update failed', firebasePhoneErrorMessage(error));
+            gazetteerAlert('Update failed', firebasePhoneErrorMessage(error));
         } finally {
             setBusy(false);
         }

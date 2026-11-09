@@ -32,6 +32,8 @@ type Props = {
     subtitle?: string;
     options: GazetteerMenuOption[];
     cancelLabel?: string;
+    /** Runs before the sheet closes when a row is chosen, so cancel is not treated as a selection. */
+    onWillSelect?: () => void;
     onDismiss: () => void;
 };
 
@@ -42,6 +44,7 @@ export default function GazetteerMenuSheet({
     subtitle,
     options,
     cancelLabel = 'Cancel',
+    onWillSelect,
     onDismiss,
 }: Props) {
     const insets = useSafeAreaInsets();
@@ -106,14 +109,15 @@ export default function GazetteerMenuSheet({
                         <Text style={styles.title}>{title}</Text>
                         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
                         <ScrollView style={styles.optionsScroll} bounces={false}>
-                            {options.map((option) => (
+                            {options.map((option, index) => (
                                 <TouchableOpacity
-                                    key={option.label}
+                                    key={`${index}-${option.label}`}
                                     style={[
                                         styles.optionBtn,
                                         option.icon ? styles.optionBtnWithIcon : null,
                                     ]}
                                     onPress={() => {
+                                        onWillSelect?.();
                                         onDismiss();
                                         // Defer so the sheet Modal closes before launching pickers / navigation.
                                         setTimeout(() => option.onPress(), 80);

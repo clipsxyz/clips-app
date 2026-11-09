@@ -79,6 +79,7 @@ class Post extends Model
         'caption',
         'image_text',
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
+        'card_style', // gradient-sunset | gradient-midnight | minimal-charcoal
         'video_captions_enabled',
         'video_caption_text',
         'subtitles_enabled',

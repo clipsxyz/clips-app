@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
     StyleSheet,
     TouchableOpacity,
-    Alert,
     RefreshControl,
     Image,
     ScrollView,
@@ -766,7 +766,7 @@ export default function InboxScreen({ navigation, route }: any) {
             },
         }));
         options.push({ text: 'Cancel', onPress: () => {} });
-        Alert.alert('Story reactions', 'Who interacted', options);
+        gazetteerAlert('Story reactions', 'Who interacted', options);
     };
 
     const openViewersList = (viewers: string[]) => {
@@ -776,7 +776,7 @@ export default function InboxScreen({ navigation, route }: any) {
             onPress: () => navigation.navigate('ViewProfile', { handle }),
         }));
         options.push({ text: 'Cancel', onPress: () => {} });
-        Alert.alert('Story views', 'View profile', options);
+        gazetteerAlert('Story views', 'View profile', options);
     };
 
     const navigateRoot = (name: string, params?: object) => {
@@ -863,7 +863,7 @@ export default function InboxScreen({ navigation, route }: any) {
             onPress: () => navigation.navigate('ViewProfile', { handle: notif.fromHandle }),
         });
         options.push({ text: 'Cancel', style: 'cancel' });
-        Alert.alert('Story actions', `@${notif.fromHandle}`, options);
+        gazetteerAlert('Story actions', `@${notif.fromHandle}`, options);
     };
 
     const handleMarkAllRead = async () => {
@@ -1251,7 +1251,7 @@ export default function InboxScreen({ navigation, route }: any) {
     const handleDeleteOrLeave = (item: ConversationSummary) => {
         if (!user?.handle) return;
         const isGroup = item.kind === 'group' && !!item.chatGroupId;
-        Alert.alert(
+        gazetteerAlert(
             isGroup ? 'Leave group?' : 'Delete conversation?',
             isGroup
                 ? `You will leave "${item.groupName || 'this group'}". You can be invited again later.`
@@ -1272,7 +1272,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                 removeConversationRow(item);
                             } catch (e) {
                                 console.error('Failed to delete/leave conversation', e);
-                                Alert.alert('Error', isGroup ? 'Failed to leave group' : 'Failed to delete conversation');
+                                gazetteerAlert('Error', isGroup ? 'Failed to leave group' : 'Failed to delete conversation');
                             }
                         })();
                     },

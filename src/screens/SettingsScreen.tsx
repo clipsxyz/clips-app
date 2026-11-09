@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import { openNotificationPermissionModal } from '../components/NotificationPermissionModal.native';
 import { clearCachedFcmToken, syncFCMToken } from '../services/fcmService';
 import { isPushNotificationAuthorized } from '../utils/permissions';
@@ -18,6 +19,11 @@ type RowProps = {
 export function PushNotificationSettingsRow({ active = true, onBeforePermissionModal }: RowProps) {
     const [isNotificationsEnabled, setIsNotificationsEnabled] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [notice, setNotice] = useState<{
+        title: string;
+        message: string;
+        icon: 'success' | 'info';
+    } | null>(null);
     const checkRef = useRef(0);
 
     const refresh = useCallback(() => {
@@ -49,10 +55,11 @@ export function PushNotificationSettingsRow({ active = true, onBeforePermissionM
             void clearCachedFcmToken().catch((error) => {
                 console.warn('[FCM] failed to clear cached token:', error);
             });
-            Alert.alert(
-                'Notifications turned off',
-                'Notifications turned off. To fully block alerts, update your device settings.',
-            );
+            setNotice({
+                title: 'Notifications turned off',
+                message: 'To fully block alerts, update your device settings.',
+                icon: 'info',
+            });
             return;
         }
 
@@ -64,6 +71,11 @@ export function PushNotificationSettingsRow({ active = true, onBeforePermissionM
                 if (alreadyAllowed) {
                     await syncFCMToken();
                     setIsNotificationsEnabled(true);
+                    setNotice({
+                        title: 'Notifications turned on',
+                        message: "You'll get updates on post boosts and activity.",
+                        icon: 'success',
+                    });
                     return;
                 }
                 onBeforePermissionModal?.();
@@ -80,6 +92,7 @@ export function PushNotificationSettingsRow({ active = true, onBeforePermissionM
     };
 
     return (
+        <>
         <View style={styles.row}>
             <Icon name="notifications-outline" size={ox(22)} color="#00F2FF" style={styles.icon} />
             <View style={styles.copy}>
@@ -95,6 +108,16 @@ export function PushNotificationSettingsRow({ active = true, onBeforePermissionM
                 ios_backgroundColor="rgba(255,255,255,0.22)"
             />
         </View>
+        <GazetteerAlertSheet
+            visible={notice !== null}
+            title={notice?.title ?? ''}
+            message={notice?.message}
+            icon={notice?.icon ?? 'info'}
+            confirmButtonText="OK"
+            onConfirm={() => setNotice(null)}
+            onDismiss={() => setNotice(null)}
+        />
+        </>
     );
 }
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     Image,
     LayoutChangeEvent,
     Pressable,
@@ -212,14 +212,14 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         void (async () => {
             const remaining = CAROUSEL_MAX - carouselItems.length;
             if (remaining <= 0) {
-                Alert.alert('Carousel full', `You can add up to ${CAROUSEL_MAX} photos or videos.`);
+                gazetteerAlert('Carousel full', `You can add up to ${CAROUSEL_MAX} photos or videos.`);
                 return;
             }
             // Use the same rich gallery picker as the initial media selection
             // (native device gallery), not react-native-image-picker's generic explorer.
             const picked = await pickFromFullGallery(remaining);
             if (picked === 'denied') {
-                Alert.alert(
+                gazetteerAlert(
                     'Gallery access needed',
                     'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
                 );
@@ -260,7 +260,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 const limit = autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1;
                 const picked = await pickFromFullGallery(limit);
                 if (picked === 'denied') {
-                    Alert.alert(
+                    gazetteerAlert(
                         'Gallery access needed',
                         'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
                     );
@@ -281,7 +281,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             void (async () => {
                 const allowed = await ensureCameraPermission();
                 if (!allowed) {
-                    Alert.alert('Camera access needed', 'Allow camera access in Settings to take a photo.');
+                    gazetteerAlert('Camera access needed', 'Allow camera access in Settings to take a photo.');
                     navigation.goBack();
                     return;
                 }
@@ -294,7 +294,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                             return;
                         }
                         if (response.errorCode) {
-                            Alert.alert('Camera error', response.errorMessage || 'Could not open camera.');
+                            gazetteerAlert('Camera error', response.errorMessage || 'Could not open camera.');
                             navigation.goBack();
                             return;
                         }
@@ -379,11 +379,11 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
     const handlePost = () => {
         if (!user) {
-            Alert.alert('Sign in required', 'Please log in to post.');
+            gazetteerAlert('Sign in required', 'Please log in to post.');
             return;
         }
         if (carouselItems.length === 0) {
-            Alert.alert('Add media', 'Choose at least one photo or video.');
+            gazetteerAlert('Add media', 'Choose at least one photo or video.');
             return;
         }
         if (isUploading) return;

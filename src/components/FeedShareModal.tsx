@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
-    Alert,
     Animated,
     KeyboardAvoidingView,
     Modal,
@@ -258,14 +258,14 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
             if (Platform.OS === 'android') {
                 ToastAndroid.show(confirmation, ToastAndroid.SHORT);
             } else {
-                Alert.alert(confirmation);
+                gazetteerAlert(confirmation);
             }
             setShareCaption('');
             setSelectedHandles([]);
             onClose();
         } catch (err) {
             console.error('Send post to DM failed:', err);
-            Alert.alert(
+            gazetteerAlert(
                 'Could not send',
                 sentCount > 0
                     ? `Sent to ${sentCount} of ${recipients.length}. Please try again for the rest.`
@@ -281,10 +281,10 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
         try {
             await Clipboard.setString(shareUrl);
             await recordShare();
-            Alert.alert('Link copied', 'Post link copied to clipboard.');
+            gazetteerAlert('Link copied', 'Post link copied to clipboard.');
         } catch (err) {
             console.error('Clipboard failed:', err);
-            Alert.alert('Could not copy', 'Please try again.');
+            gazetteerAlert('Could not copy', 'Please try again.');
         } finally {
             onClose();
         }
@@ -296,14 +296,14 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
         try {
             const updated = await regeneratePublicShareToken(String(post.id));
             if (!updated?.url) {
-                Alert.alert('Could not reset link', 'Try again in a moment.');
+                gazetteerAlert('Could not reset link', 'Try again in a moment.');
                 return;
             }
             await Clipboard.setString(updated.url);
-            Alert.alert('Shared link reset', 'New link copied to clipboard.');
+            gazetteerAlert('Shared link reset', 'New link copied to clipboard.');
         } catch (err) {
             console.warn('Reset shared link failed:', err);
-            Alert.alert('Could not reset link', 'Try again in a moment.');
+            gazetteerAlert('Could not reset link', 'Try again in a moment.');
         } finally {
             setRegeneratingToken(false);
         }

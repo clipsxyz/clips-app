@@ -1553,6 +1553,7 @@ width: response.width ?? existing?.width,
     templateId: response.template_id || response.templateId,
     bannerText: response.banner_text || response.bannerText,
     textStyle: response.text_style || response.textStyle,
+    cardStyle: response.card_style || response.cardStyle,
     taggedUsers: response.taggedUsers || response.tagged_users,
     videoCaptionsEnabled: response.video_captions_enabled || response.videoCaptionsEnabled,
     videoCaptionText: response.video_caption_text || response.videoCaptionText,
@@ -3872,6 +3873,7 @@ export async function createPost(
    *  server persists width/height/aspect_ratio and the feed lays the card out on first paint. */
   mediaWidth?: number,
   mediaHeight?: number,
+  cardStyle?: 'gradient-sunset' | 'gradient-midnight' | 'minimal-charcoal',
 ): Promise<Post> {
   const currentUserAccountType = (() => {
     try {
@@ -3919,6 +3921,7 @@ export async function createPost(
         templateId: templateId || undefined,
         mediaItems: mediaItems || undefined,
         textStyle: textStyle || undefined,
+        card_style: cardStyle || undefined,
         taggedUsers: taggedUsers || undefined,
         videoCaptionsEnabled: videoCaptionsEnabled || undefined,
         videoCaptionText: videoCaptionText || undefined,
@@ -4264,6 +4267,7 @@ export async function createPost(
       templateId: templateId || undefined, // Store template ID
       bannerText: bannerText || undefined, // Store news ticker banner text
       textStyle: textStyle || undefined, // Store text style for text-only posts
+      cardStyle: cardStyle || undefined,
       taggedUsers: taggedUsers || undefined, // Store tagged users
       videoCaptionsEnabled: videoCaptionsEnabled || undefined, // Store video captions enabled state
       videoCaptionText: videoCaptionText || undefined, // Store video caption text

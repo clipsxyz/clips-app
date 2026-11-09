@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -417,7 +418,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
 
     const onToggleFollowSuggested = async (handle: string) => {
         if (!user?.id || !user?.handle) {
-            Alert.alert('Sign in required', 'Log in to follow people.');
+            gazetteerAlert('Sign in required', 'Log in to follow people.');
             return;
         }
         setFollowBusyHandle(handle);
@@ -436,13 +437,13 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
             setLocalFollowState((prev) => ({ ...prev, [handle]: result.following }));
             setLocalRequestState((prev) => ({ ...prev, [handle]: result.requested }));
             if (result.requested && !wasRequested) {
-                Alert.alert(
+                gazetteerAlert(
                     'Follow Request Sent',
                     `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
                 );
             }
         } catch {
-            Alert.alert('Action failed', 'Could not update follow status right now.');
+            gazetteerAlert('Action failed', 'Could not update follow status right now.');
         } finally {
             setFollowBusyHandle(null);
         }

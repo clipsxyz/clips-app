@@ -1,4 +1,5 @@
-import { Platform, ToastAndroid, Alert } from 'react-native';
+import { Platform, ToastAndroid } from 'react-native';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     executeFfmpeg,
     makeSiblingOutputPath,
@@ -74,7 +75,7 @@ function autoTrimToastMessage(maxSeconds: number): void {
             /* fall through */
         }
     }
-    Alert.alert('Video', message);
+    gazetteerAlert('Video', message);
 }
 
 export function bytesToMb(bytes: number): string {

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     Image,
     Keyboard,
     LayoutChangeEvent,
@@ -352,7 +352,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     const addLocationSticker = () => {
         const label = locationDraft.trim();
         if (!label) {
-            Alert.alert('Add location', 'Enter a location for your story.');
+            gazetteerAlert('Add location', 'Enter a location for your story.');
             return;
         }
         const id = `location-${Date.now()}`;
@@ -379,7 +379,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     const saveLink = () => {
         const formatted = normalizeStoryLinkUrl(linkUrlDraft);
         if (!formatted) {
-            Alert.alert('Invalid link', 'Enter a valid website URL.');
+            gazetteerAlert('Invalid link', 'Enter a valid website URL.');
             return;
         }
         const next = buildLinkSticker(formatted, linkSticker);

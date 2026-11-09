@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
@@ -8,7 +9,6 @@ import {
     TextInput,
     ScrollView,
     ActivityIndicator,
-    Alert,
     LayoutChangeEvent,
     Pressable,
     Keyboard,
@@ -241,7 +241,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
     const openStickerPicker = useCallback(() => {
         if (!selectedMedia) {
-            Alert.alert('Media required', 'Add a photo or video before adding stickers.');
+            gazetteerAlert('Media required', 'Add a photo or video before adding stickers.');
             return;
         }
         setShowStickerPicker(true);
@@ -249,7 +249,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
     const openFilters = useCallback(() => {
         if (!selectedMedia) {
-            Alert.alert('Media required', 'Add a photo or video before choosing a filter.');
+            gazetteerAlert('Media required', 'Add a photo or video before choosing a filter.');
             return;
         }
         if (mediaType === 'video') {
@@ -424,7 +424,7 @@ export default function CreateScreen({ navigation, route }: any) {
         try {
             const picked = await pickFromFullGallery(isStory24Flow ? 1 : CAROUSEL_MAX_ITEMS);
             if (picked === 'denied') {
-                Alert.alert(
+                gazetteerAlert(
                     'Gallery access needed',
                     'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
                 );
@@ -433,7 +433,7 @@ export default function CreateScreen({ navigation, route }: any) {
             if (picked === 'cancel') return;
             const { accepted: assets } = await filterValidVideoAssets(picked);
             if (assets.length === 0) {
-                Alert.alert('Media error', 'No media was selected.');
+                gazetteerAlert('Media error', 'No media was selected.');
                 return;
             }
             if (!isStory24Flow && assets.length >= 2) {
@@ -442,7 +442,7 @@ export default function CreateScreen({ navigation, route }: any) {
             }
             const asset = assets[0];
             if (!asset?.uri) {
-                Alert.alert('Media error', 'No media was selected.');
+                gazetteerAlert('Media error', 'No media was selected.');
                 return;
             }
             applySingleMedia(
@@ -454,7 +454,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 setVideoDurationSec(Math.max(0.1, Number(asset.duration)));
             }
         } catch (err: any) {
-            Alert.alert('Media error', err?.message || 'Could not open your photo library.');
+            gazetteerAlert('Media error', err?.message || 'Could not open your photo library.');
         }
     }, [applyCarouselFromAssets, applySingleMedia, isStory24Flow]);
 
@@ -539,12 +539,12 @@ export default function CreateScreen({ navigation, route }: any) {
 
     const handlePost = async () => {
         if (!selectedMedia && !text.trim()) {
-            Alert.alert('Error', 'Please add media or text to your post');
+            gazetteerAlert('Error', 'Please add media or text to your post');
             return;
         }
 
         if (!user) {
-            Alert.alert('Error', 'Please log in to post');
+            gazetteerAlert('Error', 'Please log in to post');
             return;
         }
 
@@ -635,7 +635,7 @@ export default function CreateScreen({ navigation, route }: any) {
             hapticSuccess();
             const storyAudienceLabel =
                 storyAudience === 'close_friends' ? 'Close Friends' : storyAudience === 'only_me' ? 'Only Me' : 'Public';
-            Alert.alert(
+            gazetteerAlert(
                 'Success',
                 `Story 24 published (${storyAudienceLabel}).`,
                 [
@@ -650,7 +650,7 @@ export default function CreateScreen({ navigation, route }: any) {
             );
         } catch (error: any) {
             console.error('Error creating post:', error);
-            Alert.alert('Error', error?.message || 'Failed to create post');
+            gazetteerAlert('Error', error?.message || 'Failed to create post');
         } finally {
             setIsUploading(false);
         }

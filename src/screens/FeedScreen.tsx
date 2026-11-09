@@ -6,6 +6,7 @@
 /* eslint-disable react-refresh/only-export-components */
 // @refresh reset — FeedScreen is large; full remount on edit avoids hook-order HMR glitches.
 import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
     View,
@@ -18,7 +19,6 @@ import {
     ScrollView,
     Modal,
     TextInput,
-    Alert,
     Linking,
     Pressable,
     Platform,
@@ -213,6 +213,7 @@ import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import FeedOverlayHost from '../components/FeedOverlayHost.native';
 import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import DeletePostConfirmSheet from '../components/DeletePostConfirmSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
@@ -2076,6 +2077,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     savedByPostIdRef.current = savedByPostId;
     const [overflowVisible, setOverflowVisible] = useState(false);
     const [overflowPost, setOverflowPost] = useState<Post | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<{ id: string; handle: string } | null>(null);
     const [editPost, setEditPost] = useState<Post | null>(null);
     const [saveModalPost, setSaveModalPost] = useState<Post | null>(null);
     const [qrPost, setQrPost] = useState<Post | null>(null);
@@ -5443,7 +5445,7 @@ onVisitProfile={() =>
                     }}
                     onBlockUser={async () => {
                         if (!user?.handle) return;
-                        Alert.alert('Block user?', `Hide ${mergedPost.userHandle} from your feed?`, [
+                        gazetteerAlert('Block user?', `Hide ${mergedPost.userHandle} from your feed?`, [
                             { text: 'Cancel', style: 'cancel' },
                             {
                                 text: 'Block',
@@ -5455,7 +5457,7 @@ onVisitProfile={() =>
                                         String(mergedPost.userHandle || '').replace(/^@/, '').trim().toLowerCase(),
                                     );
                                     hideUserFromFeed(mergedPost.userHandle);
-                                    Alert.alert(
+                                    gazetteerAlert(
                                         'Blocked',
                                         `${mergedPost.userHandle} was blocked and removed from your feed.`
                                     );
@@ -6123,7 +6125,7 @@ onVisitProfile={() =>
                 onMute={async () => {
                     if (!overflowPost) return;
                     hideUserFromFeed(overflowPost.userHandle);
-                    Alert.alert('Muted', `${overflowPost.userHandle} was muted and hidden from your feed.`);
+                    gazetteerAlert('Muted', `${overflowPost.userHandle} was muted and hidden from your feed.`);
                 }}
                 onHide={() => {
                     if (!overflowPost) return;
@@ -6133,36 +6135,10 @@ onVisitProfile={() =>
                     if (!overflowPost) return;
                     markPostNotInterested(overflowPost.id);
                 }}
-                onDelete={() =>
-                    new Promise<void>((resolve) => {
-                        if (!overflowPost || !user?.handle) {
-                            resolve();
-                            return;
-                        }
-                        const targetId = overflowPost.id;
-                        const handleVal = user.handle;
-                        Alert.alert('Delete post?', 'This cannot be undone.', [
-                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
-                            {
-                                text: 'Delete',
-                                style: 'destructive',
-                                onPress: () => {
-                                    void (async () => {
-                                        try {
-                                            await deletePost(userId, targetId, handleVal);
-                                            removePostFromFeed(targetId);
-                                        } catch (e) {
-                                            console.error('Delete post failed:', e);
-                                            Alert.alert('Error', 'Could not delete this post.');
-                                        } finally {
-                                            resolve();
-                                        }
-                                    })();
-                                },
-                            },
-                        ]);
-                    })
-                }
+                onDelete={async () => {
+                    if (!overflowPost || !user?.handle) return;
+                    setDeleteTarget({ id: overflowPost.id, handle: user.handle });
+                }}
                 onReport={async () => {
                     if (!overflowPost) return;
                     const { promptReportPostNative } = await import('../utils/promptReportPostNative');
@@ -6175,7 +6151,7 @@ onVisitProfile={() =>
                             return;
                         }
                         const blockedHandle = overflowPost.userHandle;
-                        Alert.alert('Block user?', `Hide ${blockedHandle} from your feed?`, [
+                        gazetteerAlert('Block user?', `Hide ${blockedHandle} from your feed?`, [
                             { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
                             {
                                 text: 'Block',
@@ -6185,7 +6161,7 @@ onVisitProfile={() =>
                                         await blockUser(user.handle, blockedHandle);
                                         await blockFeedAuthorMobile(userId, blockedHandle);
                                         hideUserFromFeed(blockedHandle);
-                                        Alert.alert(
+                                        gazetteerAlert(
                                             'Blocked',
                                             `${blockedHandle} was blocked and removed from your feed.`
                                         );
@@ -6198,6 +6174,29 @@ onVisitProfile={() =>
                 }
             />
             ) : null}
+
+            <DeletePostConfirmSheet
+                visible={deleteTarget != null}
+                onDismiss={() => setDeleteTarget(null)}
+                onConfirm={() => {
+                    const target = deleteTarget;
+                    setDeleteTarget(null);
+                    if (!target) return;
+                    void (async () => {
+                        try {
+                            await deletePost(userId, target.id, target.handle);
+                            removePostFromFeed(target.id);
+                        } catch (e) {
+                            console.error('Delete post failed:', e);
+                            setFeedGazetteerAlert({
+                                title: 'Could not delete',
+                                message: 'This post is still on your feed.',
+                                icon: 'alert',
+                            });
+                        }
+                    })();
+                }}
+            />
 
             {saveModalPost ? (
                 <SavePostModal

@@ -1,9 +1,11 @@
 import React, { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import type { Post } from '../types';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import { hasFinitePoint, safeLayoutNumber } from '../utils/safeLayoutNative';
+import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
 
 const DOUBLE_TAP_MS = 300;
 const BODY_COLOR = '#F1F5F9';
@@ -65,35 +67,50 @@ export default function FeedTextOnlyCard({ post, onDoubleLike }: Props) {
 
     if (!text) return null;
 
+    const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
+    const body = (
+        <View
+            style={styles.bodyMeasure}
+            onLayout={(ev) => {
+                const { width: w, height: h } = ev.nativeEvent.layout;
+                if (w > 0 && h > 0) setBodySize({ width: w, height: h });
+            }}
+        >
+            <Text style={[styles.body, card ? { color: card.textColor } : null]}>{text}</Text>
+            {stickers && stickers.length > 0 && bodySize.width > 0 ? (
+                <FeedStickerOverlays
+                    stickers={stickers}
+                    containerWidth={bodySize.width}
+                    containerHeight={bodySize.height}
+                />
+            ) : null}
+            {tapPosition ? (
+                <FeedDoubleTapLikeBurst
+                    key={burstKey}
+                    x={tapPosition.x}
+                    y={tapPosition.y}
+                />
+            ) : null}
+        </View>
+    );
+
     return (
         <Pressable
             onPress={handlePress}
             accessibilityLabel="Double tap to like"
             style={styles.wrap}
         >
-            <View
-                style={styles.bodyMeasure}
-                onLayout={(ev) => {
-                    const { width: w, height: h } = ev.nativeEvent.layout;
-                    if (w > 0 && h > 0) setBodySize({ width: w, height: h });
-                }}
-            >
-                <Text style={styles.body}>{text}</Text>
-                {stickers && stickers.length > 0 && bodySize.width > 0 ? (
-                    <FeedStickerOverlays
-                        stickers={stickers}
-                        containerWidth={bodySize.width}
-                        containerHeight={bodySize.height}
-                    />
-                ) : null}
-                {tapPosition ? (
-                    <FeedDoubleTapLikeBurst
-                        key={burstKey}
-                        x={tapPosition.x}
-                        y={tapPosition.y}
-                    />
-                ) : null}
-            </View>
+            {card && card.colors.length >= 2 ? (
+                <LinearGradient colors={card.colors} style={styles.card}>
+                    {body}
+                </LinearGradient>
+            ) : card ? (
+                <View style={[styles.card, styles.charcoalCard, { backgroundColor: card.colors[0] }]}>
+                    {body}
+                </View>
+            ) : (
+                body
+            )}
         </Pressable>
     );
 }
@@ -108,6 +125,16 @@ const styles = StyleSheet.create({
     bodyMeasure: {
         position: 'relative',
         width: '100%',
+    },
+    card: {
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 18,
+        overflow: 'hidden',
+    },
+    charcoalCard: {
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
     },
     body: {
         color: BODY_COLOR,

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -151,11 +151,11 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
 
   const handleSubmit = async () => {
     if (!canPost) {
-      Alert.alert('Text required', 'Please add some text to your post.');
+      gazetteerAlert('Text required', 'Please add some text to your post.');
       return;
     }
     if (!user) {
-      Alert.alert('Login required', 'Please log in to create a post.');
+      gazetteerAlert('Login required', 'Please log in to create a post.');
       return;
     }
     setIsSubmitting(true);
@@ -202,11 +202,11 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
         );
       }
       hapticSuccess();
-      Alert.alert('Posted', isStory24 ? 'Your story is live.' : 'Post created successfully!', [
+      gazetteerAlert('Posted', isStory24 ? 'Your story is live.' : 'Post created successfully!', [
         { text: 'OK', onPress: finishToFeed },
       ]);
     } catch (err: any) {
-      Alert.alert('Post failed', err?.message || 'Failed to create post. Please try again.');
+      gazetteerAlert('Post failed', err?.message || 'Failed to create post. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

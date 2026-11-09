@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
-    Image,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -9,14 +8,20 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
-import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import ProfileCoverHero from '../components/ProfileCoverHero.native';
+import {
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { mapLaravelUserToAppFields, updateAuthProfile } from '../api/client';
+import { getAvatarForHandle } from '../api/users';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
-import { hasCustomProfileCover, resolveProfileCoverSource, DEFAULT_PROFILE_COVER_SOURCE } from '../utils/profileCoverNative';
+import { hasCustomProfileCover } from '../utils/profileCoverNative';
 import type { User } from '../types';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -35,14 +40,8 @@ export default function ProfileCoverScreen({ navigation }: any) {
 
     const coverUrl = user?.profileBackgroundUrl || '';
     const customCover = hasCustomProfileCover(coverUrl);
-    const [previewFailed, setPreviewFailed] = useState(false);
-    const previewSource = previewFailed
-        ? DEFAULT_PROFILE_COVER_SOURCE
-        : resolveProfileCoverSource(coverUrl);
-
-    useEffect(() => {
-        setPreviewFailed(false);
-    }, [coverUrl]);
+    const displayName = user?.name || 'Your profile';
+    const handle = user?.handle || '';
 
     const saveCoverUrl = useCallback(
         async (nextUrl: string) => {
@@ -177,54 +176,82 @@ export default function ProfileCoverScreen({ navigation }: any) {
     };
 
     return (
-        <GazetteerScreenShell>
+        <GazetteerScreenShell ambient={false} style={styles.shell}>
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.canvas}
+            >
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
+                <TouchableOpacity
+                    onPress={() => navigation.goBack()}
+                    style={styles.headerIconBtn}
+                    accessibilityLabel="Go back"
+                >
+                    <Icon name="chevron-back" size={ox(22)} color="#FFFFFF" />
                 </TouchableOpacity>
-                <View style={styles.headerCopy}>
-                    <Text style={styles.headerTitle}>Profile Cover</Text>
-                    <Text style={styles.headerSubtitle}>Choose the background shown behind your profile picture</Text>
+                <View style={styles.headerCenter}>
+                    <Text style={styles.headerTitle}>Cover</Text>
+                    <Text style={styles.headerHandle} numberOfLines={1}>
+                        {handle || 'Profile background'}
+                    </Text>
                 </View>
+                <View style={styles.headerIconSpacer} />
             </View>
 
             <View style={styles.body}>
-                <View style={styles.previewCard}>
-                    <Image
-                        source={previewSource}
-                        style={[styles.previewImage, (!customCover || previewFailed) && styles.previewImageMuted]}
-                        resizeMode="cover"
-                        onError={() => {
-                            if (customCover) setPreviewFailed(true);
-                        }}
-                    />
-                </View>
+                <ProfileCoverHero
+                    coverUrl={coverUrl}
+                    avatarUrl={user?.avatarUrl || getAvatarForHandle(handle)}
+                    name={displayName}
+                >
+                    <View style={styles.identity}>
+                        <Text style={styles.identityName} numberOfLines={1}>
+                            {displayName}
+                        </Text>
+                        {handle ? (
+                            <Text style={styles.identityHandle} numberOfLines={1}>
+                                {handle}
+                            </Text>
+                        ) : null}
+                    </View>
+                </ProfileCoverHero>
 
-                <View style={styles.actions}>
-                    <TouchableOpacity
-                        style={[styles.primaryBtn, isSaving && styles.btnDisabled]}
-                        onPress={handlePickImage}
-                        disabled={isSaving}
-                    >
+                <Text style={styles.hint}>This is the background behind your profile photo.</Text>
+
+                <TouchableOpacity
+                    style={[styles.uploadBtn, isSaving && styles.btnDisabled]}
+                    onPress={handlePickImage}
+                    disabled={isSaving}
+                    activeOpacity={0.9}
+                >
+                    <View style={styles.uploadFill} collapsable={false}>
                         {isSaving ? (
-                            <ActivityIndicator color="#111827" />
+                            <ActivityIndicator color="#000000" />
                         ) : (
                             <>
-                                <Icon name="image-outline" size={ox(18)} color="#111827" />
-                                <Text style={styles.primaryBtnText}>Upload image</Text>
+                                <Icon name="image-outline" size={ox(18)} color="#000000" style={styles.uploadIcon} />
+                                <Text style={styles.uploadText}>Upload image</Text>
                             </>
                         )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.secondaryBtn, (isSaving || !customCover) && styles.btnDisabled]}
-                        onPress={handleRemove}
-                        disabled={isSaving || !customCover}
-                    >
-                        <Icon name="trash-outline" size={ox(18)} color="#FFFFFF" />
-                        <Text style={styles.secondaryBtnText}>Reset</Text>
-                    </TouchableOpacity>
-                </View>
+                    </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[styles.resetBtn, (isSaving || !customCover) && styles.btnDisabled]}
+                    onPress={() => {
+                        void handleRemove();
+                    }}
+                    disabled={isSaving || !customCover}
+                    activeOpacity={0.85}
+                >
+                    <Icon name="trash-outline" size={ox(16)} color="#FFFFFF" />
+                    <Text style={styles.resetText}>Reset to map</Text>
+                </TouchableOpacity>
             </View>
+            </LinearGradient>
 
             <GazetteerAlertSheet
                 visible={coverAlert !== null}
@@ -240,67 +267,120 @@ export default function ProfileCoverScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+    shell: {
+        backgroundColor: '#05050A',
+    },
+    canvas: {
+        flex: 1,
+        backgroundColor: 'transparent',
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: ox(12),
-        paddingHorizontal: ox(16),
-        paddingVertical: ox(14),
-        ...gazetteerHeader,
+        justifyContent: 'space-between',
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
     },
-    headerCopy: { flex: 1 },
-    headerTitle: { color: '#FFFFFF', fontSize: ox(18), fontWeight: '700' },
-    headerSubtitle: { color: '#9CA3AF', fontSize: ox(12), marginTop: ox(2) },
-    body: { padding: ox(16), gap: ox(16) },
-    previewCard: {
-        borderRadius: ox(16),
-        overflow: 'hidden',
-        ...glassPanel,
-    },
-    previewImage: {
-        width: '100%',
-        height: 200,
-    },
-    previewImageMuted: {
-        opacity: 0.85,
-    },
-    actions: {
-        flexDirection: 'row',
-        gap: ox(10),
-    },
-    primaryBtn: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: ox(8),
-        backgroundColor: '#FFFFFF',
-        borderRadius: ox(14),
-        paddingVertical: ox(14),
-    },
-    primaryBtnText: {
-        color: '#111827',
-        fontSize: ox(15),
-        fontWeight: '700',
-    },
-    secondaryBtn: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: ox(8),
-        borderRadius: ox(14),
-        paddingVertical: ox(14),
+    headerIconBtn: {
+        width: ox(44),
+        height: ox(44),
+        borderRadius: ox(22),
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-        backgroundColor: 'rgba(0,0,0,0.35)',
+        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    secondaryBtnText: {
+    headerIconSpacer: {
+        width: ox(44),
+        height: ox(44),
+    },
+    headerCenter: {
+        flex: 1,
+        alignItems: 'center',
+        paddingHorizontal: ox(8),
+    },
+    headerTitle: {
         color: '#FFFFFF',
+        fontSize: ox(14),
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    headerHandle: {
+        color: '#9CA3AF',
+        fontSize: ox(11),
+        textAlign: 'center',
+        marginTop: 1,
+    },
+    body: {
+        paddingHorizontal: ox(16),
+        paddingTop: ox(8),
+    },
+    identity: {
+        alignItems: 'center',
+        marginTop: ox(8),
+    },
+    identityName: {
+        color: '#FFFFFF',
+        fontSize: ox(16),
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    identityHandle: {
+        color: '#9CA3AF',
+        fontSize: ox(12),
+        marginTop: ox(2),
+        textAlign: 'center',
+    },
+    hint: {
+        color: 'rgba(255,255,255,0.62)',
+        fontSize: ox(13),
+        lineHeight: ox(18),
+        textAlign: 'center',
+        marginTop: ox(18),
+        marginBottom: ox(16),
+    },
+    uploadBtn: {
+        height: ox(48),
+        borderRadius: ox(24),
+        backgroundColor: '#FFFFFF',
+        overflow: 'hidden',
+    },
+    uploadFill: {
+        flex: 1,
+        height: ox(48),
+        backgroundColor: '#FFFFFF',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    uploadIcon: {
+        marginRight: ox(8),
+    },
+    uploadText: {
+        color: '#000000',
         fontSize: ox(15),
         fontWeight: '700',
+        backgroundColor: '#FFFFFF',
+    },
+    resetBtn: {
+        marginTop: ox(12),
+        height: ox(44),
+        borderRadius: ox(22),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: ox(8),
+    },
+    resetText: {
+        color: '#FFFFFF',
+        fontSize: ox(14),
+        fontWeight: '600',
     },
     btnDisabled: {
-        opacity: 0.5,
+        opacity: 0.45,
     },
 });

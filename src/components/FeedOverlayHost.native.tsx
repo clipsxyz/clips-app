@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
-    Alert,
     Dimensions,
     Modal,
     Pressable,
@@ -56,7 +56,7 @@ function useFeedDmComposer(viewerHandle: string | undefined) {
     const openDmThread = useCallback(
         (handle: string, postId: string, isMutual?: boolean) => {
             if (isMutual === false) {
-                Alert.alert(
+                gazetteerAlert(
                     'Cannot message',
                     'You must mutually follow each other to send a direct message',
                 );
@@ -105,7 +105,7 @@ function useFeedDmComposer(viewerHandle: string | undefined) {
             });
             dmSheetRef.current?.dismiss();
         } catch (err) {
-            Alert.alert(
+            gazetteerAlert(
                 'Could not send',
                 err instanceof Error ? err.message : 'Please try again.',
             );

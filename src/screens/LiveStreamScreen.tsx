@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
     StyleSheet,
     TouchableOpacity,
     TextInput,
-    Alert,
     Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,12 +34,12 @@ const LiveStreamScreen: React.FC = () => {
 
     const handleStartLive = async () => {
         if (!selectedLocation) {
-            Alert.alert('Error', 'Please select a location');
+            gazetteerAlert('Error', 'Please select a location');
             return;
         }
 
         if (!streamTitle.trim()) {
-            Alert.alert('Error', 'Please enter a stream title');
+            gazetteerAlert('Error', 'Please enter a stream title');
             return;
         }
 
@@ -62,12 +62,12 @@ const LiveStreamScreen: React.FC = () => {
             setShowLocationModal(false);
         } catch (error) {
             console.error('Error starting live stream:', error);
-            Alert.alert('Error', 'Failed to start live stream. Please check your camera and microphone permissions.');
+            gazetteerAlert('Error', 'Failed to start live stream. Please check your camera and microphone permissions.');
         }
     };
 
     const handleEndLive = () => {
-        Alert.alert(
+        gazetteerAlert(
             'End Live Stream',
             'Are you sure you want to end your live stream?',
             [

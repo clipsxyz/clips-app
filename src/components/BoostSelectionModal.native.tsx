@@ -1,7 +1,7 @@
 import React from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     DeviceEventEmitter,
     Modal,
     Platform,
@@ -66,7 +66,7 @@ function confirmExternalWebCheckout(): Promise<boolean> {
             settled = true;
             resolve(accepted);
         };
-        Alert.alert(
+        gazetteerAlert(
             'Gazetteer Direct',
             EXTERNAL_CHECKOUT_MESSAGE,
             [

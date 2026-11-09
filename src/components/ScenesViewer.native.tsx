@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
@@ -6,7 +7,6 @@ import {
     Dimensions,
     Pressable,
     Platform,
-    Alert,
     Modal,
     useWindowDimensions,
     type GestureResponderEvent,
@@ -38,6 +38,7 @@ import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
 import FeedShareModal from './FeedShareModal';
 import PostCommentsSheet from './PostCommentsSheet';
 import PostOverflowMenuModal from './PostOverflowMenuModal';
+import DeletePostConfirmSheet from './DeletePostConfirmSheet.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 import SavePostModal from './SavePostModal.native';
 import ScenesFooterBar from './ScenesFooterBar.native';
@@ -188,6 +189,7 @@ export default function ScenesViewer({
     const [mediaSlideProgress, setMediaSlideProgress] = useState(0);
     const [mediaSlideIndex, setMediaSlideIndex] = useState(0);
     const [overflowVisible, setOverflowVisible] = useState(false);
+    const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
     const [overflowNotify, setOverflowNotify] = useState(false);
     const [hasPendingRequest, setHasPendingRequest] = useState(false);
     const [qrPost, setQrPost] = useState<Post | null>(null);
@@ -543,7 +545,7 @@ export default function ScenesViewer({
 
     const handleDirectMessage = useCallback(async () => {
         if (!activePost?.userHandle || !viewerHandle || !viewerUserId) {
-            Alert.alert('Sign in required', 'Log in to send a direct message.');
+            gazetteerAlert('Sign in required', 'Log in to send a direct message.');
             return;
         }
         if (activePost.userHandle === viewerHandle) return;
@@ -556,14 +558,14 @@ export default function ScenesViewer({
 
         if (!canMessage && profilePrivate) {
             if (pending) {
-                Alert.alert(
+                gazetteerAlert(
                     'Follow Request Pending',
                     "This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.",
                 );
                 return;
             }
 
-            Alert.alert(
+            gazetteerAlert(
                 'Cannot Send Message',
                 'This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.',
                 [
@@ -573,7 +575,7 @@ export default function ScenesViewer({
                         onPress: () => {
                             createFollowRequest(viewerHandle, activePost.userHandle);
                             setFollowState(viewerUserId, activePost.userHandle, false);
-                            Alert.alert(
+                            gazetteerAlert(
                                 'Follow Request Sent',
                                 'You will be notified when they accept your request.',
                             );
@@ -585,7 +587,7 @@ export default function ScenesViewer({
         }
 
         if (!canMessage) {
-            Alert.alert('Cannot Message', 'You must follow this user to send a message.');
+            gazetteerAlert('Cannot Message', 'You must follow this user to send a message.');
             return;
         }
 
@@ -662,7 +664,7 @@ export default function ScenesViewer({
     const handleReclip = useCallback(async () => {
         if (!activePost) return;
         if (!viewerHandle || !viewerUserId || viewerUserId === 'anon') {
-            Alert.alert('Sign in required', 'Log in to reclip this post.');
+            gazetteerAlert('Sign in required', 'Log in to reclip this post.');
             return;
         }
         const norm = (h?: string) => String(h || '').trim().toLowerCase();
@@ -671,7 +673,7 @@ export default function ScenesViewer({
                 ? activePost.originalUserHandle
                 : activePost.userHandle;
         if (norm(activePost.userHandle) === norm(viewerHandle) || norm(sourceHandle) === norm(viewerHandle)) {
-            Alert.alert('Cannot reclip', "You can't reclip your own post.");
+            gazetteerAlert('Cannot reclip', "You can't reclip your own post.");
             return;
         }
         if (activePost.userReclipped) return;
@@ -706,7 +708,7 @@ export default function ScenesViewer({
                 err instanceof Error && err.message
                     ? err.message
                     : 'Could not reclip this post. Try again.';
-            Alert.alert('Reclip failed', message);
+            gazetteerAlert('Reclip failed', message);
         }
     }, [activePost, patchPost, viewerHandle, viewerUserId]);
 
@@ -1223,7 +1225,7 @@ export default function ScenesViewer({
                     const url = buildShareablePostUrl(activePost);
                     const Clipboard = (await import('@react-native-clipboard/clipboard')).default;
                     Clipboard.setString(url);
-                    Alert.alert('Link copied', 'Post link copied to clipboard.');
+                    gazetteerAlert('Link copied', 'Post link copied to clipboard.');
                 }}
                 onCreateGroup={isOwn ? () => setCreateGroupOpen(true) : undefined}
                 onInviteToGroup={!isOwn ? () => setInviteGroupHandle(activePost.userHandle) : undefined}
@@ -1247,7 +1249,7 @@ export default function ScenesViewer({
                     const next = posts.filter((p) => p.userHandle !== activePost.userHandle);
                     onPostsChange?.(next);
                     if (next.length === 0) onClose();
-                    Alert.alert('Muted', `${activePost.userHandle} was muted.`);
+                    gazetteerAlert('Muted', `${activePost.userHandle} was muted.`);
                     setOverflowVisible(false);
                 }}
                 onBlock={() =>
@@ -1256,7 +1258,7 @@ export default function ScenesViewer({
                             resolve();
                             return;
                         }
-                        Alert.alert('Block user?', `Hide ${activePost.userHandle} from your feed?`, [
+                        gazetteerAlert('Block user?', `Hide ${activePost.userHandle} from your feed?`, [
                             { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
                             {
                                 text: 'Block',
@@ -1280,37 +1282,9 @@ export default function ScenesViewer({
                 }
                 onDelete={
                     isOwn
-                        ? () =>
-                              new Promise<void>((resolve) => {
-                                  Alert.alert('Delete post?', 'This cannot be undone.', [
-                                      { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
-                                      {
-                                          text: 'Delete',
-                                          style: 'destructive',
-                                          onPress: () => {
-                                              void (async () => {
-                                                  try {
-                                                      await deletePost(
-                                                          viewerUserId,
-                                                          activePost.id,
-                                                          viewerHandle!,
-                                                      );
-                                                      const next = posts.filter(
-                                                          (p) => p.id !== activePost.id,
-                                                      );
-                                                      onPostsChange?.(next);
-                                                      if (next.length === 0) onClose();
-                                                  } catch {
-                                                      Alert.alert('Error', 'Could not delete this post.');
-                                                  } finally {
-                                                      setOverflowVisible(false);
-                                                      resolve();
-                                                  }
-                                              })();
-                                          },
-                                      },
-                                  ]);
-                              })
+                        ? async () => {
+                              setDeleteTargetId(activePost.id);
+                          }
                         : undefined
                 }
                 onOpenSave={() => {
@@ -1347,6 +1321,26 @@ export default function ScenesViewer({
                 onReport={async () => {
                     const { promptReportPostNative } = await import('../utils/promptReportPostNative');
                     promptReportPostNative(activePost.id, () => setOverflowVisible(false));
+                }}
+            />
+
+            <DeletePostConfirmSheet
+                visible={deleteTargetId != null}
+                onDismiss={() => setDeleteTargetId(null)}
+                onConfirm={() => {
+                    const targetId = deleteTargetId;
+                    setDeleteTargetId(null);
+                    if (!targetId || !viewerHandle) return;
+                    void (async () => {
+                        try {
+                            await deletePost(viewerUserId, targetId, viewerHandle);
+                            const next = posts.filter((p) => p.id !== targetId);
+                            onPostsChange?.(next);
+                            if (next.length === 0) onClose();
+                        } catch {
+                            gazetteerAlert('Error', 'Could not delete this post.');
+                        }
+                    })();
                 }}
             />
 

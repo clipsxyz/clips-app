@@ -1,4 +1,5 @@
 import React from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     Modal,
     View,
@@ -7,8 +8,7 @@ import {
     StyleSheet,
     ScrollView,
     ActivityIndicator,
-    Alert,
-} from 'react-native';
+    } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
@@ -113,9 +113,9 @@ export default function PostOverflowMenuModal({
         }
         try {
             await Clipboard.setString(buildShareablePostUrl(post));
-            Alert.alert('Link copied', 'Post link copied to clipboard.');
+            gazetteerAlert('Link copied', 'Post link copied to clipboard.');
         } catch {
-            Alert.alert('Could not copy', 'Please try again.');
+            gazetteerAlert('Could not copy', 'Please try again.');
         }
     };
 

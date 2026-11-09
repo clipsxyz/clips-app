@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 
 function storyHandlesMatch(a?: string | null, b?: string | null): boolean {
     const left = String(a || '').replace(/^@/, '').trim().toLowerCase();
@@ -15,7 +16,6 @@ import {
     Dimensions,
     ActivityIndicator,
     Modal,
-    Alert,
     Pressable,
 } from 'react-native';
 import Animated, {
@@ -936,7 +936,7 @@ export default function StoriesScreen({ route, navigation }: any) {
             setIsFollowingStoryUser(result.following);
             setStoryFollowRequested(result.requested);
             if (result.requested && !wasRequested) {
-                Alert.alert(
+                gazetteerAlert(
                     'Follow Request Sent',
                     `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
                 );
@@ -1034,7 +1034,7 @@ export default function StoriesScreen({ route, navigation }: any) {
             syncFullscreenPost(updated);
         } catch (error) {
             console.error('Fullscreen like failed:', error);
-            Alert.alert('Could not like', 'Please try again.');
+            gazetteerAlert('Could not like', 'Please try again.');
         }
     };
 
@@ -1054,11 +1054,11 @@ export default function StoriesScreen({ route, navigation }: any) {
                 ? imageFullscreenPost.originalUserHandle
                 : imageFullscreenPost.userHandle;
         if (norm(imageFullscreenPost.userHandle) === norm(user.handle) || norm(sourceHandle) === norm(user.handle)) {
-            Alert.alert('Cannot reclip', 'You can’t reclip your own post.');
+            gazetteerAlert('Cannot reclip', 'You can’t reclip your own post.');
             return;
         }
         if (imageFullscreenPost.userReclipped) {
-            Alert.alert('Already reclipped', 'You have already reclipped this post.');
+            gazetteerAlert('Already reclipped', 'You have already reclipped this post.');
             return;
         }
         try {
@@ -1084,10 +1084,10 @@ export default function StoriesScreen({ route, navigation }: any) {
                     },
                 });
             }
-            Alert.alert('Reposted', 'Post added to your Following feed and profile.');
+            gazetteerAlert('Reposted', 'Post added to your Following feed and profile.');
         } catch (error) {
             console.error('Fullscreen reclip failed:', error);
-            Alert.alert('Could not repost', 'Please try again.');
+            gazetteerAlert('Could not repost', 'Please try again.');
         }
     };
 
@@ -1260,14 +1260,14 @@ export default function StoriesScreen({ route, navigation }: any) {
                     });
                 } catch (inboxError) {
                     console.warn('Story reply inbox delivery failed:', inboxError);
-                    Alert.alert(
+                    gazetteerAlert(
                         'Reply saved',
                         'Your reply was sent, but it may not show in Messages yet.',
                     );
                 }
                 startDeliveryFx('message', toHandle);
             } else if (isSelfStory) {
-                Alert.alert(
+                gazetteerAlert(
                     'Your story',
                     'That reply stays on your story insights. Messages in Inbox are for when other people reply or react to your story.',
                 );
@@ -1303,7 +1303,7 @@ export default function StoriesScreen({ route, navigation }: any) {
             setShowInlineReplyComposer(false);
         } catch (error) {
             console.error('Error adding reply:', error);
-            Alert.alert('Could not send reply', 'Please try again in a moment.');
+            gazetteerAlert('Could not send reply', 'Please try again in a moment.');
         } finally {
             setIsSendingReply(false);
         }

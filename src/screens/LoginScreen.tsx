@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
@@ -6,7 +7,6 @@ import {
     TextInput,
     TouchableOpacity,
     ScrollView,
-    Alert,
     Modal,
     Platform,
     Linking,
@@ -839,7 +839,7 @@ export default function LoginScreen({ navigation, route }: any) {
     const applyProfileAsset = (response: ImagePicker.ImagePickerResponse, sourceLabel: string) => {
         if (response.didCancel) return;
         if (response.errorCode) {
-            Alert.alert(
+            gazetteerAlert(
                 `${sourceLabel} error`,
                 response.errorMessage || `Could not open ${sourceLabel.toLowerCase()}.`,
             );
@@ -847,7 +847,7 @@ export default function LoginScreen({ navigation, route }: any) {
         }
         const uri = response.assets?.[0]?.uri;
         if (!uri) {
-            Alert.alert('No photo', 'Please choose or take a photo and try again.');
+            gazetteerAlert('No photo', 'Please choose or take a photo and try again.');
             return;
         }
         setProfilePicture(uri);
@@ -856,7 +856,7 @@ export default function LoginScreen({ navigation, route }: any) {
     const pickProfileFromLibrary = async () => {
         const allowed = await ensureGalleryMediaPermission();
         if (!allowed) {
-            Alert.alert(
+            gazetteerAlert(
                 'Photo library access needed',
                 'Allow photo access in Settings so you can choose a profile picture.',
             );
@@ -876,7 +876,7 @@ export default function LoginScreen({ navigation, route }: any) {
     const pickProfileFromCamera = async () => {
         const allowed = await ensureCameraPermission();
         if (!allowed) {
-            Alert.alert(
+            gazetteerAlert(
                 'Camera access needed',
                 'Allow camera access in Settings so you can take a profile picture.',
             );

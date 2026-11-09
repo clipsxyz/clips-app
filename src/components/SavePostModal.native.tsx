@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     Image,
     KeyboardAvoidingView,
     Modal,
@@ -196,7 +196,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
             const withPost = await getCollectionsForPost(userId, post.id);
             onSaved?.(withPost.length > 0);
         } catch {
-            Alert.alert('Save', 'Could not update collection.');
+            gazetteerAlert('Save', 'Could not update collection.');
         } finally {
             setSavingId(null);
         }
@@ -223,7 +223,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
             await load();
             onSaved?.(true);
         } catch {
-            Alert.alert('Collections', 'Could not create collection.');
+            gazetteerAlert('Collections', 'Could not create collection.');
         } finally {
             setCreating(false);
         }

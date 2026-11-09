@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
     Text,
@@ -6,7 +7,6 @@ import {
     Image,
     TouchableOpacity,
     ActivityIndicator,
-    Alert,
     Modal,
     Pressable,
     ScrollView,
@@ -62,6 +62,7 @@ import {
     FEED_PAGE_BG,
 } from '../components/FeedPageLayout.native';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
+import DeletePostConfirmSheet from '../components/DeletePostConfirmSheet.native';
 import EditPostModal from '../components/EditPostModal.native';
 import SavePostModal from '../components/SavePostModal.native';
 import QRCodeModal from '../components/QRCodeModal.native';
@@ -105,6 +106,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(!!openComments);
     const [overflowVisible, setOverflowVisible] = useState(false);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [saveModalVisible, setSaveModalVisible] = useState(false);
     const [qrVisible, setQrVisible] = useState(false);
@@ -333,11 +335,11 @@ export default function PostDetailScreen({ route, navigation }: any) {
         if (!p || !user?.handle) return;
         const norm = (h?: string) => String(h || '').trim().toLowerCase();
         if (norm(p.userHandle) === norm(user.handle)) {
-            Alert.alert('Cannot reclip', 'You cannot reclip your own post.');
+            gazetteerAlert('Cannot reclip', 'You cannot reclip your own post.');
             return;
         }
         if (p.userReclipped) {
-            Alert.alert('Already reclipped', 'You have already reclipped this post.');
+            gazetteerAlert('Already reclipped', 'You have already reclipped this post.');
             return;
         }
         const prevReclips = p.stats?.reclips ?? 0;
@@ -384,7 +386,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                       }
                     : null,
             );
-            Alert.alert('Could not reclip', err?.message || 'Please try again.');
+            gazetteerAlert('Could not reclip', err?.message || 'Please try again.');
         }
     };
 
@@ -683,7 +685,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 }}
                 onMute={async () => {
                     await muteFeedAuthorMobile(userId, post.userHandle);
-                    Alert.alert('Muted', `${post.userHandle} was muted.`);
+                    gazetteerAlert('Muted', `${post.userHandle} was muted.`);
                     navigation.goBack();
                 }}
                 onHide={async () => {
@@ -694,34 +696,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     await markNotInterestedFeedPostMobile(userId, post.id);
                     navigation.goBack();
                 }}
-                onDelete={() =>
-                    new Promise<void>((resolve) => {
-                        if (!user?.handle) {
-                            resolve();
-                            return;
-                        }
-                        Alert.alert('Delete post?', 'This cannot be undone.', [
-                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
-                            {
-                                text: 'Delete',
-                                style: 'destructive',
-                                onPress: () => {
-                                    void (async () => {
-                                        try {
-                                            await deletePost(userId, post.id, user.handle);
-                                            hideAndPopAfterArchiveOrDelete();
-                                        } catch (e) {
-                                            console.error('Delete post failed:', e);
-                                            Alert.alert('Error', 'Could not delete this post.');
-                                        } finally {
-                                            resolve();
-                                        }
-                                    })();
-                                },
-                            },
-                        ]);
-                    })
-                }
+                onDelete={async () => {
+                    if (!user?.handle) return;
+                    setDeleteConfirmOpen(true);
+                }}
                 onReport={async () => {
                     if (!post) return;
                     const { promptReportPostNative } = await import('../utils/promptReportPostNative');
@@ -733,7 +711,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                             resolve();
                             return;
                         }
-                        Alert.alert('Block user?', `Hide ${post.userHandle} from your feed?`, [
+                        gazetteerAlert('Block user?', `Hide ${post.userHandle} from your feed?`, [
                             { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
                             {
                                 text: 'Block',
@@ -741,7 +719,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                 onPress: () => {
                                     void (async () => {
                                         await blockUser(user.handle, post.userHandle);
-                                        Alert.alert(
+                                        gazetteerAlert(
                                             'Blocked',
                                             `${post.userHandle} was blocked.`,
                                             [{ text: 'OK', onPress: () => navigation.goBack() }]
@@ -753,6 +731,24 @@ export default function PostDetailScreen({ route, navigation }: any) {
                         ]);
                     })
                 }
+            />
+
+            <DeletePostConfirmSheet
+                visible={deleteConfirmOpen}
+                onDismiss={() => setDeleteConfirmOpen(false)}
+                onConfirm={() => {
+                    setDeleteConfirmOpen(false);
+                    if (!user?.handle || !post) return;
+                    void (async () => {
+                        try {
+                            await deletePost(userId, post.id, user.handle);
+                            hideAndPopAfterArchiveOrDelete();
+                        } catch (e) {
+                            console.error('Delete post failed:', e);
+                            gazetteerAlert('Error', 'Could not delete this post.');
+                        }
+                    })();
+                }}
             />
 
             {post && saveModalVisible ? (

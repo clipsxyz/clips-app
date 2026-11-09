@@ -1,6 +1,6 @@
 import React from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
-    Alert,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -40,7 +40,7 @@ export default function ClipScreen({ navigation }: any) {
             (response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
-                    Alert.alert('Could not open library', response.errorMessage || 'Try again.');
+                    gazetteerAlert('Could not open library', response.errorMessage || 'Try again.');
                     return;
                 }
                 const asset = response.assets?.[0];

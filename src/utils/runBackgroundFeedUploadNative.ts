@@ -62,6 +62,15 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             undefined,
             job.venue,
             job.landmark,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            job.cardStyle,
         );
         completePendingFeedUpload(job.tempId, createdPost);
         getUploadOverlayForJob(job.tempId)?.success();

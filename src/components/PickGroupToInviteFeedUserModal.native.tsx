@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     ActivityIndicator,
-    Alert,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -51,7 +51,7 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
             .catch(() => {
                 if (!cancelled) {
                     setGroups([]);
-                    Alert.alert('Groups', 'Could not load your groups');
+                    gazetteerAlert('Groups', 'Could not load your groups');
                 }
             })
             .finally(() => {
@@ -65,19 +65,19 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
     const invite = useCallback(
         async (g: ChatGroupSummary) => {
             if (!normalizedInvitee) {
-                Alert.alert('Invite', 'Invalid username');
+                gazetteerAlert('Invite', 'Invalid username');
                 return;
             }
             if (!isChatGroupAdmin(g, user?.id)) {
-                Alert.alert('Invite', 'Only group admins can send invites.');
+                gazetteerAlert('Invite', 'Only group admins can send invites.');
                 return;
             }
             if (normalizeHandle(user?.handle || '') === normalizedInvitee) {
-                Alert.alert('Invite', "You can't invite yourself");
+                gazetteerAlert('Invite', "You can't invite yourself");
                 return;
             }
             if (!isLaravelApiEnabled()) {
-                Alert.alert(
+                gazetteerAlert(
                     'Invite',
                     'Invites require the API. Turn on the Laravel server to invite by username.',
                 );
@@ -86,10 +86,10 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
             setInvitingId(g.id);
             try {
                 await inviteUserToChatGroup(g.id, normalizedInvitee);
-                Alert.alert('Invited', `Invited @${normalizedInvitee} to "${g.name}"`);
+                gazetteerAlert('Invited', `Invited @${normalizedInvitee} to "${g.name}"`);
                 onClose();
             } catch (e: unknown) {
-                Alert.alert('Invite', e instanceof Error ? e.message : 'Could not send invite');
+                gazetteerAlert('Invite', e instanceof Error ? e.message : 'Could not send invite');
             } finally {
                 setInvitingId(null);
             }
