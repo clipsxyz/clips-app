@@ -10,21 +10,17 @@ import {
     StyleSheet,
     Text,
     TextInput,
-    ToastAndroid,
     View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
-import LinearGradient from 'react-native-linear-gradient';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import { estimateBoostPriceApi, updateAuthProfile, apiRequest } from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { confirmBoostCheckout } from '../api/boost';
 import { openStripeCheckout } from '../utils/stripeCheckoutNative';
-import { boostQuoteCents, BOOST_UNIT_PRICE_EUR, type BoostGateway } from '../utils/boostQuote';
-import { boostStoreSku } from '../config/boostStoreProducts';
-import { purchaseBoostWithStore } from '../services/storeBilling';
+import { boostQuoteCents, BOOST_UNIT_PRICE_EUR } from '../utils/boostQuote';
 import { BOOST_ACTIVATED_EVENT } from './BoostActivatedModal.native';
 import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
 import BoostWizardBottomSheet from './BoostWizardBottomSheet.native';
@@ -82,16 +78,6 @@ function confirmExternalWebCheckout(): Promise<boolean> {
     });
 }
 
-function storeBillingBanner(error: unknown): string {
-    const tagged = error as { cancelled?: boolean; unavailable?: boolean; message?: string };
-    if (tagged?.cancelled) return 'Payment cancelled. No charge was made.';
-    if (tagged?.unavailable) return 'Store billing is unavailable right now.';
-    const message = error instanceof Error ? error.message : 'Payment could not be completed.';
-    if (/declin/i.test(message)) return 'Payment was declined. No charge was made.';
-    if (/cancel/i.test(message)) return 'Payment cancelled. No charge was made.';
-    if (/unavailable|not available|could not start/i.test(message)) return 'Store billing is unavailable right now.';
-    return message;
-}
 const DEFAULT_LOCAL_BOUNDARY_KM = 2;
 const DEFAULT_REGIONAL_BOUNDARY_KM = 6;
 
@@ -110,12 +96,10 @@ export default function BoostSelectionModal({
     const [regionalBoundaryKm, setRegionalBoundaryKm] = React.useState<number>(DEFAULT_REGIONAL_BOUNDARY_KM);
     const [showAdvancedBoundaries, setShowAdvancedBoundaries] = React.useState(false);
     const [eligibleUsersCount, setEligibleUsersCount] = React.useState<number | null>(null);
-    const [gateway, setGateway] = React.useState<BoostGateway>('stripe');
     const [estimateLoading, setEstimateLoading] = React.useState(false);
     const [isProcessing, setIsProcessing] = React.useState(false);
     const [payError, setPayError] = React.useState<string | null>(null);
     const [payNotice, setPayNotice] = React.useState<string | null>(null);
-    const [payBanner, setPayBanner] = React.useState<string | null>(null);
     const [estimateError, setEstimateError] = React.useState<string | null>(null);
     const [debouncedRadiusKm, setDebouncedRadiusKm] = React.useState<number>(2);
     const [sliderRadiusKm, setSliderRadiusKm] = React.useState<number>(2);
@@ -144,15 +128,7 @@ export default function BoostSelectionModal({
     const selectedDurationMeta = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
     const multiplier = selectedDurationMeta.multiplier;
     const stripeCents = eligibleUsersCount == null ? null : boostQuoteCents(eligibleUsersCount, multiplier, 'stripe');
-    const storeCents = eligibleUsersCount == null ? null : boostQuoteCents(eligibleUsersCount, multiplier, 'store');
-    const selectedCents = gateway === 'store' ? storeCents : stripeCents;
-    const estimatedTotalPrice = selectedCents == null ? null : selectedCents / 100;
-    const savingsCents = stripeCents != null && storeCents != null ? storeCents - stripeCents : 0;
-    const storeName = Platform.OS === 'ios' ? 'Apple App Store' : 'Google Play';
-    const storePayLabel = Platform.OS === 'ios' ? 'Pay with Apple' : 'Pay with Google Play';
-    const savePercent = storeCents != null && storeCents > 0 && savingsCents > 0
-        ? Math.round((savingsCents / storeCents) * 100)
-        : 20;
+    const estimatedTotalPrice = stripeCents == null ? null : stripeCents / 100;
     const estimatedReach = eligibleUsersCount != null ? `${eligibleUsersCount.toLocaleString()} users` : '--';
     const eligibleTooLow =
         typeof eligibleUsersCount === 'number' &&
@@ -298,14 +274,13 @@ export default function BoostSelectionModal({
     const handleContinueToPayment = async () => {
         const postId = activePost.id;
         if (!postId || eligibleUsersCount == null || estimatedTotalPrice == null || estimatedTotalPrice <= 0 || isProcessing) return;
-        if (gateway === 'stripe' && Platform.OS === 'ios') {
+        if (Platform.OS === 'ios') {
             const proceed = await confirmExternalWebCheckout();
             if (!proceed) return;
         }
         setIsProcessing(true);
         setPayError(null);
         setPayNotice(null);
-        setPayBanner(null);
         try {
             const data = await apiRequest('/boosts/create-checkout-session', {
                 method: 'POST',
@@ -314,35 +289,14 @@ export default function BoostSelectionModal({
                     radius,
                     tier,
                     duration,
-                    gateway,
+                    gateway: 'stripe',
                 }),
             }) as {
-                gateway?: string;
                 checkout_url?: string;
                 session_id?: string;
                 error?: string;
-                amount_cents?: number;
-                currency?: string;
-                product_id?: string;
-                metadata?: Record<string, string>;
             };
             if (data?.error) throw new Error(data.error);
-            if (gateway === 'store') {
-                const sku = boostStoreSku(duration);
-                if (!sku || data.product_id !== sku) {
-                    throw new Error('This boost length is not available in the store');
-                }
-                await purchaseBoostWithStore({
-                    sku,
-                    postId,
-                    radius,
-                    tier,
-                    durationHours: duration,
-                });
-                Alert.alert('Boost is live', 'Your post is now boosted.');
-                onClose();
-                return;
-            }
             const checkoutUrl = String(data?.checkout_url || '').trim();
             if (!checkoutUrl) throw new Error('Checkout link was not returned');
             const outcome = await openStripeCheckout(checkoutUrl);
@@ -359,17 +313,7 @@ export default function BoostSelectionModal({
                 DeviceEventEmitter.emit(BOOST_ACTIVATED_EVENT);
             }
         } catch (error) {
-            const message = storeBillingBanner(error);
-            if (gateway === 'store') {
-                setPayError(null);
-                setPayBanner(message);
-                if (Platform.OS === 'android') {
-                    ToastAndroid.show(message, ToastAndroid.SHORT);
-                }
-            } else {
-                setPayBanner(null);
-                setPayError(message);
-            }
+            setPayError(error instanceof Error ? error.message : 'Payment could not be completed.');
         } finally {
             setIsProcessing(false);
         }
@@ -506,7 +450,7 @@ export default function BoostSelectionModal({
                                             const active = selectedDuration === opt.hours;
                                             const rowCents = eligibleUsersCount == null
                                                 ? null
-                                                : boostQuoteCents(eligibleUsersCount, opt.multiplier, gateway);
+                                                : boostQuoteCents(eligibleUsersCount, opt.multiplier, 'stripe');
                                             return (
                                                 <Pressable
                                                     key={opt.hours}
@@ -515,7 +459,7 @@ export default function BoostSelectionModal({
                                                 >
                                                     <Text style={[styles.priceCell, active && styles.priceCellActive]}>{opt.label}</Text>
                                                     <Text style={[styles.priceCell, active && styles.priceCellActive]}>
-                                                        €{(BOOST_UNIT_PRICE_EUR[gateway] * opt.multiplier).toFixed(4)}
+                                                        €{(BOOST_UNIT_PRICE_EUR.stripe * opt.multiplier).toFixed(4)}
                                                     </Text>
                                                     <Text style={[styles.priceCell, styles.priceTotal, active && styles.priceCellActive]}>
                                                         {rowCents == null ? '--' : `€${(rowCents / 100).toFixed(2)}`}
@@ -523,35 +467,6 @@ export default function BoostSelectionModal({
                                                 </Pressable>
                                             );
                                         })}
-                                    </View>
-                                    <Text style={styles.stepThreeTitle}>Choose how to pay</Text>
-                                    <View style={styles.gatewayRow}>
-                                        <Pressable
-                                            style={[styles.gatewayCard, gateway === 'stripe' && styles.gatewayCardActive]}
-                                            onPress={() => setGateway('stripe')}
-                                        >
-                                            {savingsCents > 0 ? (
-                                                <View style={styles.savePillSlot}>
-                                                    <Text style={styles.savePill}>{`SAVE €${(savingsCents / 100).toFixed(2)}`}</Text>
-                                                </View>
-                                            ) : (
-                                                <View style={styles.savePillSlot}>
-                                                    <Text style={styles.savePill}>SAVE 20%</Text>
-                                                </View>
-                                            )}
-                                            <Text style={[styles.gatewayName, gateway === 'stripe' && styles.gatewayNameActive]}>Gazetteer Direct</Text>
-                                            <Text style={styles.gatewayPrice}>{stripeCents == null ? '--' : `€${(stripeCents / 100).toFixed(2)}`}</Text>
-                                            <Text style={styles.gatewayHint}>{`Credit / Debit Card • Save ${savePercent}%`}</Text>
-                                        </Pressable>
-                                        <Pressable
-                                            style={[styles.gatewayCard, gateway === 'store' && styles.gatewayCardActive]}
-                                            onPress={() => setGateway('store')}
-                                        >
-                                            <View style={styles.savePillSlot} />
-                                            <Text style={[styles.gatewayName, gateway === 'store' && styles.gatewayNameActive]}>{storeName}</Text>
-                                            <Text style={styles.gatewayPrice}>{storeCents == null ? '--' : `€${(storeCents / 100).toFixed(2)}`}</Text>
-                                            <Text style={styles.gatewayHint}>Standard Store Billing</Text>
-                                        </Pressable>
                                     </View>
                                 </View>
                             </ScrollView>
@@ -562,7 +477,7 @@ export default function BoostSelectionModal({
                         <Text style={styles.footerLine}>Audience: {estimatedReach}</Text>
                         <Text style={styles.footerLine}>Duration: {selectedDurationMeta.hours}h</Text>
                         <Text style={styles.footerLine}>
-                            Per person: EUR {(BOOST_UNIT_PRICE_EUR[gateway] * multiplier).toFixed(4)}
+                            Per person: EUR {(BOOST_UNIT_PRICE_EUR.stripe * multiplier).toFixed(4)}
                         </Text>
                         <Text style={styles.footerLine}>
                             Ad budget: {estimatedTotalPrice != null ? `EUR ${estimatedTotalPrice.toFixed(2)}` : '--'}
@@ -575,11 +490,6 @@ export default function BoostSelectionModal({
                         )}
                         {!!estimateError && <Text style={styles.errorText}>{estimateError}</Text>}
                         {!!payError && <Text style={styles.errorText}>{payError}</Text>}
-                        {!!payBanner && (
-                            <View style={styles.payBanner}>
-                                <Text style={styles.payBannerText}>{payBanner}</Text>
-                            </View>
-                        )}
                         {!!payNotice && <Text style={styles.footerMuted}>{payNotice}</Text>}
                         {eligibleTooLow && (
                             <Text style={styles.warnText}>
@@ -597,23 +507,33 @@ export default function BoostSelectionModal({
                             </Pressable>
                             {activeStep < 3 ? (
                                 <Pressable style={styles.nextBtn} onPress={() => setActiveStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}>
-                                    <Text style={styles.primaryBtnText}>Next</Text>
+                                    <View style={styles.nextBtnFill} collapsable={false}>
+                                        <Text style={styles.nextBtnText}>Next</Text>
+                                    </View>
                                 </Pressable>
                             ) : (
                                 <Pressable
-                                    style={[styles.primaryBtn, (!canContinue || isProcessing) && styles.primaryBtnDisabled]}
+                                    style={[
+                                        styles.stripePayBtn,
+                                        (!canContinue || isProcessing) && styles.primaryBtnDisabled,
+                                    ]}
                                     disabled={!canContinue || isProcessing}
                                     onPress={() => { void handleContinueToPayment(); }}
                                 >
-                                    <LinearGradient colors={['#d91b5c', '#7c3aed']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.payGradient}>
+                                    <View style={styles.stripePayFill} collapsable={false}>
                                         {isProcessing ? (
-                                            <ActivityIndicator color="#FFFFFF" />
+                                            <ActivityIndicator color="#000000" />
                                         ) : (
-                                            <Text style={styles.primaryBtnText}>
-                                                {gateway === 'store' ? storePayLabel : 'Continue with Gazetteer Direct'}
-                                            </Text>
+                                            <>
+                                                <View style={styles.stripeMark}>
+                                                    <Text style={styles.stripeMarkText}>S</Text>
+                                                </View>
+                                                <Text style={styles.stripePayText} numberOfLines={1}>
+                                                    Pay with Stripe
+                                                </Text>
+                                            </>
                                         )}
-                                    </LinearGradient>
+                                    </View>
                                 </Pressable>
                             )}
                         </View>
@@ -705,34 +625,6 @@ const styles = StyleSheet.create({
     priceCell: { flex: 1, color: '#E5E7EB', fontSize: 12 },
     priceCellActive: { color: '#FFFFFF', fontWeight: '700' },
     priceTotal: { textAlign: 'right' },
-    gatewayRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-    gatewayCard: {
-        flex: 1,
-        borderRadius: 12,
-        borderWidth: 1.5,
-        borderColor: 'rgba(255,255,255,0.18)',
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        paddingVertical: 8,
-        paddingHorizontal: 8,
-        gap: 2,
-    },
-    gatewayCardActive: { borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.12)' },
-    savePillSlot: { minHeight: 18, justifyContent: 'center' },
-    savePill: {
-        alignSelf: 'flex-start',
-        overflow: 'hidden',
-        backgroundColor: '#10B981',
-        color: '#052E1C',
-        fontSize: 10,
-        fontWeight: '800',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 999,
-    },
-    gatewayName: { color: '#E5E7EB', fontSize: 13, fontWeight: '700' },
-    gatewayNameActive: { color: '#FFFFFF' },
-    gatewayPrice: { color: '#F9FAFB', fontSize: 16, fontWeight: '700' },
-    gatewayHint: { color: '#9CA3AF', fontSize: 11, lineHeight: 14 },
     smallBtn: {
         flex: 1,
         alignItems: 'center',
@@ -788,49 +680,72 @@ const styles = StyleSheet.create({
     footerMuted: { color: '#9CA3AF', fontSize: 12 },
     loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
     errorText: { color: '#FCA5A5', fontSize: 12, marginTop: 4 },
-    payBanner: {
-        marginTop: 6,
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.16)',
-    },
-    payBannerText: { color: '#F3F4F6', fontSize: 12, lineHeight: 16 },
     warnText: { color: '#FCD34D', fontSize: 12, marginTop: 4 },
-    actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+    actions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        marginTop: 8,
+    },
     navBtn: {
         width: 84,
+        height: 48,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 12,
+        borderRadius: 24,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
-        paddingVertical: 12,
     },
     navBtnDisabled: { opacity: 0.45 },
     navBtnText: { color: '#E5E7EB', fontWeight: '700' },
     nextBtn: {
         flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 12,
-        backgroundColor: '#d91b5c',
-        paddingVertical: 12,
-    },
-    primaryBtn: {
-        flex: 1,
-        borderRadius: 12,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#FFFFFF',
         overflow: 'hidden',
     },
-    payGradient: {
-        minHeight: 48,
+    nextBtnFill: {
+        flex: 1,
+        height: 48,
+        backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 12,
+    },
+    nextBtnText: { color: '#000000', fontSize: 15, fontWeight: '700', backgroundColor: '#FFFFFF' },
+    stripePayBtn: {
+        flex: 1,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#FFFFFF',
+        overflow: 'hidden',
+    },
+    stripePayFill: {
+        flex: 1,
+        height: 48,
+        backgroundColor: '#FFFFFF',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+    },
+    stripeMark: {
+        width: 18,
+        height: 18,
+        marginRight: 8,
+        borderRadius: 5,
+        backgroundColor: '#635BFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    stripeMarkText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+    stripePayText: {
+        color: '#000000',
+        fontSize: 15,
+        fontWeight: '700',
+        backgroundColor: '#FFFFFF',
     },
     primaryBtnDisabled: { opacity: 0.45 },
-    primaryBtnText: { color: '#FFFFFF', fontWeight: '700', textAlign: 'center' },
 });
 

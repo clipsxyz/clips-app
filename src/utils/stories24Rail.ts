@@ -29,6 +29,9 @@ export type Stories24RailItem = {
      * avatar below, which is only ever used as a last-resort card thumbnail.
      */
     avatarUrl?: string;
+    /** Paid story bubble. Organic rail order is unchanged apart from this slot. */
+    sponsored?: boolean;
+    boostId?: number;
 };
 
 /** RN AsyncStorage key — keep in sync with web `clips:stories24OpenedFromRailHandle` semantics. */

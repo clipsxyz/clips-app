@@ -8,9 +8,9 @@ import {
     ScrollView,
     Alert,
     Modal,
-    Keyboard,
     Platform,
     Linking,
+    KeyboardAvoidingView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -97,9 +97,6 @@ export default function LoginScreen({ navigation, route }: any) {
     const [showLoginPassword, setShowLoginPassword] = useState(false);
     const [showSignupPassword, setShowSignupPassword] = useState(false);
     const [showSignupConfirmPassword, setShowSignupConfirmPassword] = useState(false);
-    const [acceptedTerms, setAcceptedTerms] = useState(false);
-    const [acceptedGuidelines, setAcceptedGuidelines] = useState(false);
-    const [keyboardOpen, setKeyboardOpen] = useState(false);
     const [inviteHandle, setInviteHandle] = useState(() =>
         String(route?.params?.invite || '').replace(/^@/, '').trim()
     );
@@ -176,18 +173,6 @@ export default function LoginScreen({ navigation, route }: any) {
         };
     }, [route?.params?.invite]);
 
-    // Hide sticky Terms block while keyboard is open so it doesn't cover signup fields.
-    useEffect(() => {
-        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-        const showSub = Keyboard.addListener(showEvent, () => setKeyboardOpen(true));
-        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardOpen(false));
-        return () => {
-            showSub.remove();
-            hideSub.remove();
-        };
-    }, []);
-
     const goToFeed = () => {
         // Prefer a root reset so Login is not left under MainTabs (back → blank auth).
         // Fall back if the helper is missing/unready so login never throws "undefined is not a function".
@@ -263,21 +248,13 @@ export default function LoginScreen({ navigation, route }: any) {
     const passwordNorm = normalizeSignupPassword(password);
     const confirmPasswordNorm = normalizeSignupPassword(confirmPassword);
     const passwordsMatch = passwordNorm.length >= 8 && passwordNorm === confirmPasswordNorm;
-    const acceptedAgreement = acceptedTerms && acceptedGuidelines;
-    const setAcceptedAgreement = (next: boolean) => {
-        setAcceptedTerms(next);
-        setAcceptedGuidelines(next);
-    };
-    const step1CanContinue = Boolean(
-        accountType && email.trim() && passwordsMatch && acceptedAgreement
-    );
+    const step1CanContinue = Boolean(accountType && email.trim() && passwordsMatch);
     const step1MissingHints = (() => {
         const missing: string[] = [];
         if (!accountType) missing.push('account type');
         if (!email.trim()) missing.push('email');
         if (passwordNorm.length < 8) missing.push('password (8+)');
         else if (!confirmPasswordNorm || passwordNorm !== confirmPasswordNorm) missing.push('matching confirm password');
-        if (!acceptedAgreement) missing.push('Terms & Guidelines');
         return missing;
     })();
     const step2CanContinue = Boolean(name.trim() && !validateSignupUsername(username) && birthdateComplete);
@@ -608,9 +585,6 @@ export default function LoginScreen({ navigation, route }: any) {
             nextErrors.confirmPassword = 'Passwords do not match.';
         }
         if (!accountType) nextErrors.accountType = 'Choose personal or business.';
-        if (!acceptedTerms || !acceptedGuidelines) {
-            nextErrors.terms = 'You must agree to the Terms & Conditions and Community Guidelines.';
-        }
         if (Object.keys(nextErrors).length > 0) {
             setFieldErrors(nextErrors);
             setErrorText('Please fix the highlighted fields.');
@@ -934,11 +908,16 @@ export default function LoginScreen({ navigation, route }: any) {
                 pointerEvents="none"
             />
         <GazetteerScreenShell edges={['top', 'bottom']} ambient={false} style={styles.shellTransparent}>
+            <KeyboardAvoidingView
+                style={styles.screen}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
             <View style={styles.screen}>
                 <ScrollView
                     style={styles.scroll}
                     contentContainerStyle={styles.scrollContent}
                     keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                 >
                 <View style={[styles.form, mode === 'login' && styles.loginFormShell]}>
                     <View style={mode === 'login' ? styles.loginFormInner : undefined}>
@@ -1436,7 +1415,7 @@ export default function LoginScreen({ navigation, route }: any) {
             </ScrollView>
 
             {mode === 'signup' ? (
-                step === 1 && !keyboardOpen ? (
+                step === 1 ? (
                     <View style={styles.swalFooter}>
                         <View style={styles.swalHandleWrap}>
                             <View style={styles.swalHandle} />
@@ -1444,33 +1423,17 @@ export default function LoginScreen({ navigation, route }: any) {
                         <Text style={styles.swalEyebrow}>Gazetteer says</Text>
                         <Text style={styles.swalTitle}>Required to continue</Text>
 
-                        <View style={styles.swalCheckRow}>
-                            <TouchableOpacity
-                                onPress={() => setAcceptedAgreement(!acceptedAgreement)}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                accessibilityRole="checkbox"
-                                accessibilityState={{ checked: acceptedAgreement }}
-                            >
-                                <Icon
-                                    name={acceptedAgreement ? 'checkbox' : 'square-outline'}
-                                    size={ox(20)}
-                                    color={acceptedAgreement ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
-                                />
-                            </TouchableOpacity>
-                            <Text style={styles.swalCheckLabel}>
-                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}>
-                                    I agree to the{' '}
-                                </Text>
-                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
-                                    Terms & Conditions
-                                </Text>
-                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}> & </Text>
-                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
-                                    Community Guidelines
-                                </Text>
+                        <Text style={styles.legalDisclaimer}>
+                            By signing up, you agree to our{' '}
+                            <Text style={styles.legalDisclaimerLink} onPress={() => navigation.navigate('Terms')}>
+                                Terms
                             </Text>
-                        </View>
-                        {!!getFieldError('terms') && <Text style={styles.fieldErrorText}>{getFieldError('terms')}</Text>}
+                            {' of Service and '}
+                            <Text style={styles.legalDisclaimerLink} onPress={() => navigation.navigate('Terms')}>
+                                Privacy Policy
+                            </Text>
+                            .
+                        </Text>
 
                         <TouchableOpacity
                             onPress={handleStep1Submit}
@@ -1497,7 +1460,7 @@ export default function LoginScreen({ navigation, route }: any) {
                             </Text>
                         </Text>
                     </View>
-                ) : step > 1 ? (
+                ) : (
                     <View style={styles.swalFooter}>
                         <View style={styles.swalHandleWrap}>
                             <View style={styles.swalHandle} />
@@ -1554,58 +1517,10 @@ export default function LoginScreen({ navigation, route }: any) {
                             </Text>
                         ) : null}
                     </View>
-                ) : (
-                    <View style={styles.swalFooter}>
-                        <View style={styles.swalHandleWrap}>
-                            <View style={styles.swalHandle} />
-                        </View>
-                        <View style={styles.swalCheckRow}>
-                            <TouchableOpacity
-                                onPress={() => setAcceptedAgreement(!acceptedAgreement)}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                accessibilityRole="checkbox"
-                                accessibilityState={{ checked: acceptedAgreement }}
-                            >
-                                <Icon
-                                    name={acceptedAgreement ? 'checkbox' : 'square-outline'}
-                                    size={ox(18)}
-                                    color={acceptedAgreement ? PASSPORT_PALETTE.wavePrimary : '#9CA3AF'}
-                                />
-                            </TouchableOpacity>
-                            <Text style={styles.swalCheckLabel}>
-                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}>
-                                    I agree to the{' '}
-                                </Text>
-                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
-                                    Terms & Conditions
-                                </Text>
-                                <Text onPress={() => setAcceptedAgreement(!acceptedAgreement)}> & </Text>
-                                <Text style={styles.swalCheckLink} onPress={() => navigation.navigate('Terms')}>
-                                    Community Guidelines
-                                </Text>
-                            </Text>
-                        </View>
-                        <TouchableOpacity
-                            onPress={handleStep1Submit}
-                            style={[
-                                styles.swalConfirmBtn,
-                                (busy || !step1CanContinue) && styles.submitButtonDisabled,
-                            ]}
-                            disabled={busy || !step1CanContinue}
-                        >
-                            <Text style={styles.swalConfirmBtnText}>
-                                {busy ? 'Please wait...' : 'Continue'}
-                            </Text>
-                        </TouchableOpacity>
-                        {!step1CanContinue && step1MissingHints.length > 0 ? (
-                            <Text style={styles.consentCompactHint}>
-                                Still needed: {step1MissingHints.join(', ')}
-                            </Text>
-                        ) : null}
-                    </View>
                 )
             ) : null}
             </View>
+            </KeyboardAvoidingView>
             <Modal visible={forgotOpen} transparent animationType="fade" onRequestClose={() => setForgotOpen(false)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.forgotModalCard}>
@@ -1757,6 +1672,7 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         flexGrow: 1,
+        justifyContent: 'center',
         padding: ox(16),
         paddingBottom: ox(8),
     },
@@ -2276,24 +2192,13 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         lineHeight: ox(18),
     },
-    swalCheckRow: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: ox(8),
-        paddingVertical: ox(6),
-        paddingHorizontal: ox(8),
-        borderRadius: ox(10),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.18)',
-        backgroundColor: SCREEN_CANVAS_BASE,
-    },
-    swalCheckLabel: {
-        flex: 1,
+    legalDisclaimer: {
+        color: 'rgba(243,244,246,0.72)',
         fontSize: ox(13),
-        color: '#F3F4F6',
         lineHeight: ox(18),
+        textAlign: 'center',
     },
-    swalCheckLink: {
+    legalDisclaimerLink: {
         color: '#7A8AF0',
         fontSize: ox(13),
         lineHeight: ox(18),

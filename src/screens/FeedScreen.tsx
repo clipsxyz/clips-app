@@ -327,6 +327,13 @@ import { getActiveAds, trackAdImpression, trackAdClick } from '../api/ads';
 import type { Ad } from '../types';
 import { buildFlatWithSuggested, type FeedStreamRow } from '../utils/feedStreamInjection';
 import {
+    blendPaidFeedRows,
+    fetchPaidDelivery,
+    paidSlotPostsFromDelivery,
+    placeSponsoredStory,
+    recordPaidReach,
+} from '../utils/paidFeedSlots';
+import {
     hideBusinessSuggestion,
     likeBusinessSuggestion,
     loadBusinessLastShown,
@@ -334,6 +341,7 @@ import {
     loadHiddenBusinesses,
     loadLikedBusinesses,
     markBusinessStripInserted,
+    markBusinessSuggestionShown,
     unhideBusinessSuggestion,
 } from '../utils/feedBusinessPrefsNative';
 import { loadSuggestedPlacesPrefs } from '../utils/suggestedPlacesPrefsNative';
@@ -1869,7 +1877,7 @@ const measuredMediaSizeByPostId = new Map<string, { width: number; height: numbe
 type FeedListRow =
     | { kind: 'post'; post: Post }
     | { kind: 'ad'; ad: Ad }
-    | { kind: 'local_business'; posts: Post[]; pinnedPaidPostId?: string; useMockPreview?: boolean }
+    | { kind: 'local_business'; posts: Post[]; pinnedPaidPostId?: string }
     | { kind: 'suggested_places'; bundleKey: string; suggestions: PlaceMatchedPost[] }
     | { kind: 'stories24'; id: string }
     | { kind: 'stories24_divider'; id: string }
@@ -2091,7 +2099,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [businessLastShown, setBusinessLastShown] = useState<Record<string, number>>({});
     const [hiddenBusinesses, setHiddenBusinesses] = useState<Set<string>>(new Set());
     const [likedBusinesses, setLikedBusinesses] = useState<Set<string>>(new Set());
-    const [businessStripEligible, setBusinessStripEligible] = useState(true);
+    const [businessStripEligible, setBusinessStripEligible] = useState(false);
+    const [paidSlotPosts, setPaidSlotPosts] = useState<Post[]>([]);
+    const sponsoredStoryHoldRef = useRef<Stories24RailItem | null>(null);
+    const sponsoredBusinessMarkedRef = useRef<string | null>(null);
+    const businessStripMarkedRef = useRef(false);
     const [serverPlaceSuggestions, setServerPlaceSuggestions] = useState<PlaceMatchedPost[] | undefined>(
         undefined,
     );
@@ -2336,9 +2348,32 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         let cancelled = false;
         const load = () => {
-            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter).then((items) => {
-                if (!cancelled) setStories24Items(items);
-            });
+            void (async () => {
+                const items = await buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter);
+                if (cancelled) return;
+                let sponsored = sponsoredStoryHoldRef.current;
+                try {
+                    const rows = await fetchPaidDelivery('stories');
+                    const winner = rows.find((row) => row.story?.id && row.story.handle && Number(row.boostId) > 0);
+                    if (winner?.story) {
+                        sponsored = {
+                            handle: winner.story.handle,
+                            title: winner.story.title || winner.story.handle,
+                            thumb: winner.story.thumb || undefined,
+                            avatarUrl: winner.story.avatarUrl || undefined,
+                            storyId: winner.story.id,
+                            boostId: Number(winner.boostId),
+                            sponsored: true,
+                        };
+                        sponsoredStoryHoldRef.current = sponsored;
+                    }
+                } catch {
+                    /* The organic rail still shows when delivery is unavailable. */
+                }
+                if (!cancelled) {
+                    setStories24Items(sponsored ? placeSponsoredStory(items, sponsored) : items);
+                }
+            })();
         };
         load();
         const pollMs = getStoriesRailPollMs();
@@ -2354,7 +2389,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useFocusEffect(
         React.useCallback(() => {
             if (!user?.id) return;
-            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter).then(setStories24Items);
+            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter).then((items) => {
+                const sponsored = sponsoredStoryHoldRef.current;
+                setStories24Items(sponsored ? placeSponsoredStory(items, sponsored) : items);
+            });
         }, [user?.id, user?.handle, user?.avatarUrl, railFilter]),
     );
 
@@ -2826,6 +2864,34 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         user?.national,
         user?.regional,
     ]);
+
+    const paidSurface = customLocation
+        ? null
+        : showFollowingFeed || active === 'Following'
+            ? 'following'
+            : 'location';
+    const paidFeedType: 'local' | 'regional' | 'national' =
+        headerFeedScope === 'local' || headerFeedScope === 'regional' || headerFeedScope === 'national'
+            ? headerFeedScope
+            : 'national';
+
+    useEffect(() => {
+        if (!user?.id || !paidSurface) {
+            setPaidSlotPosts([]);
+            return;
+        }
+        let cancelled = false;
+        void fetchPaidDelivery(paidSurface, paidSurface === 'location' ? paidFeedType : undefined)
+            .then((rows) => {
+                if (!cancelled) setPaidSlotPosts(paidSlotPostsFromDelivery(rows));
+            })
+            .catch(() => {
+                if (!cancelled) setPaidSlotPosts([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.id, paidSurface, paidFeedType, refreshing]);
 
     const feedFetchFilter = useMemo(() => {
         if (customLocation != null && String(customLocation).trim() !== '') {
@@ -4068,6 +4134,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         return feedItems;
     }, [flatPosts, ads]);
 
+    const visiblePaidSlots = React.useMemo(
+        () =>
+            paidSlotPosts.filter((post) => {
+                const handle = String(post.userHandle || '').replace(/^@/, '').trim().toLowerCase();
+                return !handle || !hiddenBusinesses.has(handle);
+            }),
+        [paidSlotPosts, hiddenBusinesses],
+    );
+
+    const blendedStream = React.useMemo(
+        () => (paidSurface ? blendPaidFeedRows(flatStream, visiblePaidSlots, paidSurface) : flatStream),
+        [flatStream, visiblePaidSlots, paidSurface],
+    );
+
     const visibleServerPlaceSuggestions = React.useMemo(
         () => serverPlaceSuggestions?.filter((row) => !isPlaceDisliked(row.matchedPlace)),
         [serverPlaceSuggestions, placeFeedbackRevision],
@@ -4081,7 +4161,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const flatWithSuggested = React.useMemo(
         () =>
             buildFlatWithSuggested({
-                flat: flatStream,
+                flat: blendedStream,
                 user: user ?? null,
                 userId,
                 activeTab: String(active || user?.national || 'Ireland'),
@@ -4097,6 +4177,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }),
         [
             flatStream,
+            blendedStream,
             user,
             userId,
             active,
@@ -4167,16 +4248,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (isStories24AddYoursHandle(item.handle)) {
                 return;
             }
-            setStories24Items((prev) =>
-                orderStories24RailItems(
+            if (item.boostId) recordPaidReach(item.boostId);
+            setStories24Items((prev) => {
+                const ordered = orderStories24RailItems(
                     prev.map((row) =>
                         normalizeStories24Handle(row.handle) === normalizeStories24Handle(item.handle)
                             ? { ...row, hasViewed: true }
                             : row,
                     ),
                     user?.handle,
-                ),
-            );
+                );
+                return item.sponsored ? placeSponsoredStory(ordered, item) : ordered;
+            });
             void snapshotStories24FeedScroll(feedScrollYRef.current);
             void persistStories24RailOpenHandle(item.handle);
             navigation.navigate('Stories', buildStories24StoryNavParams(item, railHandles));
@@ -4245,17 +4328,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, [stories24Items, user?.id, user?.handle, navigation, railFilter]);
 
-    const previewLocalBusinessPosts = React.useMemo(() => {
-        const posts = flatStream
-            .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
-            .map((x) => x.item);
-        const business = posts.filter((p) => p.userAccountType === 'business');
-        const source = business.length > 0 ? business : posts;
-        return [...source]
-            .sort((a, b) => String(a.id).localeCompare(String(b.id)))
-            .slice(0, 8);
-    }, [flatStream]);
-
     const previewSuggestedPlaces = React.useMemo((): PlaceMatchedPost[] => {
         const posts = flatStream
             .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
@@ -4304,14 +4376,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 ) {
                     out.push({ kind: 'stories_promo', id: `stories-promo-${postCount}` });
                 }
-                if (
-                    previewSuggestedCards &&
-                    !customLocation &&
-                    previewLocalBusinessPosts.length > 0 &&
-                    postCount === 2
-                ) {
-                    out.push({ kind: 'local_business', posts: previewLocalBusinessPosts, useMockPreview: true });
-                }
                 if (!followerInserted && showSuggestedFollowerCard && suggestedFollowerSuggestion && postCount === 3) {
                     out.push({ kind: 'suggested_follower', suggestion: suggestedFollowerSuggestion });
                     followerInserted = true;
@@ -4357,7 +4421,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         showStories24Rail,
         previewSuggestedCards,
         customLocation,
-        previewLocalBusinessPosts,
         previewSuggestedPlaces,
     ]);
 
@@ -4960,7 +5023,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     <LocalBusinessSuggestionCard
                         posts={item.posts}
                         userLocal={user?.local}
-                        useMockBusinesses={Boolean(item.useMockPreview)}
                         pinnedPaidPostId={item.pinnedPaidPostId}
                         viewerHandle={user?.handle ?? null}
                         onFollowPost={handleSuggestedCardFollow}
@@ -4983,7 +5045,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onOpenProfile={(handle) => navigation.navigate('ViewProfile', { handle })}
                         onScrollToPost={scrollToFeedPost}
                         onStripShown={() => {
-                            void markBusinessStripInserted().then(() => setBusinessStripEligible(false));
+                            if (!businessStripMarkedRef.current) {
+                                businessStripMarkedRef.current = true;
+                                void markBusinessStripInserted();
+                            }
+                            const pinnedId = item.pinnedPaidPostId;
+                            if (!pinnedId || sponsoredBusinessMarkedRef.current === pinnedId) return;
+                            sponsoredBusinessMarkedRef.current = pinnedId;
+                            void markBusinessSuggestionShown(`${userId}:${pinnedId}`);
                         }}
                     />,
                 );

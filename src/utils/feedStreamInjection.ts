@@ -81,7 +81,6 @@ export function buildFlatWithSuggested(params: BuildFlatWithSuggestedParams): Fe
   if (!suggestedCardsV2Enabled) return flat;
   if (customLocation) return flat;
   if (!user) return flat;
-  if (previewSuggestedCards) return flat;
 
   const posts = flat
     .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
@@ -172,7 +171,8 @@ export function buildFlatWithSuggested(params: BuildFlatWithSuggestedParams): Fe
   }
 
   let bundles = bundlesRaw;
-  if (suggestedPlacesPrefs.dismissAll) {
+  // Ireland keeps its own places preview in the feed screen. Business cards still rank here.
+  if (previewSuggestedCards || suggestedPlacesPrefs.dismissAll) {
     bundles = [];
   } else if (suggestedPlacesPrefs.dismissedBundles.length > 0) {
     const dismissed = new Set(suggestedPlacesPrefs.dismissedBundles);

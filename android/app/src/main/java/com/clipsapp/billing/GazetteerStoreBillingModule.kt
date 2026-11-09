@@ -72,8 +72,7 @@ class GazetteerStoreBillingModule(
         val params = QueryProductDetailsParams.newBuilder()
             .setProductList(listOf(product))
             .build()
-        billing.queryProductDetailsAsync(params) { result, queryResult ->
-            val details = queryResult.productDetailsList
+        billing.queryProductDetailsAsync(params) { result, details ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK || details.isEmpty()) {
                 fail("NO_PRODUCT", "Google Play has no boost product for this build")
                 return@queryProductDetailsAsync

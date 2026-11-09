@@ -89,6 +89,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        // react-native-iap publishes Play and Amazon variants. This phone uses Play.
+        missingDimensionStrategy "store", "play"
     }
     signingConfigs {
         debug {

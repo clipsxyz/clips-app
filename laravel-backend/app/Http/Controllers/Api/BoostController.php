@@ -8,6 +8,7 @@ use App\Models\BoostAnalyticsEvent;
 use App\Models\Post;
 use App\Models\User;
 use App\Services\BoostAnalyticsService;
+use App\Services\BoostDeliveryService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -720,6 +721,33 @@ class BoostController extends Controller
                 'ended' => $endedCount,
             ],
             'posts' => $payload,
+        ]);
+    }
+
+    /**
+     * Paid candidates for the location feed, Following, or Stories.
+     * Organic order is unchanged. The client inserts these into the paid slots.
+     */
+    public function delivery(Request $request, BoostDeliveryService $delivery): JsonResponse
+    {
+        $surface = (string) $request->query('surface', 'location');
+        if (! in_array($surface, ['location', 'following', 'stories'], true)) {
+            return response()->json(['error' => 'Invalid surface'], 400);
+        }
+
+        $feedType = $request->query('feedType');
+        $feedType = is_string($feedType) ? $feedType : null;
+        if ($surface === 'location' && ! in_array($feedType, ['local', 'regional', 'national'], true)) {
+            return response()->json(['error' => 'Invalid feed type'], 400);
+        }
+
+        $viewer = $request->user();
+        if (! $viewer instanceof User) {
+            return response()->json(['candidates' => []]);
+        }
+
+        return response()->json([
+            'candidates' => $delivery->candidates($viewer, $surface, $feedType),
         ]);
     }
 

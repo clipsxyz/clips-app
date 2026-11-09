@@ -241,6 +241,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     Route::post('/boosts/confirm-checkout', [BoostCheckoutController::class, 'confirmCheckout']);
     Route::post('/boosts/verify-native-purchase', [BoostCheckoutController::class, 'verifyNativePurchase']);
     Route::post('/boosts/{boostId}/track', [BoostController::class, 'track'])->whereNumber('boostId');
+    Route::get('/boosts/delivery', [BoostController::class, 'delivery']);
     Route::get('/boosts/{boost}/analytics', [BoostAnalyticsController::class, 'show'])->whereNumber('boost');
 
     Route::get('/feed-content-preferences', [FeedContentPreferenceController::class, 'show']);
