@@ -62,6 +62,14 @@ export function sanitizeSignupUsernameInput(raw: string): string {
         .slice(0, SIGNUP_USERNAME_MAX);
 }
 
+/** Business accounts publish the business name. The personal username is not the public handle. */
+export function businessUsernameFromName(businessName: string): string {
+    return String(businessName || '')
+        .replace(/\s+/g, '')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .slice(0, SIGNUP_USERNAME_MAX);
+}
+
 export function validateSignupUsername(raw: string): string | null {
     const value = sanitizeSignupUsernameInput(raw);
     if (!value) return 'Username is required.';

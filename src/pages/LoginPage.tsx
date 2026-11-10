@@ -14,7 +14,7 @@ import { persistAuthToken } from '../utils/authTokenBridge';
 import { setAvatarForHandle } from '../api/users';
 import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import { db } from '../utils/db';
-import { buildGazetteerHandle, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
+import { buildGazetteerHandle, businessUsernameFromName, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
 const avatarStorageKey = (id: string) => `clips_app_avatar_${id}`;
@@ -210,7 +210,10 @@ export default function LoginPage() {
     return age;
   }
 
-  const usernameForHandle = sanitizeSignupUsernameInput(username) || 'yourname';
+  const isBusinessAccount = accountType === 'business';
+  const businessUsername = businessUsernameFromName(name);
+  const signupUsername = isBusinessAccount ? businessUsername : sanitizeSignupUsernameInput(username);
+  const usernameForHandle = signupUsername || (isBusinessAccount ? 'business' : 'yourname');
   const handlePreview = regional
     ? buildGazetteerHandle(usernameForHandle, regional)
     : buildGazetteerHandle(usernameForHandle, 'yourregion');
@@ -220,7 +223,13 @@ export default function LoginPage() {
     const age = getAgeFromBirthday();
     return age !== null && age >= MIN_AGE;
   }, [birthMonth, birthDay, birthYear]);
-  const step2CanContinue = Boolean(name.trim() && !validateSignupUsername(username) && birthdateComplete);
+  const step2CanContinue = Boolean(
+    name.trim() &&
+      !(isBusinessAccount
+        ? name.trim() && businessUsername.length < 3
+        : validateSignupUsername(username)) &&
+      birthdateComplete,
+  );
   const step3CanContinue = homeLocationComplete;
   const step1CanContinue =
     Boolean(accountType && email.trim() && password.length >= 8 && password === confirmPassword && acceptedTerms && acceptedGuidelines);
@@ -302,9 +311,14 @@ export default function LoginPage() {
   async function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
-    if (!name) nextErrors.name = 'Full name is required.';
-    const usernameError = validateSignupUsername(username);
-    if (usernameError) nextErrors.username = usernameError;
+    if (!name) nextErrors.name = isBusinessAccount ? 'Business name is required.' : 'Full name is required.';
+    else if (isBusinessAccount && businessUsername.length < 3) {
+      nextErrors.name = 'Use a business name with at least 3 letters or numbers. That is the name people see.';
+    }
+    if (!isBusinessAccount) {
+      const usernameError = validateSignupUsername(username);
+      if (usernameError) nextErrors.username = usernameError;
+    }
     if (!birthMonth || !birthDay || !birthYear) {
       nextErrors.birthdate = 'Please enter your date of birth.';
     }
@@ -323,10 +337,13 @@ export default function LoginPage() {
     setSignupSubmitting(true);
     setSignupError('');
     try {
-      const cleanUsername = sanitizeSignupUsernameInput(username);
+      const cleanUsername = isBusinessAccount ? businessUsername : sanitizeSignupUsernameInput(username);
       const availability = await checkSignupAvailability({ username: cleanUsername });
       if (availability.username_taken) {
-        setSignupFieldErrors({ username: 'This username is already taken. Try another.' });
+        const taken = isBusinessAccount
+          ? 'This name is already taken. Try another.'
+          : 'This username is already taken. Try another.';
+        setSignupFieldErrors(isBusinessAccount ? { name: taken } : { username: taken });
         setSignupError('Please choose a different username.');
         return;
       }
@@ -373,7 +390,7 @@ export default function LoginPage() {
     setSignupSubmitting(true);
     const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
-    const cleanUsername = sanitizeSignupUsernameInput(username);
+    const cleanUsername = isBusinessAccount ? businessUsernameFromName(name) : sanitizeSignupUsernameInput(username);
     const handle = buildGazetteerHandle(cleanUsername || 'user', regional);
     const userId = email.trim().toLowerCase();
     const userData = {
@@ -1130,14 +1147,24 @@ export default function LoginPage() {
                 value={name}
                 onChange={e => setName(e.target.value)}
                 className={signupInputClass}
-                placeholder="Full Name"
+                placeholder={isBusinessAccount ? 'Business name' : 'Full Name'}
                 required
                 autoComplete="name"
               />
               {signupFieldErrors.name && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.name}</p>}
             </div>
 
-            <div>
+            {isBusinessAccount ? (
+              <p className="text-xs text-gray-400 px-1 -mt-2">
+                This is the name on your posts and profile.
+                {businessUsername.length >= 3 ? (
+                  <>
+                    {' '}Your handle will be <span className="text-white font-medium">{handlePreview}</span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+            {isBusinessAccount ? null : <div>
               <p className="text-xs text-gray-500 mb-2">
                 Username — one word for your Gazetteer handle (letters, numbers, underscore).
               </p>
@@ -1159,7 +1186,7 @@ export default function LoginPage() {
                   Your handle will be <span className="text-white font-medium">{handlePreview}</span>
                 </p>
               )}
-            </div>
+            </div>}
 
             {/* Date of Birth - required, 13+ */}
             <div>

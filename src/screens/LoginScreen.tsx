@@ -28,7 +28,7 @@ import { useAuth } from '../context/Auth';
 import { loginUser, registerUser, checkSignupAvailability, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode } from '../api/client';
 import { persistAuthToken } from '../utils/authTokenBridge';
 import { resetRootToScreen, rootNavigationRef } from '../navigation/rootNavigationRef';
-import { buildGazetteerHandle, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
+import { buildGazetteerHandle, businessUsernameFromName, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
 import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import Avatar from '../components/Avatar';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
@@ -257,11 +257,18 @@ export default function LoginScreen({ navigation, route }: any) {
         else if (!confirmPasswordNorm || passwordNorm !== confirmPasswordNorm) missing.push('matching confirm password');
         return missing;
     })();
-    const step2CanContinue = Boolean(name.trim() && !validateSignupUsername(username) && birthdateComplete);
+    const businessUsername = businessUsernameFromName(name);
+    const signupUsername = isBusinessAccount ? businessUsername : sanitizeSignupUsernameInput(username);
+    const signupUsernameError = isBusinessAccount
+        ? name.trim() && businessUsername.length < 3
+            ? 'Use a business name with at least 3 letters or numbers. That is the name people see.'
+            : null
+        : validateSignupUsername(username);
+    const step2CanContinue = Boolean(name.trim() && !signupUsernameError && birthdateComplete);
     const step2MissingHints = (() => {
         const missing: string[] = [];
         if (!name.trim()) missing.push(isBusinessAccount ? 'business name' : 'full name');
-        if (validateSignupUsername(username)) missing.push('username (one word, 3+)');
+        if (signupUsernameError) missing.push(isBusinessAccount ? 'business name (3+ letters)' : 'username (one word, 3+)');
         if (!birthdateComplete) {
             missing.push(isBusinessAccount ? 'owner date of birth (13+)' : 'date of birth (13+)');
         }
@@ -271,7 +278,7 @@ export default function LoginScreen({ navigation, route }: any) {
     const step3MissingHints = homeLocationComplete
         ? []
         : [isBusinessAccount ? 'business location' : 'home location'];
-    const usernameForHandle = sanitizeSignupUsernameInput(username) || (isBusinessAccount ? 'business' : 'you');
+    const usernameForHandle = signupUsername || (isBusinessAccount ? 'business' : 'you');
     const handlePreview = regional
         ? buildGazetteerHandle(usernameForHandle, regional)
         : buildGazetteerHandle(usernameForHandle, 'yourregion');
@@ -625,9 +632,13 @@ export default function LoginScreen({ navigation, route }: any) {
         const nextErrors: Record<string, string> = {};
         if (!name.trim()) {
             nextErrors.name = isBusinessAccount ? 'Business name is required.' : 'Full name is required.';
+        } else if (isBusinessAccount && businessUsername.length < 3) {
+            nextErrors.name = 'Use a business name with at least 3 letters or numbers. That is the name people see.';
         }
-        const usernameError = validateSignupUsername(username);
-        if (usernameError) nextErrors.username = usernameError;
+        if (!isBusinessAccount) {
+            const usernameError = validateSignupUsername(username);
+            if (usernameError) nextErrors.username = usernameError;
+        }
         if (!birthMonth || !birthDay || !birthYear) {
             nextErrors.birthdate = isBusinessAccount
                 ? 'Please enter the account owner’s date of birth.'
@@ -649,11 +660,12 @@ export default function LoginScreen({ navigation, route }: any) {
 
         setBusy(true);
         try {
-            const cleanUsername = sanitizeSignupUsernameInput(username);
+            const cleanUsername = isBusinessAccount ? businessUsername : sanitizeSignupUsernameInput(username);
             const availability = await checkSignupAvailability({ username: cleanUsername });
             if (availability.username_taken) {
-                setFieldErrors({ username: 'This username is already taken. Try another.' });
-                setErrorText('Please choose a different username.');
+                const taken = 'This name is already taken. Try another.';
+                setFieldErrors(isBusinessAccount ? { name: taken } : { username: 'This username is already taken. Try another.' });
+                setErrorText(isBusinessAccount ? taken : 'Please choose a different username.');
                 return;
             }
             if (availability.errors?.username?.[0]) {
@@ -701,7 +713,7 @@ export default function LoginScreen({ navigation, route }: any) {
         setErrorText('');
         const age = getAgeFromBirthday();
         const consentTimestamp = new Date().toISOString();
-        const cleanUsername = sanitizeSignupUsernameInput(username);
+        const cleanUsername = isBusinessAccount ? businessUsernameFromName(name) : sanitizeSignupUsernameInput(username);
         const handle = buildGazetteerHandle(cleanUsername || 'user', regional);
         const userData = {
             name: name.trim(),
@@ -1185,27 +1197,37 @@ export default function LoginScreen({ navigation, route }: any) {
                                 autoCapitalize="words"
                             />
                             {!!getFieldError('name') && <Text style={styles.fieldErrorText}>{getFieldError('name')}</Text>}
-
-                            <Text style={styles.fieldLabel}>Username</Text>
-                            <Text style={styles.hintText}>
-                                One word — used in your Gazetteer handle (letters, numbers, underscore).
-                            </Text>
-                            <TextInput
-                                value={username}
-                                onChangeText={(v) => setUsername(sanitizeSignupUsernameInput(v))}
-                                placeholder="e.g. John or JohnS"
-                                placeholderTextColor="#6B7280"
-                                style={styles.input}
-                                autoCapitalize="none"
-                                autoCorrect={false}
-                                autoComplete="username"
-                            />
-                            {!!getFieldError('username') && (
-                                <Text style={styles.fieldErrorText}>{getFieldError('username')}</Text>
-                            )}
-                            {sanitizeSignupUsernameInput(username).length >= 3 ? (
-                                <Text style={styles.hintText}>Your handle will be {handlePreview}</Text>
+                            {isBusinessAccount ? (
+                                <Text style={styles.hintText}>
+                                    This is the name on your posts and profile.
+                                    {businessUsername.length >= 3 ? ` Your handle will be ${handlePreview}.` : ''}
+                                </Text>
                             ) : null}
+
+                            {isBusinessAccount ? null : (
+                                <>
+                                    <Text style={styles.fieldLabel}>Username</Text>
+                                    <Text style={styles.hintText}>
+                                        One word — used in your Gazetteer handle (letters, numbers, underscore).
+                                    </Text>
+                                    <TextInput
+                                        value={username}
+                                        onChangeText={(v) => setUsername(sanitizeSignupUsernameInput(v))}
+                                        placeholder="e.g. John or JohnS"
+                                        placeholderTextColor="#6B7280"
+                                        style={styles.input}
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                        autoComplete="username"
+                                    />
+                                    {!!getFieldError('username') && (
+                                        <Text style={styles.fieldErrorText}>{getFieldError('username')}</Text>
+                                    )}
+                                    {sanitizeSignupUsernameInput(username).length >= 3 ? (
+                                        <Text style={styles.hintText}>Your handle will be {handlePreview}</Text>
+                                    ) : null}
+                                </>
+                            )}
 
                             <Text style={styles.fieldLabel}>
                                 {isBusinessAccount
