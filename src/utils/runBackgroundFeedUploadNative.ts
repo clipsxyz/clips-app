@@ -284,7 +284,7 @@ function messageForUploadError(err: unknown): string {
 
 function reportBackgroundUploadFailure(tempId: string, err: unknown): void {
     const message = messageForUploadError(err);
-    console.error('runBackgroundFeedUploadNative:', err);
+    console.warn('runBackgroundFeedUploadNative:', err);
     try {
         if (typeof failPendingFeedUpload === 'function') {
             failPendingFeedUpload(tempId, message);

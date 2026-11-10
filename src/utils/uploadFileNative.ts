@@ -137,6 +137,80 @@ function isTransientNetworkError(err: unknown): boolean {
     );
 }
 
+function withResolvedMediaUrl(result: NativeUploadResult): NativeUploadResult {
+    const rawRemote = result.fileUrl || result.url || '';
+    const remote =
+        typeof resolvePublicMediaUrl === 'function'
+            ? resolvePublicMediaUrl(rawRemote) || rawRemote
+            : rawRemote;
+    return { ...result, fileUrl: remote, url: remote };
+}
+
+function httpError(status: number, body: string): Error {
+    let message = `Upload failed (${status})`;
+    try {
+        const data = JSON.parse(body || '{}');
+        message = [data.error, data.message, data.detail].filter(Boolean).join(': ') || message;
+    } catch {
+        /* ignore parse errors */
+    }
+    const httpErr = new Error(message);
+    (httpErr as { status?: number }).status = status;
+    return httpErr;
+}
+
+function appendUploadFile(formData: FormData, formFile: RnFormFile): void {
+    // React Native native shape — not a Blob/File from the DOM.
+    // Do NOT set Content-Type; the runtime must generate multipart/form-data; boundary=…
+    formData.append('file', {
+        uri: formFile.uri,
+        type: formFile.type,
+        name: formFile.name,
+    } as unknown as Blob);
+}
+
+/**
+ * Android fetch + FormData + AbortSignal fails immediately with
+ * "Network request failed" and the body never leaves the phone.
+ * XMLHttpRequest sends the same file part and honors xhr.timeout.
+ */
+function postMultipartViaXhr(
+    uploadUrl: string,
+    formFile: RnFormFile,
+    headers: Record<string, string>,
+    timeoutMs: number,
+): Promise<NativeUploadResult> {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', uploadUrl);
+        xhr.timeout = timeoutMs;
+        for (const [key, value] of Object.entries(headers)) {
+            xhr.setRequestHeader(key, value);
+        }
+        xhr.onload = () => {
+            const body = xhr.responseText || '';
+            if (xhr.status < 200 || xhr.status >= 300) {
+                reject(httpError(xhr.status, body));
+                return;
+            }
+            try {
+                resolve(withResolvedMediaUrl(JSON.parse(body) as NativeUploadResult));
+            } catch (err) {
+                reject(err);
+            }
+        };
+        xhr.onerror = () => reject(new Error('Network request failed'));
+        xhr.ontimeout = () => {
+            const err = new Error('Upload timed out');
+            err.name = 'AbortError';
+            reject(err);
+        };
+        const formData = new FormData();
+        appendUploadFile(formData, formFile);
+        xhr.send(formData);
+    });
+}
+
 async function postMultipartToUrl(
     uploadUrl: string,
     formFile: RnFormFile,
@@ -152,17 +226,13 @@ async function postMultipartToUrl(
         );
     }
 
-    const formData = new FormData();
-    // React Native native shape — not a Blob/File from the DOM.
-    // Do NOT set Content-Type; the runtime must generate multipart/form-data; boundary=…
-    formData.append('file', {
-        uri: formFile.uri,
-        type: formFile.type,
-        name: formFile.name,
-    } as unknown as Blob);
-
-    // Final guard: never send application/json or multipart/form-data without boundary.
     const safeHeaders = stripContentType(headers);
+    if (Platform.OS === 'android') {
+        return postMultipartViaXhr(uploadUrl, formFile, safeHeaders, timeoutMs);
+    }
+
+    const formData = new FormData();
+    appendUploadFile(formData, formFile);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -177,26 +247,10 @@ async function postMultipartToUrl(
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-            let message = `Upload failed (${response.status})`;
-            try {
-                const data = await response.json();
-                message =
-                    [data.error, data.message, data.detail].filter(Boolean).join(': ') || message;
-            } catch {
-                /* ignore parse errors */
-            }
-            const httpErr = new Error(message);
-            (httpErr as any).status = response.status;
-            throw httpErr;
+            throw httpError(response.status, await response.text());
         }
 
-        const result = (await response.json()) as NativeUploadResult;
-        const rawRemote = result.fileUrl || result.url || '';
-        const remote =
-            typeof resolvePublicMediaUrl === 'function'
-                ? resolvePublicMediaUrl(rawRemote) || rawRemote
-                : rawRemote;
-        return { ...result, fileUrl: remote, url: remote };
+        return withResolvedMediaUrl((await response.json()) as NativeUploadResult);
     } catch (err: unknown) {
         clearTimeout(timeoutId);
         throw err;

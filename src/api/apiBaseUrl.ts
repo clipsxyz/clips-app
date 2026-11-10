@@ -195,26 +195,35 @@ export function getApiBaseUrlCandidates(): string[] {
         pushUnique(fromMetro);
     }
 
+    // A real phone cannot use 10.0.2.2 (that is the emulator's name for the computer).
+    // After the Wi-Fi address, try 127.0.0.1 so `adb reverse tcp:8000` still works.
+    const pushPhoneFallbacks = () => {
+        if (skipLoopback) {
+            pushUnique(loopback, true);
+            return;
+        }
+        pushUnique(emulator);
+        pushUnique(loopback, true);
+    };
+
     if (preferred === 'loopback') {
-        pushUnique(loopback);
+        pushUnique(loopback, true);
         pushUnique(lan);
-        pushUnique(emulator);
+        if (!skipLoopback) pushUnique(emulator);
     } else if (preferred === 'emulator') {
-        pushUnique(emulator);
+        if (!skipLoopback) pushUnique(emulator);
         pushUnique(lan);
-        pushUnique(loopback);
+        pushUnique(loopback, true);
     } else if (preferred === 'lan') {
         pushUnique(lan);
-        pushUnique(emulator);
-        pushUnique(loopback);
+        pushPhoneFallbacks();
     } else if (isLoopbackApiHost(primary)) {
-        pushUnique(loopback);
+        pushUnique(loopback, true);
         pushUnique(lan);
-        pushUnique(emulator);
+        if (!skipLoopback) pushUnique(emulator);
     } else {
-        pushUnique(loopback);
         pushUnique(lan);
-        pushUnique(emulator);
+        pushPhoneFallbacks();
     }
     return ordered;
 }
