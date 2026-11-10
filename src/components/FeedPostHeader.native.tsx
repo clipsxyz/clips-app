@@ -16,8 +16,8 @@ import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 
-/** Outer slot including ring + Instagram standoff so the photo stays ~30px. */
-const FEED_HEADER_AVATAR_SIZE = 36;
+/** Circular profile photo: 32×32, fully round. */
+const FEED_HEADER_AVATAR_SIZE = 32;
 /** Compact overlay badge (follow +, DM, follow check, request pill). */
 const FEED_HEADER_BADGE_SIZE = 10;
 const FEED_HEADER_BADGE_ICON = 6;
@@ -90,8 +90,6 @@ export default function FeedPostHeader({
         isCurrentUser ? user?.accountType : post.userAccountType,
     );
 
-    const textPrimary = isOverlaid ? '#FFFFFF' : '#F3F4F6';
-    const textMuted = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
     const reclipColor = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
 
     const viewerId = user?.id != null ? String(user.id) : undefined;
@@ -167,10 +165,12 @@ export default function FeedPostHeader({
 
     const handleRow = (
         <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85} style={styles.handleBtn}>
-            <Text style={[styles.handleText, { color: textPrimary }]} numberOfLines={1}>
+            <Text style={styles.handleText} numberOfLines={1}>
                 {safeHandle}
             </Text>
-            <VerifiedBadge accountType={verifiedAccountType} size={FEED_UI.icon.flag} />
+            <View style={styles.verifiedBadge}>
+                <VerifiedBadge accountType={verifiedAccountType} size={14} />
+            </View>
         </TouchableOpacity>
     );
 
@@ -260,9 +260,8 @@ const styles = StyleSheet.create({
         position: 'relative',
         width: '100%',
         minHeight: 56,
-        paddingHorizontal: 12,
-        paddingTop: 12,
-        paddingBottom: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
         justifyContent: 'center',
         backgroundColor: FEED_CARD_CHROME_BG,
         overflow: 'hidden',
@@ -275,9 +274,8 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     textOnlyChromeWrap: {
-        paddingHorizontal: 12,
-        paddingTop: 8,
-        paddingBottom: 0,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
         marginBottom: 0,
         backgroundColor: 'transparent',
         zIndex: 10,
@@ -304,7 +302,6 @@ const styles = StyleSheet.create({
     identityRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
         minWidth: 0,
         maxWidth: '100%',
         height: FEED_HEADER_AVATAR_SIZE,
@@ -400,19 +397,27 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 4,
         flexShrink: 1,
         minWidth: 0,
         height: FEED_HEADER_AVATAR_SIZE,
     },
     // Web feed: `text-xs font-semibold`
     handleText: {
-        fontSize: FEED_UI.type.handle,
+        marginLeft: 10,
+        fontSize: 14,
         fontWeight: '600',
+        color: '#FFFFFF',
         flexShrink: 1,
         includeFontPadding: false,
         textAlignVertical: 'center',
-        lineHeight: FEED_UI.type.handle + 2,
+        lineHeight: 18,
+    },
+    verifiedBadge: {
+        marginLeft: 4,
+        width: 14,
+        height: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     socialPill: {
         alignSelf: 'flex-start',
