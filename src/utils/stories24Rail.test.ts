@@ -15,13 +15,13 @@ const cards = (count: number, prefix = 'user') =>
     Array.from({ length: count }, (_, i) => card(`${prefix}${i}`));
 
 describe('rankStories24RailItems', () => {
-    it('caps the rail at 9 story cards and ranks them 0..8', () => {
+    it('caps the rail at 10 story cards and ranks them 0..9', () => {
         const ranked = rankStories24RailItems(cards(12));
         expect(ranked).toHaveLength(STORIES24_RAIL_MAX_CARDS);
         expect(ranked.map((r) => r.item.handle)).toEqual(
-            Array.from({ length: 9 }, (_, i) => `user${i}`),
+            Array.from({ length: STORIES24_RAIL_MAX_CARDS }, (_, i) => `user${i}`),
         );
-        expect(ranked.map((r) => r.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        expect(ranked.map((r) => r.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     });
 
     it('keeps Add yours visible and unranked without spending a rank slot', () => {
@@ -30,8 +30,8 @@ describe('rankStories24RailItems', () => {
         expect(ranked[0]).toEqual({ item: items[0], index: null });
         expect(ranked).toHaveLength(STORIES24_RAIL_MAX_CARDS + 1);
         expect(ranked[1].item.handle).toBe('user0');
-        expect(ranked[9].item.handle).toBe('user8');
-        expect(ranked.some((r) => r.item.handle === 'user9')).toBe(false);
+        expect(ranked[10].item.handle).toBe('user9');
+        expect(ranked.some((r) => r.item.handle === 'user10')).toBe(false);
     });
 
     it('preserves rail order for lists shorter than the cap', () => {

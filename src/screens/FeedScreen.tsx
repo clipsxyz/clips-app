@@ -83,7 +83,12 @@ import {
 import { isMockMode } from '../api/apiMode';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { getUnreadTotal } from '../api/messages';
-import { markStoryAsViewedLocal, markStoryViewed } from '../api/stories';
+import { fetchStoryGroupByHandle, markStoryAsViewedLocal, markStoryViewed } from '../api/stories';
+import {
+    postIsLiveOnStories,
+    rememberLiveSharedPosts,
+    STORY_SHARE_STILL_LIVE_MESSAGE,
+} from '../utils/sharePostToStories';
 import { getStoryViewedVersion, subscribeStoryViewed } from '../utils/storyViewedStore';
 import {
     connectSocket,
@@ -3271,9 +3276,35 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const openShareToStoriesForPost = React.useCallback(
         (post: Post) => {
             pinFeedScrollSoon();
-            setShareToStoriesPost(post);
+            void (async () => {
+                if (postIsLiveOnStories(post.id)) {
+                    setFeedGazetteerAlert({
+                        title: 'Already on Stories',
+                        message: STORY_SHARE_STILL_LIVE_MESSAGE,
+                        icon: 'info',
+                    });
+                    return;
+                }
+                if (user?.handle) {
+                    try {
+                        const group = await fetchStoryGroupByHandle(user.handle);
+                        rememberLiveSharedPosts(group?.stories || []);
+                    } catch {
+                        // The server still refuses a second share of a live story.
+                    }
+                    if (postIsLiveOnStories(post.id)) {
+                        setFeedGazetteerAlert({
+                            title: 'Already on Stories',
+                            message: STORY_SHARE_STILL_LIVE_MESSAGE,
+                            icon: 'info',
+                        });
+                        return;
+                    }
+                }
+                setShareToStoriesPost(post);
+            })();
         },
-        [pinFeedScrollSoon],
+        [pinFeedScrollSoon, user?.handle],
     );
 
     const tryReclipPost = React.useCallback(

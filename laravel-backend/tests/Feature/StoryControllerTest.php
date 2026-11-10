@@ -75,6 +75,65 @@ class StoryControllerTest extends TestCase
         $this->assertTrue($story->expires_at->isBefore(now()->addHours(25)));
     }
 
+    public function test_cannot_share_the_same_card_again_until_the_story_expires(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+
+        Story::factory()->forUser($user)->create([
+            'shared_from_post_id' => $post->id,
+            'shared_from_user_handle' => $post->user_handle,
+            'expires_at' => now()->addHours(12),
+        ]);
+
+        $again = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'media_url' => 'https://example.com/shared-again.jpg',
+                'media_type' => 'image',
+                'text' => 'Shared from feed',
+                'shared_from_post_id' => $post->id,
+            ]);
+
+        $again->assertStatus(409)
+            ->assertJsonFragment([
+                'error' => 'This card is already on your Stories. You can share it again after it disappears in 24 hours.',
+            ]);
+
+        $this->assertSame(1, Story::where('user_id', $user->id)->where('shared_from_post_id', $post->id)->count());
+    }
+
+    public function test_can_share_the_same_card_again_after_the_story_expires(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+
+        Story::factory()->forUser($user)->expired()->create([
+            'shared_from_post_id' => $post->id,
+            'shared_from_user_handle' => $post->user_handle,
+        ]);
+
+        $again = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'media_url' => 'https://example.com/shared-after-expiry.jpg',
+                'media_type' => 'image',
+                'text' => 'Shared from feed again',
+                'shared_from_post_id' => $post->id,
+            ]);
+
+        $again->assertStatus(201)
+            ->assertJsonFragment([
+                'shared_from_post_id' => $post->id,
+            ]);
+
+        $this->assertSame(2, Story::where('user_id', $user->id)->where('shared_from_post_id', $post->id)->count());
+    }
+
     public function test_shared_story_with_unknown_post_id_still_persists(): void
     {
         $user = User::factory()->create();

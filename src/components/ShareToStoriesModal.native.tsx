@@ -11,7 +11,12 @@ import {
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { incrementShares } from '../api/posts';
-import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
+import {
+    buildSharePostToStoriesPayload,
+    postIsLiveOnStories,
+    rememberPostSharedToStories,
+    STORY_SHARE_STILL_LIVE_MESSAGE,
+} from '../utils/sharePostToStories';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
@@ -90,6 +95,12 @@ export default function ShareToStoriesModal({
     const handleShare = async () => {
         if (!user?.id || !post) {
             gazetteerAlert('Sign in required', 'Please sign in to share to Stories.');
+            return;
+        }
+
+        if (postIsLiveOnStories(post.id)) {
+            gazetteerAlert('Already on Stories', STORY_SHARE_STILL_LIVE_MESSAGE);
+            onClose();
             return;
         }
 
@@ -184,9 +195,17 @@ export default function ShareToStoriesModal({
                 // UI already updated optimistically
             }
 
+            rememberPostSharedToStories(post.id);
             emitStoriesRefresh();
             overlay.success('Shared to Stories 24.');
         } catch (e) {
+            const message = e instanceof Error ? e.message : '';
+            if (/already on your Stories/i.test(message)) {
+                rememberPostSharedToStories(post.id);
+                if (overlay) overlay.dismiss();
+                gazetteerAlert('Already on Stories', STORY_SHARE_STILL_LIVE_MESSAGE);
+                return;
+            }
             console.error('Failed to share to stories:', e);
             if (overlay) {
                 overlay.error('Failed to share to Stories 24. Please try again.');

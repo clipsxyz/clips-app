@@ -186,8 +186,8 @@ export function orderStoryGroupsLikeRail<T extends OrderableStoryGroup>(
         .filter((group): group is T => !!group);
 }
 
-/** Ranked cards shown in the horizontal rail (NOW TV / Netflix-style 1–9). */
-export const STORIES24_RAIL_MAX_CARDS = 9;
+/** Ranked cards shown in the horizontal rail. 1–10, then a View all card when more remain. */
+export const STORIES24_RAIL_MAX_CARDS = 10;
 
 export type Stories24RailDisplayItem = {
     item: Stories24RailItem;
@@ -198,7 +198,7 @@ export type Stories24RailDisplayItem = {
 /**
  * Cap the rail *render* at {@link STORIES24_RAIL_MAX_CARDS} story cards while always
  * keeping the Add yours CTA. Pure display helper: the uncapped `items` array must keep
- * driving `railHandles`, so the full-screen viewer still swipes past rank 9.
+ * driving `railHandles`, so the full-screen viewer still swipes past rank 10.
  */
 export function rankStories24RailItems(items: Stories24RailItem[]): Stories24RailDisplayItem[] {
     const ranked: Stories24RailDisplayItem[] = [];
@@ -351,7 +351,7 @@ export async function buildStories24RailItems(
             // Stamp Auth avatar onto the viewer's own rail card so Passport / feed / stories match.
             avatarUrl: isViewerGroup && viewerAvatar ? viewerAvatar : posterAvatarUrl,
         });
-        if (nextItems.length >= 12) break;
+        if (nextItems.length >= 40) break;
     }
 
     const mergedByHandle = new Map<string, Stories24RailItem>();
@@ -371,7 +371,7 @@ export async function buildStories24RailItems(
         withViewer.unshift({ handle: STORIES24_ADD_YOURS_HANDLE, title: 'Add yours' });
     }
 
-    return orderStories24RailItems(withViewer, userHandle).slice(0, 12);
+    return orderStories24RailItems(withViewer, userHandle).slice(0, 41);
 }
 
 export async function persistStories24RailOpenHandle(handle: string): Promise<void> {

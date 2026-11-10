@@ -17,6 +17,8 @@ import {
     Modal,
     AppState,
     useWindowDimensions,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent,
 } from 'react-native';
 import Animated, {
     Easing,
@@ -29,16 +31,18 @@ import Animated, {
 } from 'react-native-reanimated';
 import CachedImage from './CachedImage.native';
 import LinearGradient from 'react-native-linear-gradient';
-import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
 import FeedPlusIcon from './FeedPlusIcon.native';
 import Avatar from './Avatar.native';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
+import { UCL_SHEET_GRADIENT, UCL_SHEET_GRADIENT_LOCATIONS } from '../theme/gazetteerAmbientNative';
 import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
 import { useAuth } from '../context/Auth';
 import type { Stories24RailItem, Stories24RailReturnPayload } from '../utils/stories24Rail';
 import {
     STORIES24_ADD_YOURS_HANDLE,
     STORIES24_COLLAPSE_MS,
+    STORIES24_RAIL_MAX_CARDS,
     STORIES24_EXPAND_MS,
     isStories24AddYoursHandle,
     normalizeStories24Handle,
@@ -48,28 +52,24 @@ import {
     rankStories24RailItems,
 } from '../utils/stories24Rail';
 import {
-    FEED_GRID_TILE_BG,
-    FEED_GRID_TILE_BORDER_COLOR,
-    FEED_GRID_TILE_BORDER_WIDTH,
-    FEED_GRID_TILE_RADIUS,
-} from './FeedPageLayout.native';
-import {
     STORY_GRADIENT_RING_COLORS,
     STORY_GRADIENT_RING_END,
     STORY_GRADIENT_RING_START,
-    STORY_RING_GAP,
-    STORY_RING_NONE_COLOR,
-    STORY_RING_WIDTH,
 } from '../utils/storyRingNative';
 import { markStoryAsViewedLocal, markStoryViewed } from '../api/stories';
 import { getStoryViewedVersion, subscribeStoryViewed } from '../utils/storyViewedStore';
-/** Same silhouette as a passport post tile: portrait 3:4, grid corner radius. */
-const CARD_W = 118;
-const CARD_H = Math.round((CARD_W * 4) / 3);
-const CARD_RADIUS = FEED_GRID_TILE_RADIUS;
-/** Outer story-card avatar slot; stroke + gap match the newsfeed header. */
-const CARD_AVATAR_RING = 58;
-const CARD_AVATAR_PHOTO = CARD_AVATAR_RING - (STORY_RING_WIDTH + STORY_RING_GAP) * 2;
+/** Horizontal story chip: avatar left, caption or handle on the right. */
+const CARD_W = 220;
+const CARD_H = 72;
+const CARD_RADIUS = 12;
+const CARD_RING_WIDTH = 2;
+const CARD_RING_GAP = 2;
+const CARD_AVATAR_PHOTO = 36;
+const CARD_AVATAR_RING = CARD_AVATAR_PHOTO + (CARD_RING_WIDTH + CARD_RING_GAP) * 2;
+/** Rank column + gap + card + space before the next rank. Used to follow the front card while dragging. */
+const RAIL_CARD_STRIDE = 28 + 6 + CARD_W + 10;
+/** Placeholders written when a story has no caption. Show the handle instead. */
+const RAIL_CAPTION_PLACEHOLDERS = new Set(['shared a post', 'new story', 'add yours']);
 /** Idle / missing poster — never the old BBB rainbow test card. */
 const PREVIEW_POSTER_FALLBACK = '#121212';
 
@@ -115,7 +115,20 @@ type Props = {
     onCollapseHandled?: () => void;
 };
 
-function usableRailStill(uri?: string): string | undefined {
+function displayRailHandle(handle: string): string {
+    const raw = handle.replace(/^@/, '').trim();
+    if (!raw) return '';
+    if (raw.includes('@')) return raw;
+    return `@${raw}`;
+}
+
+function railCaption(title: string | undefined): string {
+    const text = (title || '').trim();
+    if (!text || RAIL_CAPTION_PLACEHOLDERS.has(text.toLowerCase())) return '';
+    return text;
+}
+
+function railStill(uri?: string): string | undefined {
     const raw = (uri || '').trim();
     if (!raw || raw.startsWith('#')) return undefined;
     if (/^(file:|content:|blob:|ph:)/i.test(raw)) return undefined;
@@ -123,61 +136,30 @@ function usableRailStill(uri?: string): string | undefined {
     return resolvePublicMediaUrl(raw) || raw;
 }
 
-function StoryPreviewVideo({
-    posterUri,
-}: {
-    uri: string;
-    posterUri?: string;
-    paused: boolean;
-}) {
-    // Still-only rail thumbs. Android TextureView ignores overflow clipping and bleeds into
-    // the feed; motion plays in the fullscreen story viewer instead.
-    const poster = usableRailStill(posterUri);
-    const posterSource = poster ? { uri: poster } : undefined;
-
-    if (posterSource) {
-        return (
-            <CachedImage
-                source={posterSource}
-                style={StyleSheet.absoluteFill}
-                resizeMode="cover"
-                pointerEvents="none"
-            />
-        );
-    }
-
-    return (
-        <View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
-        />
-    );
-}
-
 function StoryCard({
     item,
-    index,
     onPress,
     registerCardRef,
-    playPreviewVideo,
-    previewVideosPaused,
     /** Hide while the shared-element clone is flying (avoids double-image ghost). */
     morphHidden = false,
+    lit = false,
 }: {
     item: Stories24RailItem;
     /** 0-based story index; the card paints `index + 1`. Null/omit for Add yours. */
     index?: number | null;
     onPress: (rect: CardRect) => void;
     registerCardRef: (handle: string, node: View | null) => void;
-    playPreviewVideo: boolean;
-    previewVideosPaused: boolean;
+    playPreviewVideo?: boolean;
+    previewVideosPaused?: boolean;
     morphHidden?: boolean;
+    /** White border for the card sitting in the front slot of the rail. */
+    lit?: boolean;
 }) {
     const cardRef = useRef<View>(null);
     const { user } = useAuth();
     const handleKey = normalizeStories24Handle(item.handle);
     const isAddYours = item.handle === STORIES24_ADD_YOURS_HANDLE;
-    const displayHandle = item.handle.startsWith('@') ? item.handle : `@${item.handle.replace(/^@/, '')}`;
+    const displayHandle = displayRailHandle(item.handle);
     const isOwnStory =
         !!user?.handle && normalizeStories24Handle(user.handle) === handleKey;
     useEffect(() => {
@@ -222,7 +204,11 @@ function StoryCard({
         registerCardRef(handleKey, node);
     };
 
-    const stillUri = usableRailStill(item.thumb);
+    const caption = railCaption(item.title);
+    const cardLabel = caption || displayHandle;
+    const cardMeta = caption ? item.subtitle || displayHandle : '';
+    const stillUri = railStill(item.thumb);
+    const avatarName = displayHandle.replace(/^@/, '').split('@')[0] || 'User';
 
     if (isAddYours) {
         return (
@@ -232,14 +218,12 @@ function StoryCard({
                     onPress={measureAndPress}
                     activeOpacity={0.9}
                 >
-                    <View style={styles.addYoursInner}>
-                        <View style={styles.addYoursIconCircle}>
-                            <FeedPlusIcon size={16} color="#FFFFFF" strokeWidth={2.5} />
-                        </View>
-                        <Text style={styles.addYoursTitle} numberOfLines={1}>
-                            Add yours
-                        </Text>
+                    <View style={styles.addYoursIconCircle}>
+                        <FeedPlusIcon size={16} color="#FFFFFF" strokeWidth={2.5} />
                     </View>
+                    <Text style={[styles.cardLabel, styles.addYoursLabel]} numberOfLines={1}>
+                        Add yours
+                    </Text>
                 </TouchableOpacity>
             </View>
         );
@@ -247,77 +231,69 @@ function StoryCard({
 
     return (
         <View ref={setCardRef} collapsable={false} style={morphHidden ? styles.cardMorphHidden : undefined}>
-            <TouchableOpacity style={styles.card} onPress={measureAndPress} activeOpacity={0.9}>
+            <TouchableOpacity
+                style={[styles.card, lit && styles.cardLit]}
+                onPress={measureAndPress}
+                activeOpacity={0.9}
+            >
                 <LinearGradient
-                    colors={[...STORY_CARD_TINT]}
-                    start={{ x: 0.5, y: 0 }}
-                    end={{ x: 0.5, y: 1 }}
+                    colors={[...UCL_SHEET_GRADIENT]}
+                    locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
                     style={StyleSheet.absoluteFill}
                 />
-                {item.previewVideoUrl ? (
-                    <StoryPreviewVideo
-                        uri={item.previewVideoUrl}
-                        posterUri={stillUri}
-                        paused={previewVideosPaused || !playPreviewVideo}
-                    />
-                ) : stillUri ? (
+                {stillUri ? (
                     <CachedImage
                         source={{ uri: stillUri }}
-                        style={StyleSheet.absoluteFill}
+                        style={styles.cardWash}
                         resizeMode="cover"
                         pointerEvents="none"
                     />
-                ) : (
-                    <View
-                        pointerEvents="none"
-                        style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
-                    />
-                )}
-                <LinearGradient
-                    colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.88)']}
-                    locations={[0, 0.4, 1]}
-                    style={styles.cardFooterGrad}
-                />
-                {typeof index === 'number' ? (
-                    <Text pointerEvents="none" numberOfLines={1} style={styles.cardRank}>
-                        {index + 1}
-                    </Text>
                 ) : null}
-                <View style={styles.cardAvatarCenter} pointerEvents="none">
-                    {hasViewed ? (
-                        <View style={styles.cardAvatarSeen}>
+                <LinearGradient
+                    colors={['#03091B', 'rgba(3,9,27,0.82)', 'rgba(3,9,27,0.2)']}
+                    locations={[0, 0.46, 1]}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                />
+                {hasViewed ? (
+                    <View style={styles.cardAvatarSeen}>
+                        <Avatar
+                            src={avatarSrc}
+                            name={avatarName}
+                            size={CARD_AVATAR_PHOTO}
+                            hideBorder
+                        />
+                    </View>
+                ) : (
+                    <LinearGradient
+                        colors={[...STORY_GRADIENT_RING_COLORS]}
+                        start={STORY_GRADIENT_RING_START}
+                        end={STORY_GRADIENT_RING_END}
+                        style={styles.cardAvatarRing}
+                    >
+                        <View style={styles.cardAvatarRingInner}>
                             <Avatar
                                 src={avatarSrc}
-                                name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                                name={avatarName}
                                 size={CARD_AVATAR_PHOTO}
                                 hideBorder
                             />
                         </View>
-                    ) : (
-                        <LinearGradient
-                            colors={[...STORY_GRADIENT_RING_COLORS]}
-                            start={STORY_GRADIENT_RING_START}
-                            end={STORY_GRADIENT_RING_END}
-                            style={styles.cardAvatarRing}
-                        >
-                            <View style={styles.cardAvatarRingInner}>
-                                <Avatar
-                                    src={avatarSrc}
-                                    name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
-                                    size={CARD_AVATAR_PHOTO}
-                                    hideBorder
-                                />
-                            </View>
-                        </LinearGradient>
-                    )}
-                </View>
-                <View style={styles.cardFooter}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>
-                        {item.title}
+                    </LinearGradient>
+                )}
+                <View style={styles.cardCopy}>
+                    <Text style={styles.cardLabel} numberOfLines={2}>
+                        {cardLabel}
                     </Text>
-                    <Text style={styles.cardSubtitle} numberOfLines={1}>
-                        {item.subtitle || displayHandle}
-                    </Text>
+                    {cardMeta ? (
+                        <Text style={styles.cardMeta} numberOfLines={1}>
+                            {cardMeta}
+                        </Text>
+                    ) : null}
                 </View>
             </TouchableOpacity>
         </View>
@@ -744,8 +720,8 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         [orderedItems],
     );
 
-    // Rail render only: top 9 story cards. `railHandles` above stays uncapped
-    // so the full-screen viewer keeps swiping past rank 9, in the same order.
+    // Rail render only: cards 1–10. `railHandles` above stays uncapped
+    // so View all and the full-screen viewer keep the people past rank 10.
     const displayCards = useMemo(
         () =>
             rankStories24RailItems(orderedItems).filter(
@@ -753,6 +729,29 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             ),
         [orderedItems],
     );
+    const hasMoreStories = useMemo(
+        () =>
+            orderedItems.filter((item) => !isStories24AddYoursHandle(item.handle)).length >
+            STORIES24_RAIL_MAX_CARDS,
+        [orderedItems],
+    );
+    const railSlotCount = displayCards.length + (hasMoreStories ? 1 : 0);
+    const [focusedCardIndex, setFocusedCardIndex] = useState(0);
+    const focusedCardIndexRef = useRef(0);
+    const onRailScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        if (railSlotCount <= 0) return;
+        const next = Math.max(
+            0,
+            Math.min(
+                railSlotCount - 1,
+                Math.round(event.nativeEvent.contentOffset.x / RAIL_CARD_STRIDE),
+            ),
+        );
+        if (next === focusedCardIndexRef.current) return;
+        focusedCardIndexRef.current = next;
+        setFocusedCardIndex(next);
+    }, [railSlotCount]);
+    const litCardIndex = Math.min(focusedCardIndex, Math.max(0, railSlotCount - 1));
 
     const firstStoryPreviewHandle = useMemo(
         () => orderedItems.find((i) => i.handle !== STORIES24_ADD_YOURS_HANDLE)?.handle ?? null,
@@ -778,6 +777,13 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     const handleStoryCardPress = (item: Stories24RailItem, _rect: CardRect) => {
         markRailItemSeen(item);
         onOpenStory(item, railHandles);
+    };
+
+    const openViewAll = () => {
+        const stories = orderedItems.filter((item) => !isStories24AddYoursHandle(item.handle));
+        const next = stories[STORIES24_RAIL_MAX_CARDS] || stories[0];
+        if (!next) return;
+        handleStoryCardPress(next, { x: 0, y: 0, width: CARD_W, height: CARD_H });
     };
 
     const finishExpand = () => {
@@ -816,11 +822,13 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}
+                scrollEventThrottle={16}
+                onScroll={onRailScroll}
                 onScrollBeginDrag={() => setRailScrolling(true)}
                 onScrollEndDrag={() => setRailScrolling(false)}
                 onMomentumScrollEnd={() => setRailScrolling(false)}
             >
-                {displayCards.map(({ item, index }) => {
+                {displayCards.map(({ item, index }, slot) => {
                     const handleKey = normalizeStories24Handle(item.handle);
                     // Keep the source card visible until the morph clone has a paintable frame.
                     const morphHidden =
@@ -830,31 +838,49 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                         (!!collapsing &&
                             collapseHideSource &&
                             normalizeStories24Handle(collapsing.payload.handle) === handleKey);
+                    const rank = typeof index === 'number' ? index + 1 : null;
                     return (
-                        <StoryCard
-                            key={
-                                item.handle === STORIES24_ADD_YOURS_HANDLE
-                                    ? 'add-yours'
-                                    : item.handle
-                            }
-                            item={item}
-                            index={index}
-                            registerCardRef={registerCardRef}
-                            morphHidden={morphHidden}
-                            playPreviewVideo={
-                                !!item.previewVideoUrl && item.handle === firstStoryPreviewHandle
-                            }
-                            previewVideosPaused={previewsPaused || morphHidden}
-                            onPress={(rect) => {
-                                if (item.handle === STORIES24_ADD_YOURS_HANDLE) {
-                                    onAddYours();
-                                } else {
-                                    handleStoryCardPress(item, rect);
+                        <View key={item.handle} style={styles.cardWithRank}>
+                            {rank != null ? (
+                                <Text style={styles.cardRankBeside}>{rank}</Text>
+                            ) : (
+                                <View style={styles.cardRankSlot} />
+                            )}
+                            <StoryCard
+                                item={item}
+                                registerCardRef={registerCardRef}
+                                morphHidden={morphHidden}
+                                playPreviewVideo={
+                                    !!item.previewVideoUrl && item.handle === firstStoryPreviewHandle
                                 }
-                            }}
-                        />
+                                previewVideosPaused={previewsPaused || morphHidden}
+                                lit={slot === litCardIndex}
+                                onPress={(rect) => handleStoryCardPress(item, rect)}
+                            />
+                        </View>
                     );
                 })}
+                {hasMoreStories ? (
+                    <View style={styles.cardWithRank}>
+                        <View style={styles.cardRankSlot} />
+                        <TouchableOpacity
+                            style={[styles.card, displayCards.length === litCardIndex && styles.cardLit]}
+                            onPress={openViewAll}
+                            activeOpacity={0.9}
+                            accessibilityRole="button"
+                            accessibilityLabel="View all stories"
+                        >
+                            <LinearGradient
+                                colors={[...UCL_SHEET_GRADIENT]}
+                                locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                                start={{ x: 0, y: 0.5 }}
+                                end={{ x: 1, y: 0.5 }}
+                                style={StyleSheet.absoluteFill}
+                            />
+                            <Text style={styles.viewAllLabel}>View all</Text>
+                        </TouchableOpacity>
+                    </View>
+                ) : null}
             </ScrollView>
             ) : null}
             {expanding ? (
@@ -926,137 +952,122 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     scrollContent: {
-        paddingLeft: 16,
+        paddingLeft: 12,
         paddingRight: 16,
         gap: 10,
         columnGap: 10,
+        alignItems: 'center',
+    },
+    cardWithRank: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    cardRankBeside: {
+        width: 28,
+        marginRight: 6,
+        color: '#FFFFFF',
+        fontSize: 26,
+        lineHeight: 30,
+        fontWeight: '800',
+        textAlign: 'left',
+    },
+    cardRankSlot: {
+        width: 28,
+        marginRight: 6,
+    },
+    viewAllLabel: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
+        textAlign: 'center',
     },
     card: {
         width: CARD_W,
         height: CARD_H,
         borderRadius: CARD_RADIUS,
         overflow: 'hidden',
-        backgroundColor: FEED_GRID_TILE_BG,
-        borderWidth: FEED_GRID_TILE_BORDER_WIDTH,
-        borderColor: FEED_GRID_TILE_BORDER_COLOR,
-    },
-    addYoursCard: {
-        backgroundColor: 'transparent',
-        borderWidth: 1,
-        borderColor: '#FFFFFF',
-        borderStyle: 'solid',
-    },
-    addYoursInner: {
-        flex: 1,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        rowGap: 8,
-        paddingHorizontal: 8,
-    },
-    addYoursIconCircle: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        backgroundColor: '#03091B',
         borderWidth: 1,
+        borderColor: '#2A2A3C',
+    },
+    cardLit: {
         borderColor: '#FFFFFF',
-        backgroundColor: 'transparent',
-        alignItems: 'center',
-        justifyContent: 'center',
     },
-    addYoursTitle: {
-        color: '#FFFFFF',
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    cardFooterGrad: {
+    cardWash: {
         position: 'absolute',
-        left: 0,
+        top: 0,
         right: 0,
         bottom: 0,
-        height: 44,
+        width: 108,
+        opacity: 0.9,
     },
-    cardAvatarCenter: {
-        ...StyleSheet.absoluteFill,
+    addYoursCard: {
+        backgroundColor: '#03091B',
+    },
+    addYoursIconCircle: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#2A2A3C',
+        backgroundColor: '#12121A',
         alignItems: 'center',
         justifyContent: 'center',
-        // Sit slightly above true center so the footer text doesn't crowd it.
-        paddingBottom: 10,
     },
     cardAvatarRing: {
         width: CARD_AVATAR_RING,
         height: CARD_AVATAR_RING,
         borderRadius: CARD_AVATAR_RING / 2,
-        padding: STORY_RING_WIDTH,
+        padding: CARD_RING_WIDTH,
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.45,
-        shadowRadius: 4,
-        elevation: 4,
     },
     cardAvatarSeen: {
         width: CARD_AVATAR_RING,
         height: CARD_AVATAR_RING,
         borderRadius: CARD_AVATAR_RING / 2,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: STORY_RING_NONE_COLOR,
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.22)',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
-        backgroundColor: '#000000',
+        backgroundColor: '#03091B',
     },
     cardAvatarRingInner: {
         width: '100%',
         height: '100%',
         borderRadius: 999,
-        padding: STORY_RING_GAP,
-        // Opaque so the gradient ring doesn't fill the standoff — same 2.5px
-        // newsfeed gap, readable over the story thumbnail.
-        backgroundColor: '#000000',
+        padding: CARD_RING_GAP,
+        backgroundColor: '#03091B',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
     },
-    cardFooter: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        paddingHorizontal: 8,
-        paddingVertical: 6,
-        gap: 2,
-        alignItems: 'center',
-        // Paint the byline over the rank watermark so long titles stay readable.
-        zIndex: 2,
-    },
-    /** NOW TV / Netflix-style rank number, bottom-left of every story card. */
-    cardRank: {
-        position: 'absolute',
-        left: 8,
-        bottom: 4,
-        color: 'rgba(255, 255, 255, 0.85)',
-        fontSize: 44,
-        lineHeight: 46,
-        fontWeight: '900',
-        textShadowColor: 'rgba(0, 0, 0, 0.75)',
-        textShadowOffset: { width: 1, height: 1 },
-        textShadowRadius: 3,
+    cardCopy: {
+        flex: 1,
+        marginLeft: 10,
         zIndex: 1,
     },
-    cardTitle: {
+    addYoursLabel: {
+        marginLeft: 10,
+    },
+    cardLabel: {
         color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+        lineHeight: 16,
+    },
+    cardMeta: {
+        marginTop: 2,
+        color: '#D1E4FF',
         fontSize: 11,
         fontWeight: '600',
         lineHeight: 13,
-        textAlign: 'center',
-    },
-    cardSubtitle: {
-        color: '#A5B4FC',
-        fontSize: 10,
-        fontWeight: '600',
-        textAlign: 'center',
-        includeFontPadding: false,
     },
     expandModalRoot: {
         flex: 1,

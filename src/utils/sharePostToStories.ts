@@ -17,6 +17,45 @@ export type SharePostToStoriesPayload = {
     sharedFromUser?: string;
 };
 
+export const STORY_SHARE_STILL_LIVE_MESSAGE =
+    'This card is already on your Stories. You can share it again after it disappears in 24 hours.';
+
+const liveSharedPosts = new Map<string, number>();
+
+/** Remember a card the viewer just put on Stories, until that story's 24 hours are up. */
+export function rememberPostSharedToStories(
+    postId: string,
+    expiresAt = Date.now() + 24 * 60 * 60 * 1000,
+): void {
+    const id = String(postId || '').trim();
+    if (!id) return;
+    const previous = liveSharedPosts.get(id) ?? 0;
+    liveSharedPosts.set(id, Math.max(previous, expiresAt));
+}
+
+export function rememberLiveSharedPosts(
+    stories: Array<{ sharedFromPost?: string; expiresAt?: number }>,
+    now = Date.now(),
+): void {
+    for (const story of stories) {
+        const id = String(story.sharedFromPost || '').trim();
+        if (!id || (story.expiresAt != null && story.expiresAt <= now)) continue;
+        rememberPostSharedToStories(id, story.expiresAt ?? now + 24 * 60 * 60 * 1000);
+    }
+}
+
+/** True while this viewer still has a live story of this newsfeed card. */
+export function postIsLiveOnStories(postId: string, now = Date.now()): boolean {
+    const id = String(postId || '').trim();
+    const until = liveSharedPosts.get(id);
+    if (until == null) return false;
+    if (until <= now) {
+        liveSharedPosts.delete(id);
+        return false;
+    }
+    return true;
+}
+
 /** Build createStory args from a feed post (web ShareToStoriesModal parity). */
 export function buildSharePostToStoriesPayload(post: Post): SharePostToStoriesPayload {
     const postText = post.text || post.caption || post.imageText || '';

@@ -364,7 +364,21 @@ class StoryController extends Controller
         // Resolved outside the transaction: it may make outbound HTTP calls.
         $linkPreview = $this->resolveLinkPreview($request);
 
-        $story = DB::transaction(function () use ($request, $user, $sharedPost, $linkPreview) {
+        $shareStillLive = false;
+        $story = DB::transaction(function () use ($request, $user, $sharedPost, $linkPreview, &$shareStillLive) {
+            // One live story per newsfeed card. The same card can be shared again only
+            // after this story expires and drops off Stories (24 hours).
+            if ($sharedPost && Story::query()
+                ->where('user_id', $user->id)
+                ->where('shared_from_post_id', $sharedPost->id)
+                ->where('expires_at', '>', now())
+                ->lockForUpdate()
+                ->exists()) {
+                $shareStillLive = true;
+
+                return null;
+            }
+
             $attributes = [
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
@@ -393,6 +407,12 @@ class StoryController extends Controller
 
             return $story;
         });
+
+        if ($shareStillLive || ! $story) {
+            return response()->json([
+                'error' => 'This card is already on your Stories. You can share it again after it disappears in 24 hours.',
+            ], 409);
+        }
 
         return response()->json($this->presentStory($story, false), 201);
     }
