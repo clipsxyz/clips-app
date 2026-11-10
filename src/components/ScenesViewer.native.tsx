@@ -181,7 +181,6 @@ export default function ScenesViewer({
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
     const [burstKey, setBurstKey] = useState(0);
     const burstClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [topMetaVisible, setTopMetaVisible] = useState(true);
     const [metadataIndex, setMetadataIndex] = useState(0);
     const [saveModalOpen, setSaveModalOpen] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
@@ -201,7 +200,6 @@ export default function ScenesViewer({
     activeIndexRef.current = activeIndex;
     postsRef.current = posts;
     const videoRef = useRef<VideoRef>(null);
-    const topMetaHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const currentTimeRef = useRef(0);
     const timesByPostId = useRef<Map<string, number>>(new Map());
     const didSeekInitialRef = useRef(false);
@@ -269,33 +267,12 @@ export default function ScenesViewer({
         setMediaSlideIndex(0);
         setPaused(false);
         setMetadataIndex(0);
-        setTopMetaVisible(true);
         lastMediaTapRef.current = 0;
         if (singleMediaTapTimerRef.current) {
             clearTimeout(singleMediaTapTimerRef.current);
             singleMediaTapTimerRef.current = null;
         }
     }, [activePost?.id]);
-
-    useEffect(() => {
-        if (topMetaHideTimerRef.current) {
-            clearTimeout(topMetaHideTimerRef.current);
-            topMetaHideTimerRef.current = null;
-        }
-        if (commentsOpen) {
-            setTopMetaVisible(true);
-            return;
-        }
-        topMetaHideTimerRef.current = setTimeout(() => {
-            setTopMetaVisible(false);
-        }, 1600);
-        return () => {
-            if (topMetaHideTimerRef.current) {
-                clearTimeout(topMetaHideTimerRef.current);
-                topMetaHideTimerRef.current = null;
-            }
-        };
-    }, [activePost?.id, commentsOpen, paused, muted, metadataIndex]);
 
     useEffect(() => {
         if (commentsOpen) {
@@ -731,7 +708,6 @@ export default function ScenesViewer({
     const fireDoubleTapLikeAt = useCallback(
         (pageX: number, pageY: number) => {
             if (isTextOnlyPost) return;
-            setTopMetaVisible(true);
             setBurstAt({ x: pageX, y: pageY });
             setBurstKey((k) => k + 1);
             // Play once: clear on a timer (feed parity) instead of an inline onDone
@@ -751,7 +727,6 @@ export default function ScenesViewer({
     const handleMediaPress = useCallback(
         (event?: GestureResponderEvent) => {
             if (isTextOnlyPost) return;
-            setTopMetaVisible(true);
 
             const now = Date.now();
             if (now - lastMediaTapRef.current <= SCENES_DOUBLE_TAP_MS) {
@@ -783,9 +758,6 @@ export default function ScenesViewer({
         return () => {
             if (singleMediaTapTimerRef.current) {
                 clearTimeout(singleMediaTapTimerRef.current);
-            }
-            if (topMetaHideTimerRef.current) {
-                clearTimeout(topMetaHideTimerRef.current);
             }
             if (burstClearTimerRef.current) {
                 clearTimeout(burstClearTimerRef.current);
@@ -972,7 +944,7 @@ export default function ScenesViewer({
             </Pressable>
 
             <View style={[styles.topRight, { top: insets.top + 14 }]}>
-                {!commentsOpen && topMetaVisible && metadataItems.length > 0 ? (
+                {!commentsOpen && metadataItems.length > 0 ? (
                     <View style={styles.metaPill}>
                         <Icon
                             name={metadataIcon(metadataItems[metadataIndex]?.type ?? 'feed')}
