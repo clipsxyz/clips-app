@@ -152,7 +152,6 @@ export default function ScenesViewer({
     /** 0 = fullscreen post, 1 = comments open (post pinned to the top 40%). */
     const commentsProgressSv = useSharedValue(0);
     const commentsPreviewSv = useSharedValue(Math.round(windowHeight * COMMENTS_PREVIEW_RATIO));
-    const windowHeightSv = useSharedValue(windowHeight);
     /** Full viewer height captured while comments are closed, so the keyboard
      * resize does not recompute the split. */
     const stageHeightSv = useSharedValue(windowHeight);
@@ -278,25 +277,22 @@ export default function ScenesViewer({
     }, [activePost?.id]);
 
     useEffect(() => {
-        windowHeightSv.value = windowHeight;
         if (commentsOpen) return;
         stageHeightSv.value = windowHeight;
         commentsPreviewSv.value = Math.max(1, Math.round(windowHeight * COMMENTS_PREVIEW_RATIO));
-    }, [commentsOpen, commentsPreviewSv, stageHeightSv, windowHeight, windowHeightSv]);
+    }, [commentsOpen, commentsPreviewSv, stageHeightSv, windowHeight]);
 
     useEffect(() => {
         if (commentsOpen) {
-            const fullPreview = Math.max(1, Math.round(stageHeightSv.value * COMMENTS_PREVIEW_RATIO));
-            // Keep a usable sheet if the keyboard shrinks the window (adjustResize).
-            const preview = Math.max(96, Math.min(fullPreview, windowHeight - 240));
-            const duration = commentsProgressSv.value > 0.85 ? 200 : COMMENTS_MEDIA_MS;
+            // Keep the video and sheet where they opened. The composer lifts on its own.
+            const preview = Math.max(1, Math.round(stageHeightSv.value * COMMENTS_PREVIEW_RATIO));
             commentsPreviewSv.value = preview;
             commentsProgressSv.value = withTiming(1, {
-                duration,
+                duration: COMMENTS_MEDIA_MS,
                 easing: COMMENTS_MEDIA_EASE,
             });
             mediaHeightSv.value = withTiming(preview, {
-                duration,
+                duration: COMMENTS_MEDIA_MS,
                 easing: COMMENTS_MEDIA_EASE,
             });
             return;
@@ -312,7 +308,7 @@ export default function ScenesViewer({
             duration: COMMENTS_MEDIA_MS,
             easing: COMMENTS_MEDIA_EASE,
         });
-    }, [commentsOpen, commentsPreviewSv, commentsProgressSv, mediaHeightSv, stageHeightSv, windowHeight]);
+    }, [commentsOpen, commentsPreviewSv, commentsProgressSv, mediaHeightSv, stageHeightSv]);
 
     const applyMediaFrame = useCallback((h: number, r: number) => {
         const nextH = Math.max(1, Math.round(h));
@@ -349,11 +345,9 @@ export default function ScenesViewer({
         const top =
             stageHeightSv.value -
             (stageHeightSv.value - commentsPreviewSv.value) * commentsProgressSv.value;
-        const parentHeight = windowHeightSv.value;
-        const clampedTop = Math.min(top, Math.max(0, parentHeight - 1));
         return {
-            top: clampedTop,
-            height: Math.max(0, parentHeight - clampedTop),
+            top,
+            height: Math.max(0, stageHeightSv.value - top),
         };
     });
 

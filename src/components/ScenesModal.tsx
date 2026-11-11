@@ -8,6 +8,7 @@ import CreateGroupModal from './CreateGroupModal';
 import PickGroupToInviteFeedUserModal from './PickGroupToInviteFeedUserModal';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
+import CommentsModal from './CommentsModal';
 import StickerOverlayComponent from './StickerOverlay';
 import EffectWrapper from './EffectWrapper';
 import VerifiedBadge from './VerifiedBadge';
@@ -316,7 +317,17 @@ export default function ScenesModal({
     const carouselTouchHandled = React.useRef(false);
     const [carouselTouchDelta, setCarouselTouchDelta] = React.useState(0);
     const [carouselAnimating, setCarouselAnimating] = React.useState(false);
-    const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
+    const liveVh = typeof window !== 'undefined' ? window.innerHeight : 768;
+    // Freeze the split while comments are open so the phone keyboard does not
+    // resize the video or the sheet. Only the composer lifts.
+    const [commentsLayoutVh, setCommentsLayoutVh] = React.useState(liveVh);
+    const [composerLiftPx, setComposerLiftPx] = React.useState(0);
+    React.useEffect(() => {
+        if (isCaptionExpanded) return;
+        setCommentsLayoutVh(window.innerHeight);
+        setComposerLiftPx(0);
+    }, [isCaptionExpanded]);
+    const vh = isCaptionExpanded ? commentsLayoutVh : liveVh;
     // Match TikTok-like comments-open mini player sizing.
     const commentsPreviewHeightPx = Math.round(vh * 0.40);
     const commentsSheetTopPx = Math.min(
@@ -467,6 +478,26 @@ export default function ScenesModal({
 
     // Don't auto-focus the comment input when the sheet opens — on mobile that opens the keyboard
     // and pushes the video off-screen. User can tap the input when they want to type.
+
+    // Phone keyboard covers the bottom of the layout viewport. Lift only the
+    // composer; the comments sheet and video stay where they opened.
+    React.useEffect(() => {
+        if (!isCaptionExpanded) return;
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const sync = () => {
+            const visibleBottom = vv.offsetTop + vv.height;
+            const covered = Math.max(0, commentsLayoutVh - visibleBottom);
+            setComposerLiftPx(covered > 80 ? Math.round(covered) : 0);
+        };
+        sync();
+        vv.addEventListener('resize', sync);
+        vv.addEventListener('scroll', sync);
+        return () => {
+            vv.removeEventListener('resize', sync);
+            vv.removeEventListener('scroll', sync);
+        };
+    }, [commentsLayoutVh, isCaptionExpanded]);
 
     // Lock body scroll when comments sheet is open so video doesn't move (TikTok-style)
     React.useEffect(() => {
@@ -715,19 +746,8 @@ export default function ScenesModal({
 
     // Listen for engagement updates
     React.useEffect(() => {
-        const handleCommentAdded = async () => {
-            setComments(prev => prev + 1);
-            // Refresh comments list if sheet is open
-            if (isCaptionExpanded) {
-                try {
-                    const page = await fetchCommentsPage(post.id, null, 30, 5, user?.id);
-                    setCommentsList(page.items);
-                    setCommentsCursor(page.nextCursor);
-                    setCommentsHasMore(page.hasMore);
-                } catch (error) {
-                    console.error('Failed to refresh comments:', error);
-                }
-            }
+        const handleCommentAdded = () => {
+            setComments((prev) => prev + 1);
         };
         const handleLikeToggled = (event: CustomEvent) => {
             console.log('ScenesModal: likeToggled event received', event.detail);
@@ -762,7 +782,7 @@ export default function ScenesModal({
             window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
             window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
         };
-    }, [post.id, isCaptionExpanded, user?.id]);
+    }, [post.id]);
 
     // When the underlying post changes (e.g. swipe from post 1 to post 4),
     // reset the comments UI so we never show comments from the previous post.
@@ -1288,7 +1308,7 @@ export default function ScenesModal({
         setExpandedReplyThreads({});
     }, []);
 
-    const openCommentsSheet = React.useCallback(async (e?: React.SyntheticEvent) => {
+    const openCommentsSheet = React.useCallback((e?: React.SyntheticEvent) => {
         if (e) {
             e.preventDefault();
             e.stopPropagation();
@@ -1296,20 +1316,7 @@ export default function ScenesModal({
         if (isCaptionExpanded) return;
         setScenesBottomChromeVisible(true);
         setIsCaptionExpanded(true);
-        if (commentsList.length === 0 && !isLoadingComments) {
-            setIsLoadingComments(true);
-            try {
-                const page = await fetchCommentsPage(post.id, null, 30, 5, user?.id);
-                setCommentsList(page.items);
-                setCommentsCursor(page.nextCursor);
-                setCommentsHasMore(page.hasMore);
-            } catch (error) {
-                console.error('Failed to load comments:', error);
-            } finally {
-                setIsLoadingComments(false);
-            }
-        }
-    }, [commentsList.length, isCaptionExpanded, isLoadingComments, post.id, user?.id]);
+    }, [isCaptionExpanded]);
 
     const handleLoadMoreComments = React.useCallback(async () => {
         if (commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
@@ -2425,290 +2432,25 @@ export default function ScenesModal({
                         </div>
                     )}
 
-                    {/* Comments panel - portaled so it displays correctly (not clipped by carousel overflow) */}
+                    {/* Comments sheet — same navy sheet as the app, docked under the video. */}
                     {isCaptionExpanded && createPortal(
-                        <>
-                            {/* Backdrop - only from 30vh down, so video stays visible at top */}
-                            <div
-                                className="fixed left-0 right-0 bottom-0 z-[260]"
-                                // Leave more space for the video at the top when comments sheet is open.
-                                style={{
-                                    top: `${commentsSheetTopPx}px`,
-                                    backgroundColor: `rgba(0, 0, 0, ${commentsBackdropOpacity})`,
-                                    transition: isDragging ? 'none' : `top 0.64s ${scenesCommentsEase}, background-color 0.32s linear`,
-                                }}
-                                onClick={closeCommentsSheet}
+                        <div
+                            className="fixed left-0 right-0 z-[270] flex flex-col"
+                            style={{
+                                top: `${commentsSheetTopPx}px`,
+                                height: `${Math.max(0, vh - commentsSheetTopPx)}px`,
+                                transition: `top 0.64s ${scenesCommentsEase}, height 0.64s ${scenesCommentsEase}`,
+                            }}
+                        >
+                            <CommentsModal
+                                variant="embed"
+                                postId={String(post.id)}
+                                post={post}
+                                isOpen
+                                onClose={closeCommentsSheet}
+                                composerLiftPx={composerLiftPx}
                             />
-                            {/* Comments sheet - TikTok style: white card, fixed to viewport; only handle bar triggers drag */}
-                            <div
-                                ref={sheetRef}
-                                className="fixed left-0 right-0 bottom-0 z-[270] bg-white rounded-t-2xl flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.2)]"
-                                style={{
-                                    top: `${commentsSheetTopPx}px`,
-                                    bottom: 0,
-                                    height: `calc(100dvh - ${commentsSheetTopPx}px)`,
-                                    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-                                    transition: isDragging ? 'none' : `top 0.64s ${scenesCommentsEase}, height 0.64s ${scenesCommentsEase}`,
-                                }}
-                                onTouchStart={handleSheetTouchStart}
-                                onTouchMove={handleSheetTouchMove}
-                                onTouchEnd={handleSheetTouchEnd}
-                            >
-                                {/* Drag Handle - only this area starts sheet drag so list can scroll */}
-                                <div data-sheet-drag-handle className="flex justify-center pt-2 pb-1 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none">
-                                    <div className="w-10 h-1 bg-gray-300 rounded-full" />
-                                </div>
-                                {/* Header - TikTok style: "X comments" + sort + close */}
-                                <div className="flex items-center justify-between px-4 pb-3 flex-shrink-0 border-b border-gray-200">
-                                    <h3 className="text-black font-semibold text-base">
-                                        {comments} {comments === 1 ? 'comment' : 'comments'}
-                                    </h3>
-                                    <div className="flex items-center gap-2">
-                                        <button type="button" className="p-2 -mr-1 text-gray-600 hover:text-gray-900" aria-label="Sort comments">
-                                            <FiChevronDown className="w-5 h-5" />
-                                        </button>
-                                        <button type="button" onClick={closeCommentsSheet} className="p-2 -mr-1 text-gray-600 hover:text-gray-900" aria-label="Close comments">
-                                            <FiX className="w-5 h-5" />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Scrollable Comments */}
-                                <div
-                                    ref={commentsSheetScrollRef}
-                                    onScroll={(e) => handleCommentsSheetScroll(e.currentTarget)}
-                                    className="flex-1 overflow-y-auto min-h-0"
-                                >
-                                    {(post.caption || post.text) && (
-                                        <div className="px-4 py-3 border-b border-gray-100">
-                                            <p className="text-gray-900 text-sm whitespace-pre-line break-words">
-                                                {renderTextWithMentions(post.caption || post.text)}
-                                            </p>
-                                        </div>
-                                    )}
-                                    {isLoadingComments ? (
-                                        <div className="flex justify-center py-12">
-                                            <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
-                                        </div>
-                                    ) : commentsList.length === 0 ? (
-                                        <div className="text-center py-12 text-gray-500 text-sm">
-                                            No comments yet. Be the first to comment!
-                                        </div>
-                                    ) : (
-                                        <div className="px-4 py-2 space-y-4">
-                                            {commentsList.map((comment) => (
-                                                <div key={comment.id} className="flex gap-3">
-                                                    <Avatar
-                                                        src={
-                                                            comment.userHandle === user?.handle
-                                                                ? (user?.avatarUrl || getAvatarForHandle(comment.userHandle))
-                                                                : getAvatarForHandle(comment.userHandle)
-                                                        }
-                                                        name={comment.userHandle?.split('@')[0] || 'User'}
-                                                        size="sm"
-                                                        className="flex-shrink-0 ring-1 ring-gray-200"
-                                                    />
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-baseline gap-2 mb-0.5">
-                                                            <span className="font-semibold text-sm text-gray-900">
-                                                                {comment.userHandle}
-                                                            </span>
-                                                            <span className="text-xs text-gray-500">
-                                                                {timeAgo(comment.createdAt)}
-                                                            </span>
-                                                        </div>
-                                                        <p className="text-sm text-gray-900 mb-2">{renderTextWithMentions(comment.text)}</p>
-                                                        <div className="flex items-center justify-between">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setReplyingToCommentId(replyingToCommentId === comment.id ? null : comment.id)}
-                                                                className="text-xs text-gray-500 hover:text-gray-900 font-medium"
-                                                            >
-                                                                Reply
-                                                            </button>
-                                                            <div className="flex items-center gap-1 text-gray-500">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleLikeComment(comment.id)}
-                                                                    disabled={likingCommentId === comment.id}
-                                                                    className="p-0.5 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
-                                                                    aria-label={comment.userLiked ? 'Unlike' : 'Like'}
-                                                                >
-                                                                    <FiThumbsUp className={`w-4 h-4 ${comment.userLiked ? 'text-blue-500' : ''}`} />
-                                                                </button>
-                                                                <span className="text-xs">{comment.likes || 0}</span>
-                                                            </div>
-                                                        </div>
-                                                        {/* Reply uses bottom composer — avoid stacking under Join/Add comment. */}
-                                                        {replyingToCommentId === comment.id ? (
-                                                            <p className="mt-1 text-[11px] font-medium text-[#3d9b8f]">
-                                                                Replying in composer below…
-                                                            </p>
-                                                        ) : null}
-                                                        {/* Replies - nested under parent comment (collapsed by default) */}
-                                                        {(comment.replies?.length ?? 0) > 0 && (
-                                                            <div className="mt-2 ml-2">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        setExpandedReplyThreads(prev => ({
-                                                                            ...prev,
-                                                                            [comment.id]: !prev[comment.id]
-                                                                        }))
-                                                                    }
-                                                                    className="text-xs font-medium text-gray-500 hover:text-gray-800"
-                                                                >
-                                                                    {expandedReplyThreads[comment.id]
-                                                                        ? `Hide replies (${comment.replies!.length})`
-                                                                        : `View replies (${comment.replies!.length})`}
-                                                                </button>
-
-                                                                {expandedReplyThreads[comment.id] && (
-                                                                    <div className="mt-2 pl-4 border-l-2 border-gray-200 bg-gray-50/80 rounded-r-md py-2 space-y-3">
-                                                                        {comment.replies!.map((reply) => (
-                                                                            <div key={reply.id} className="flex gap-2">
-                                                                                <Avatar
-                                                                                    src={
-                                                                                        reply.userHandle === user?.handle
-                                                                                            ? (user?.avatarUrl || getAvatarForHandle(reply.userHandle))
-                                                                                            : getAvatarForHandle(reply.userHandle)
-                                                                                    }
-                                                                                    name={reply.userHandle?.split('@')[0] || 'User'}
-                                                                                    size="sm"
-                                                                                    className="flex-shrink-0 ring-1 ring-gray-200 w-6 h-6"
-                                                                                />
-                                                                                <div className="flex-1 min-w-0">
-                                                                                    <div className="flex items-baseline gap-2 mb-0.5">
-                                                                                        <span className="font-semibold text-xs text-gray-900">{reply.userHandle}</span>
-                                                                                        <span className="text-xs text-gray-400">{timeAgo(reply.createdAt)}</span>
-                                                                                    </div>
-                                                                                    <p className="text-xs text-gray-900 mb-1">{renderTextWithMentions(reply.text)}</p>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => handleLikeReply(comment.id, reply.id)}
-                                                                                        disabled={likingReplyKey === `${comment.id}-${reply.id}`}
-                                                                                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
-                                                                                        aria-label={reply.userLiked ? 'Unlike reply' : 'Like reply'}
-                                                                                        title={(reply.likes ?? 0) === 0 ? 'Like this reply' : `${reply.likes ?? 0} likes`}
-                                                                                    >
-                                                                                        <FiThumbsUp className={`w-3.5 h-3.5 ${reply.userLiked ? 'text-blue-500' : ''}`} />
-                                                                                        <span className="text-xs" title="Likes on this reply">{reply.likes ?? 0}</span>
-                                                                                    </button>
-                                                                                </div>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            {commentsHasMore && (
-                                                <div className="pt-1">
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleLoadMoreComments}
-                                                        disabled={commentsLoadingMore}
-                                                        className="w-full min-h-[40px] rounded-lg border border-gray-300 bg-gray-50 text-sm text-gray-700 disabled:opacity-60"
-                                                    >
-                                                        {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Comment / reply composer (footer). */}
-                                <div className="px-4 py-3 flex-shrink-0 border-t border-gray-200 bg-white safe-area-inset-bottom">
-                                    {replyingToCommentId ? (
-                                        <div className="mb-2 flex items-center justify-between gap-2">
-                                            <p className="text-xs text-gray-500 truncate">
-                                                Replying to{' '}
-                                                {commentsList.find((c) => c.id === replyingToCommentId)?.userHandle ||
-                                                    'comment'}
-                                            </p>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setReplyingToCommentId(null);
-                                                    setReplyInputText('');
-                                                }}
-                                                className="p-1 text-gray-500 hover:text-gray-900"
-                                                aria-label="Cancel reply"
-                                            >
-                                                <FiX size={14} />
-                                            </button>
-                                        </div>
-                                    ) : null}
-                                    <form
-                                        onSubmit={(e) => {
-                                            e.preventDefault();
-                                            if (replyingToCommentId) {
-                                                void handleReplyToComment(replyingToCommentId, replyInputText);
-                                            } else {
-                                                handleAddComment();
-                                            }
-                                        }}
-                                        className="flex items-center gap-2"
-                                    >
-                                        <Avatar
-                                            src={user?.avatarUrl}
-                                            name={user?.name || user?.handle || 'User'}
-                                            size="sm"
-                                            className="flex-shrink-0 ring-1 ring-gray-200"
-                                        />
-                                        <input
-                                            ref={expandedCommentInputRef}
-                                            type="text"
-                                            value={replyingToCommentId ? replyInputText : commentText}
-                                            onChange={(e) => {
-                                                if (replyingToCommentId) setReplyInputText(e.target.value);
-                                                else setCommentText(e.target.value);
-                                            }}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    if (replyingToCommentId) {
-                                                        if (replyInputText.trim()) {
-                                                            void handleReplyToComment(
-                                                                replyingToCommentId,
-                                                                replyInputText,
-                                                            );
-                                                        }
-                                                    } else if (commentText.trim() && user) {
-                                                        handleAddComment(commentText.trim());
-                                                    }
-                                                }
-                                            }}
-                                            placeholder={
-                                                replyingToCommentId ? 'Write a reply...' : 'Add comment...'
-                                            }
-                                            className="flex-1 min-w-0 px-4 py-2.5 rounded-full bg-gray-100 text-gray-900 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:bg-gray-50"
-                                            disabled={
-                                                replyingToCommentId
-                                                    ? !!submittingReplyId || !user
-                                                    : isAddingComment || !user
-                                            }
-                                            autoFocus={Boolean(replyingToCommentId)}
-                                        />
-                                        <button
-                                            type="submit"
-                                            disabled={
-                                                replyingToCommentId
-                                                    ? !replyInputText.trim() || !!submittingReplyId
-                                                    : !commentText.trim() || isAddingComment || !user
-                                            }
-                                            className="p-2 text-gray-900 disabled:opacity-40"
-                                            aria-label={replyingToCommentId ? 'Send reply' : 'Post comment'}
-                                        >
-                                            <FiSend className="w-5 h-5" />
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        </>,
+                        </div>,
                         document.body
                     )}
                                 </div>

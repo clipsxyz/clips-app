@@ -70,8 +70,13 @@ function sheetAvatarSrc(
 
 interface CommentsModalProps {
     postId: string;
+    post?: Post | null;
     isOpen: boolean;
     onClose: () => void;
+    /** `embed` fills the parent. Fullscreen Scenes uses this under the shrunk video. */
+    variant?: 'modal' | 'embed';
+    /** Moves only the composer when the phone keyboard covers the sheet. */
+    composerLiftPx?: number;
 }
 
 function formatTime(timestamp: number): string {
@@ -164,7 +169,7 @@ function CommentItem({
     const [liked, setLiked] = React.useState(comment.userLiked);
     const [likes, setLikes] = React.useState(comment.likes);
     const [busy, setBusy] = React.useState(false);
-    const [showReplies, setShowReplies] = React.useState(true);
+    const [showReplies, setShowReplies] = React.useState(false);
 
     // Sync with comment data changes
     React.useEffect(() => {
@@ -172,14 +177,14 @@ function CommentItem({
         setLikes(comment.likes);
     }, [comment.userLiked, comment.likes]);
 
-    const replyCount = comment.replyCount || 0;
-    const hasReplies = replyCount > 0;
     const isCommentAuthor = String(comment.userHandle || '').trim().toLowerCase() === String(user?.handle || '').trim().toLowerCase();
     const isHiddenForViewer = comment.moderationState === 'hidden_by_filter' && !isCommentAuthor;
     const visibleReplies = (comment.replies || []).filter((reply) => {
         if (reply.moderationState !== 'hidden_by_filter') return true;
         return String(reply.userHandle || '').trim().toLowerCase() === String(user?.handle || '').trim().toLowerCase();
     });
+    const replyCount = Math.max(comment.replyCount || 0, visibleReplies.length);
+    const hasReplies = replyCount > 0;
 
     return (
         <div className="flex gap-3">
@@ -348,6 +353,7 @@ function CommentInput({
         if (text.trim() && !isLoading) {
             onSubmit(text.trim());
             setText('');
+            setShowEmojiPicker(false);
         }
     };
 
@@ -415,7 +421,14 @@ function CommentInput({
     );
 }
 
-export default function CommentsModal({ postId, isOpen, onClose }: CommentsModalProps) {
+export default function CommentsModal({
+    postId,
+    post: postSnapshot,
+    isOpen,
+    onClose,
+    variant = 'modal',
+    composerLiftPx = 0,
+}: CommentsModalProps) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const online = useOnline();
@@ -424,7 +437,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const [commentsCursor, setCommentsCursor] = React.useState<string | null>(null);
     const [commentsHasMore, setCommentsHasMore] = React.useState(false);
     const [commentsLoadingMore, setCommentsLoadingMore] = React.useState(false);
-    const [sortMode, setSortMode] = React.useState<'top' | 'newest'>('top');
+    const [sortMode, setSortMode] = React.useState<'top' | 'newest'>('newest');
     const [loading, setLoading] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
     const [replyingTo, setReplyingTo] = React.useState<{ id: string; handle: string } | null>(null);
@@ -448,40 +461,44 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const postIdStr = String(postId || '');
     const isDemoPost = isFrontendOnlyPostId(postIdStr);
     const canLoadComments = isDemoPost || Boolean(user?.id);
+    const postSnapshotRef = React.useRef(postSnapshot);
+    postSnapshotRef.current = postSnapshot;
 
     // Load post (author, caption) + comments when modal opens
     React.useEffect(() => {
         if (!isOpen) {
             setReplyingTo(null);
+            setSortMode('newest');
             return;
         }
         if (!postId || !canLoadComments) return;
         let cancelled = false;
         (async () => {
             setLoading(true);
-            setPost(null);
+            setPost(postSnapshotRef.current ?? null);
             setComments([]);
             setCommentsCursor(null);
             setCommentsHasMore(false);
             setCommentsLoadingMore(false);
             try {
                 const [fetchedPost, fetchedCommentsPage] = await Promise.all([
-                    getPostById(postId, user?.id),
-                    fetchCommentsPage(postId, null, 30, 5, user?.id),
+                    getPostById(postId, user?.id).catch(() => null),
+                    fetchCommentsPage(postId, null, 30, 5, user?.id).catch(() => null),
                 ]);
                 if (cancelled) return;
-                setPost(fetchedPost);
-                setComments(fetchedCommentsPage.items);
-                setCommentsCursor(fetchedCommentsPage.nextCursor);
-                setCommentsHasMore(fetchedCommentsPage.hasMore);
+                setPost(fetchedPost ?? postSnapshotRef.current ?? null);
+                if (fetchedCommentsPage) {
+                    setComments(fetchedCommentsPage.items);
+                    setCommentsCursor(fetchedCommentsPage.nextCursor);
+                    setCommentsHasMore(fetchedCommentsPage.hasMore);
+                }
                 requestAnimationFrame(() => {
                     commentsScrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
                 });
             } catch (error) {
                 console.error('Failed to load comments sheet:', error);
                 if (!cancelled) {
-                    setPost(null);
-                    setComments([]);
+                    setPost(postSnapshotRef.current ?? null);
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -859,17 +876,13 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const previewUrl = post ? commentSheetPreviewUrl(post) : undefined;
     const commentAccess = resolveCommentComposerAccess(post, user);
 
-    return createPortal(
-        <div className="fixed inset-0 z-[230] flex items-end justify-center">
-            <button
-                type="button"
-                className="absolute inset-0 bg-black/55"
-                onClick={onClose}
-                aria-label="Dismiss comments"
-            />
-
+    const sheet = (
             <div
-                className="relative flex h-[78%] w-full max-w-[min(400px,calc(100vw-32px))] min-h-0 flex-col overflow-hidden rounded-t-2xl border border-b-0 border-white/15 text-white shadow-xl"
+                className={
+                    variant === 'embed'
+                        ? 'relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-t-2xl text-white'
+                        : 'relative flex h-[78%] w-full max-w-[min(400px,calc(100vw-32px))] min-h-0 flex-col overflow-hidden rounded-t-2xl border border-b-0 border-white/15 text-white shadow-xl'
+                }
                 style={{ background: SHEET_GRADIENT }}
             >
                 {post && (post.mediaUrl || authorHandle) ? (
@@ -1013,7 +1026,12 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     )}
                 </div>
 
-                <div className="flex-shrink-0 border-t border-white/12 bg-[rgba(6,13,22,0.92)]">
+                <div
+                    className="relative z-[2] flex-shrink-0 border-t border-white/12 bg-[rgba(6,13,22,0.92)]"
+                    style={{
+                        transform: composerLiftPx > 0 ? `translateY(-${composerLiftPx}px)` : undefined,
+                    }}
+                >
                     {commentAccess.canComment ? (
                     <CommentInput
                         placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
@@ -1047,7 +1065,20 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     </div>
                 )}
             </div>
+    );
+
+    if (variant === 'embed') return sheet;
+
+    return createPortal(
+        <div className="fixed inset-0 z-[230] flex items-end justify-center">
+            <button
+                type="button"
+                className="absolute inset-0 bg-black/55"
+                onClick={onClose}
+                aria-label="Dismiss comments"
+            />
+            {sheet}
         </div>,
-        document.body
+        document.body,
     );
 }

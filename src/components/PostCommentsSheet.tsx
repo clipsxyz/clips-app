@@ -10,7 +10,6 @@ import {
     ActivityIndicator,
     TextInput,
     Dimensions,
-    KeyboardAvoidingView,
     Keyboard,
     Modal,
     Platform,
@@ -23,6 +22,14 @@ import {
     BottomSheetTextInput,
     type BottomSheetFlatListMethods,
 } from '@gorhom/bottom-sheet';
+import { TouchableOpacity as GestureTouchableOpacity } from 'react-native-gesture-handler';
+import Animated, {
+    measure,
+    runOnUI,
+    useAnimatedRef,
+    useAnimatedStyle,
+    useSharedValue,
+} from 'react-native-reanimated';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import {
     UCL_CANVAS_NAVY,
@@ -212,10 +219,7 @@ function CommentItem({
     });
     const replyCount = Math.max(comment.replyCount || 0, visibleReplies.length);
     const hasReplies = replyCount > 0;
-    const [showReplies, setShowReplies] = useState(hasReplies);
-    useEffect(() => {
-        if (hasReplies) setShowReplies(true);
-    }, [replyCount, hasReplies]);
+    const [showReplies, setShowReplies] = useState(false);
 
     const avatarSrc =
         comment.userHandle === user?.handle
@@ -370,6 +374,9 @@ function CommentInput({
     onCancelReply,
     useSheetTextInput = false,
     autoFocus = false,
+    textInputRef,
+    onFocus,
+    onBlur,
 }: {
     placeholder: string;
     onSubmit: (text: string) => void;
@@ -378,11 +385,15 @@ function CommentInput({
     onCancelReply?: () => void;
     useSheetTextInput?: boolean;
     autoFocus?: boolean;
+    textInputRef?: React.RefObject<TextInput | null>;
+    onFocus?: () => void;
+    onBlur?: () => void;
 }) {
     const { user } = useAuth();
     const [text, setText] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-    const inputRef = useRef<TextInput>(null);
+    const localInputRef = useRef<TextInput>(null);
+    const inputRef = textInputRef ?? localInputRef;
 
     useEffect(() => {
         if (!replyingToHandle) return;
@@ -399,8 +410,12 @@ function CommentInput({
 
     const handleSubmit = () => {
         if (!text.trim() || isLoading) return;
-        onSubmit(text.trim());
+        const next = text.trim();
         setText('');
+        setShowEmojiPicker(false);
+        onSubmit(next);
+        // Send sits outside the field. Put the cursor back so the keyboard stays up.
+        requestAnimationFrame(() => inputRef.current?.focus());
     };
 
     const InputComponent = useSheetTextInput ? BottomSheetTextInput : TextInput;
@@ -421,13 +436,16 @@ function CommentInput({
                 <View style={styles.emojiPickerWrap}>
                     <View style={styles.emojiPickerGrid}>
                         {COMMENT_EMOJIS.map((emoji) => (
-                            <TouchableOpacity
+                            <GestureTouchableOpacity
                                 key={emoji}
                                 style={styles.emojiButton}
-                                onPress={() => setText((prev) => prev + emoji)}
+                                onPress={() => {
+                                    setText((prev) => prev + emoji);
+                                    inputRef.current?.focus();
+                                }}
                             >
                                 <Text style={styles.emojiButtonText}>{emoji}</Text>
-                            </TouchableOpacity>
+                            </GestureTouchableOpacity>
                         ))}
                     </View>
                 </View>
@@ -436,15 +454,18 @@ function CommentInput({
                 <CommentAvatarRing size="sm" gap={12}>
                     <Avatar src={user?.avatarUrl} name={user?.name || 'User'} size="sm" />
                 </CommentAvatarRing>
-                <TouchableOpacity
+                <GestureTouchableOpacity
                     style={[styles.emojiToggle, showEmojiPicker && styles.emojiToggleActive]}
-                    onPress={() => setShowEmojiPicker((v) => !v)}
+                    onPress={() => {
+                        setShowEmojiPicker((v) => !v);
+                        inputRef.current?.focus();
+                    }}
                 >
                     <FeedSmileIcon
                         size={20}
                         color={showEmojiPicker ? P.text : P.muted}
                     />
-                </TouchableOpacity>
+                </GestureTouchableOpacity>
                 <View style={styles.commentInputGradientWrap}>
                     <InputComponent
                         ref={inputRef as any}
@@ -455,16 +476,19 @@ function CommentInput({
                         onChangeText={setText}
                         editable={!isLoading}
                         returnKeyType="send"
+                        blurOnSubmit={false}
+                        onFocus={onFocus}
+                        onBlur={onBlur}
                         onSubmitEditing={handleSubmit}
                     />
                 </View>
-                <TouchableOpacity
+                <GestureTouchableOpacity
                     style={[styles.sendButton, (!text.trim() || isLoading) && styles.sendButtonDisabled]}
                     disabled={!text.trim() || isLoading}
                     onPress={handleSubmit}
                 >
                     <FeedSendIcon size={16} color={UCL_CANVAS_NAVY} />
-                </TouchableOpacity>
+                </GestureTouchableOpacity>
             </View>
         </View>
     );
@@ -482,6 +506,17 @@ export default function PostCommentsSheet({
     variant = 'modal',
 }: Props) {
     const isScenesEmbed = variant === 'scenesEmbed';
+    const composerLiftSv = useSharedValue(0);
+    const composerVisualBottomSv = useSharedValue(-1);
+    const composerInputRef = useRef<TextInput | null>(null);
+    const footerRef = useAnimatedRef<View>();
+    const keepKeyboardRef = useRef(false);
+    const keyboardShownAtRef = useRef(0);
+    const keyboardRefocusesRef = useRef(0);
+    const dropTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const composerStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: -composerLiftSv.value }],
+    }));
     const { user } = useAuth();
     const navigation = useNavigation<any>();
     const listRef = useRef<(FlatList<Comment> & BottomSheetFlatListMethods) | null>(null);
@@ -496,9 +531,102 @@ export default function PostCommentsSheet({
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [followBusy, setFollowBusy] = useState(false);
-    const [sortMode, setSortMode] = useState<'top' | 'newest'>('top');
+    const [sortMode, setSortMode] = useState<'top' | 'newest'>('newest');
     const [replyingTo, setReplyingTo] = useState<{ id: string; handle: string } | null>(null);
     const [submittingReply, setSubmittingReply] = useState(false);
+
+    useEffect(() => {
+        if (!isScenesEmbed || !isOpen) {
+            composerLiftSv.value = 0;
+            keepKeyboardRef.current = false;
+            keyboardRefocusesRef.current = 0;
+            return undefined;
+        }
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        let cancelled = false;
+        const alignTimers: ReturnType<typeof setTimeout>[] = [];
+        // Sit the composer on the keyboard. The reported keyboard height is taller
+        // than the overlap on Android, which left a gap under the field.
+        const alignComposer = (keyboardTop: number) => {
+            runOnUI((top: number) => {
+                'worklet';
+                const frame = measure(footerRef);
+                if (frame == null) return;
+                const visualBottom = frame.pageY + frame.height;
+                // Ignore a repeat read of the same pixels. The lift from the previous
+                // pass has not been drawn yet, and adding it again would float the field.
+                if (
+                    composerLiftSv.value > 0 &&
+                    Math.abs(visualBottom - composerVisualBottomSv.value) < 2
+                ) {
+                    return;
+                }
+                composerVisualBottomSv.value = visualBottom;
+                const delta = Math.round(visualBottom - top);
+                if (Math.abs(delta) < 2) return;
+                composerLiftSv.value = Math.max(0, composerLiftSv.value + delta);
+            })(keyboardTop);
+        };
+        const onShow = (e: { endCoordinates: { height: number; screenY: number } }) => {
+            if (dropTimerRef.current) {
+                clearTimeout(dropTimerRef.current);
+                dropTimerRef.current = null;
+            }
+            keyboardShownAtRef.current = Date.now();
+            keyboardRefocusesRef.current = 0;
+            const keyboardTop = e.endCoordinates.screenY;
+            alignComposer(keyboardTop);
+            // Layout catches up a frame after adjustResize. Measure again so the
+            // field lands on the keys instead of staying short of them.
+            alignTimers.push(
+                setTimeout(() => {
+                    if (!cancelled) alignComposer(keyboardTop);
+                }, 60),
+            );
+            alignTimers.push(
+                setTimeout(() => {
+                    if (!cancelled) alignComposer(keyboardTop);
+                }, 160),
+            );
+        };
+        const dropComposer = () => {
+            keepKeyboardRef.current = false;
+            keyboardRefocusesRef.current = 0;
+            composerLiftSv.value = 0;
+            composerVisualBottomSv.value = -1;
+        };
+        const onHide = () => {
+            // Android can emit a hide while the keyboard is still up, right after the
+            // composer moves. Keep the bar up and put the cursor back.
+            if (typeof Keyboard.isVisible === 'function' && Keyboard.isVisible()) return;
+            const bounced = Date.now() - keyboardShownAtRef.current < 800;
+            if (keepKeyboardRef.current && bounced && keyboardRefocusesRef.current < 3) {
+                keyboardRefocusesRef.current += 1;
+                requestAnimationFrame(() => composerInputRef.current?.focus());
+                if (dropTimerRef.current) clearTimeout(dropTimerRef.current);
+                dropTimerRef.current = setTimeout(() => {
+                    dropTimerRef.current = null;
+                    if (typeof Keyboard.isVisible === 'function' && Keyboard.isVisible()) return;
+                    dropComposer();
+                }, 350);
+                return;
+            }
+            dropComposer();
+        };
+        const showSub = Keyboard.addListener(showEvent, onShow);
+        const hideSub = Keyboard.addListener(hideEvent, onHide);
+        return () => {
+            cancelled = true;
+            alignTimers.forEach(clearTimeout);
+            if (dropTimerRef.current) {
+                clearTimeout(dropTimerRef.current);
+                dropTimerRef.current = null;
+            }
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, [composerLiftSv, composerVisualBottomSv, footerRef, isOpen, isScenesEmbed]);
 
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
@@ -533,7 +661,7 @@ export default function PostCommentsSheet({
 
     useEffect(() => {
         if (!isOpen) {
-            setSortMode('top');
+            setSortMode('newest');
             return;
         }
         if (!postIdStr || !canLoadComments) {
@@ -1213,8 +1341,8 @@ export default function PostCommentsSheet({
         contentContainerStyle: styles.commentsListContent,
         onScroll: handleScroll,
         scrollEventThrottle: 16 as const,
-        keyboardShouldPersistTaps: 'handled' as const,
-        keyboardDismissMode: 'on-drag' as const,
+        keyboardShouldPersistTaps: 'always' as const,
+        keyboardDismissMode: (isScenesEmbed ? 'none' : 'on-drag') as 'none' | 'on-drag',
         automaticallyAdjustKeyboardInsets: false,
         onScrollToIndexFailed: (info: { index: number }) => {
             setTimeout(() => {
@@ -1241,7 +1369,11 @@ export default function PostCommentsSheet({
                 ) : (
                     <FlatList {...commentsListProps} ListHeaderComponent={listHeader} />
                 )}
-                <View style={styles.footerSolid}>
+                <Animated.View
+                    ref={footerRef}
+                    style={[styles.footerSolid, isScenesEmbed ? composerStyle : null]}
+                    collapsable={false}
+                >
                     {commentAccess.canComment ? (
                         <CommentInput
                             placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
@@ -1252,29 +1384,26 @@ export default function PostCommentsSheet({
                             replyingToHandle={replyingTo?.handle}
                             onCancelReply={cancelReply}
                             autoFocus={Boolean(replyingTo)}
+                            textInputRef={isScenesEmbed ? composerInputRef : undefined}
+                            onFocus={
+                                isScenesEmbed
+                                    ? () => {
+                                          keepKeyboardRef.current = true;
+                                      }
+                                    : undefined
+                            }
                         />
                     ) : (
                         <View style={styles.commentsClosedBar}>
                             <Text style={styles.commentsClosedText}>{commentAccess.message}</Text>
                         </View>
                     )}
-                </View>
+                </Animated.View>
             </View>
         </PassportSheetCanvas>
     );
 
-    const embedBody =
-        Platform.OS === 'android' ? (
-            <View style={styles.scenesEmbedRoot}>{sheetBody}</View>
-        ) : (
-            <KeyboardAvoidingView
-                style={styles.scenesEmbedRoot}
-                behavior="padding"
-                keyboardVerticalOffset={12}
-            >
-                {sheetBody}
-            </KeyboardAvoidingView>
-        );
+    const embedBody = <View style={styles.scenesEmbedRoot}>{sheetBody}</View>;
 
     if (isScenesEmbed) {
         if (!isOpen) return null;
