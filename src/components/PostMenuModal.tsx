@@ -9,8 +9,6 @@ import {
     FiVolumeX,
     FiUserX,
     FiEyeOff,
-    FiStar,
-    FiRefreshCw,
     FiMaximize,
     FiTrash2,
     FiEdit3,
@@ -22,11 +20,11 @@ import {
     FiRepeat,
     FiUsers,
     FiUserPlus,
+    FiChevronRight,
 } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import QRCodeModal from './QRCodeModal';
 import { showToast } from '../utils/toast';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 
 interface PostMenuModalProps {
     post: Post;
@@ -88,7 +86,7 @@ export default function PostMenuModal({
     isCurrentUser = false,
     isFollowing = false,
     isSaved = false,
-    isMuted = false,
+    isMuted: _isMuted = false,
     isBlocked: _isBlocked = false, // Reserved for future use
     hasNotifications = false,
 }: PostMenuModalProps) {
@@ -145,159 +143,122 @@ export default function PostMenuModal({
         }
     };
 
-    // Menu items based on whether it's current user's post or not
     type MenuItem = {
         icon: React.ComponentType<{ className?: string }>;
         label: string;
         action?: () => void | Promise<void>;
         danger?: boolean;
-        highlight?: boolean;
+        disabled?: boolean;
+        keepOpen?: boolean;
     };
 
-    const menuItems: MenuItem[] = isCurrentUser
+    const firstName = post.userHandle.split('@')[0];
+    const isReclip = !!post.originalUserHandle;
+    const rows: MenuItem[] = isCurrentUser
         ? [
-            // Own posts – only show Delete when handler is provided (user can delete own posts)
-            ...(onDelete ? [{ icon: FiTrash2, label: 'Delete', action: onDelete, danger: true }] : []),
-            { icon: FiEdit3, label: 'Edit', action: onEdit },
-            { icon: FiCopy, label: 'Copy Link', action: handleCopyLink },
-            { icon: FiArchive, label: 'Archive', action: onArchive },
-            { icon: hasNotifications ? FiBellOff : FiBell, label: hasNotifications ? 'Turn off post notifications' : 'Turn on post notifications', action: hasNotifications ? onTurnOffNotifications : onTurnOnNotifications },
+            ...(onCreateGroup ? [{ icon: FiUsers, label: 'Create group', action: onCreateGroup }] : []),
+            { icon: FiCopy, label: 'Copy link', action: handleCopyLink },
+            { icon: FiBookmark, label: isSaved ? 'Unsave' : 'Save', action: handleSave },
+            { icon: FiShare2, label: 'Share', action: () => onShare && handleAction(onShare) },
+            ...(!isReclip && onEdit ? [{ icon: FiEdit3, label: 'Edit', action: onEdit }] : []),
+            ...(!isReclip && onBoost ? [{ icon: FiZap, label: 'Boost', action: onBoost }] : []),
+            ...(!isReclip && onArchive ? [{ icon: FiArchive, label: 'Archive', action: onArchive }] : []),
+            ...(!isReclip && (onTurnOnNotifications || onTurnOffNotifications)
+                ? [{
+                    icon: hasNotifications ? FiBellOff : FiBell,
+                    label: hasNotifications ? 'Turn off post notifications' : 'Turn on post notifications',
+                    action: hasNotifications ? onTurnOffNotifications : onTurnOnNotifications,
+                }]
+                : []),
+            ...(!isReclip && onDelete ? [{ icon: FiTrash2, label: 'Delete post', action: onDelete, danger: true }] : []),
         ]
         : [
-            // Other users' posts (removed Save, Share, QR code - already in top row)
-            { icon: FiRepeat, label: 'Reclip', action: onReclip },
-            { icon: FiCopy, label: 'Copy Link', action: handleCopyLink },
-            { icon: FiFlag, label: 'Report post', action: onReport, danger: true },
-            ...(isFollowing ? [{ icon: FiUserMinus, label: `Unfollow ${post.userHandle.split('@')[0]}`, action: onUnfollow }] : []),
-            { icon: FiVolumeX, label: isMuted ? `Unmute ${post.userHandle.split('@')[0]}` : `Mute ${post.userHandle.split('@')[0]}`, action: onMute },
-            { icon: FiUserX, label: `Block ${post.userHandle.split('@')[0]}`, action: onBlock, danger: true },
-            { icon: FiEyeOff, label: 'Hide', action: onHide },
-            { icon: FiInfo, label: 'Not interested', action: onNotInterested },
+            { icon: FiCopy, label: 'Copy link', action: handleCopyLink },
+            { icon: FiBookmark, label: isSaved ? 'Unsave' : 'Save', action: handleSave },
+            { icon: FiShare2, label: 'Share', action: () => onShare && handleAction(onShare) },
+            ...(onInviteToGroup ? [{ icon: FiUserPlus, label: 'Invite to a group', action: onInviteToGroup }] : []),
+            { icon: FiMaximize, label: 'QR code', action: () => setShowQRCodeModal(true), keepOpen: true },
+            ...(onReclip
+                ? [{
+                    icon: FiRepeat,
+                    label: 'Reclip',
+                    action: onReclip,
+                    disabled: !!post.userReclipped,
+                }]
+                : []),
+            ...(isFollowing ? [{ icon: FiUserMinus, label: `Unfollow ${firstName}`, action: onUnfollow }] : []),
+            ...(onMute ? [{ icon: FiVolumeX, label: `Mute ${firstName}`, action: onMute }] : []),
+            ...(onHide ? [{ icon: FiEyeOff, label: 'Hide', action: onHide }] : []),
+            ...(onNotInterested ? [{ icon: FiInfo, label: 'Not interested', action: onNotInterested }] : []),
+            ...(onReport ? [{ icon: FiFlag, label: 'Report', action: onReport }] : []),
+            ...(onBlock ? [{ icon: FiUserX, label: 'Block user', action: onBlock, danger: true }] : []),
         ];
 
-    // Build full list for Threads-style sheet: label left, icon right, full-width rows. Insert dividers by group.
-    const isSaveRow = (label: string) => label === 'Save' || label === 'Unsave';
-
-    const renderRow = (item: MenuItem, index: number) => {
-        const Icon = item.icon;
-        const isDanger = item.danger;
-        const isHighlight = item.highlight;
-        const textClass = isDanger ? 'text-neutral-300' : isHighlight ? 'text-white' : 'text-white';
-        const iconClass = isDanger ? 'text-neutral-500' : isHighlight ? 'text-neutral-400' : 'text-neutral-400';
-        return (
-            <button
-                key={index}
-                onClick={() => {
-                    if (!item.action) return;
-                    // Save/Unsave: must not use handleAction — that called onClose() and unmounted before Save UI could show
-                    if (isSaveRow(item.label)) {
-                        handleSave();
-                        return;
-                    }
-                    if (item.label === 'Create group') {
-                        onCreateGroup?.();
-                        onClose();
-                        return;
-                    }
-                    if (item.label === 'Invite to a group') {
-                        onInviteToGroup?.();
-                        onClose();
-                        return;
-                    }
-                    // QR opens a higher z-index modal; closing the menu first would drop internal state
-                    if (item.label === 'QR code') {
-                        item.action();
-                        return;
-                    }
-                    handleAction(item.action);
-                }}
-                disabled={isProcessing}
-                className="flex w-full items-center justify-between py-3.5 px-4 active:bg-white/10 transition-colors disabled:opacity-50"
-            >
-                <span className={`text-[15px] font-medium ${textClass}`}>{item.label}</span>
-                <Icon className={`w-5 h-5 flex-shrink-0 ${iconClass}`} />
-            </button>
-        );
+    const runRow = (item: MenuItem) => {
+        if (!item.action || item.disabled) return;
+        if (item.label === 'Save' || item.label === 'Unsave') {
+            handleSave();
+            return;
+        }
+        if (item.label === 'Create group') {
+            onCreateGroup?.();
+            onClose();
+            return;
+        }
+        if (item.label === 'Invite to a group') {
+            onInviteToGroup?.();
+            onClose();
+            return;
+        }
+        if (item.keepOpen) {
+            item.action();
+            return;
+        }
+        handleAction(item.action);
     };
 
     return (
         <>
             <div className="fixed inset-0 z-[280] flex items-end justify-center">
-                {/* Backdrop – same as new Swal */}
-                <div
-                    className="absolute inset-0 bg-black/65 backdrop-blur-[2px]"
+                <button
+                    type="button"
+                    aria-label="Dismiss"
+                    className="absolute inset-0 bg-[rgba(3,9,27,0.72)]"
                     onClick={onClose}
                 />
-
-                <div className="relative w-full max-w-[min(400px,calc(100vw-32px))] overflow-hidden bg-[#060d16] border border-white/15 border-b-0 rounded-t-[24px] shadow-[0_-8px_40px_rgba(0,0,0,0.5)] max-h-[85vh] flex flex-col animate-in slide-in-from-bottom duration-300">
-                    <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                    <div className="relative z-10 flex max-h-[85vh] flex-col">
-                    <div className="flex justify-center pt-2.5 pb-2">
-                        <div className="w-10 h-0.5 bg-white/25 rounded-full" />
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto pb-6 px-0">
-                        {/* Own post: Copy link, Save/Unsave, Share, Boost, then divider and rest */}
-                        {isCurrentUser ? (
-                            <>
-                                {isCurrentUser && onCreateGroup ? (
-                                    <div className="py-1">
-                                        {renderRow({ icon: FiUsers, label: 'Create group', action: onCreateGroup }, -1)}
-                                    </div>
-                                ) : null}
-                                {isCurrentUser && onCreateGroup ? <div className="mx-4 border-t border-white/15" /> : null}
-                                <div className="py-1">
-                                    {[
-                                        { icon: FiCopy, label: 'Copy link', action: handleCopyLink },
-                                        { icon: FiBookmark, label: isSaved ? 'Unsave' : 'Save', action: handleSave },
-                                        { icon: FiShare2, label: 'Share', action: () => onShare && handleAction(onShare) },
-                                        ...(onBoost ? [{ icon: FiZap, label: 'Boost', action: onBoost }] : []),
-                                    ].map((row, i) => (
-                                        <React.Fragment key={i}>
-                                            {renderRow(row as MenuItem, i)}
-                                        </React.Fragment>
-                                    ))}
-                                </div>
-                                <div className="mx-4 border-t border-white/15" />
-                                <div className="py-1">
-                                    {menuItems.filter(m => m.label !== 'Copy Link').map((item, index) => renderRow(item, index))}
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div className="py-1">
-                                    {[
-                                        { icon: FiCopy, label: 'Copy link', action: handleCopyLink },
-                                        { icon: FiBookmark, label: isSaved ? 'Unsave' : 'Save', action: handleSave },
-                                        { icon: FiShare2, label: 'Share', action: () => onShare && handleAction(onShare) },
-                                        ...(onBoost ? [{ icon: FiZap, label: 'Boost', action: onBoost }] : []),
-                                        ...(onInviteToGroup
-                                            ? [{ icon: FiUserPlus, label: 'Invite to a group', action: onInviteToGroup }]
-                                            : []),
-                                        { icon: FiMaximize, label: 'QR code', action: () => setShowQRCodeModal(true) },
-                                    ].map((row, i) => (
-                                        <React.Fragment key={i}>
-                                            {renderRow(row as MenuItem, i)}
-                                        </React.Fragment>
-                                    ))}
-                                </div>
-                                <div className="mx-4 border-t border-white/15" />
-                                <div className="py-1">
-                                    {(() => {
-                                        const rest = menuItems.filter(m => m.label !== 'Copy Link');
-                                        return rest.map((item, index) => (
-                                            <React.Fragment key={`${item.label}-${index}`}>
-                                                {index > 0 && !rest[index - 1].danger && item.danger ? (
-                                                    <div className="mx-4 border-t border-white/15" />
-                                                ) : null}
-                                                {renderRow(item, index)}
-                                            </React.Fragment>
-                                        ));
-                                    })()}
-                                </div>
-                            </>
-                        )}
-                    </div>
+                <div
+                    className="relative flex max-h-[72%] w-full max-w-[min(400px,calc(100vw-32px))] flex-col overflow-hidden rounded-t-[20px] border border-b-0 border-white/15 pb-7"
+                    style={{ background: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)' }}
+                    role="dialog"
+                    aria-label="Post options"
+                >
+                    <div className="mx-auto mt-2.5 mb-2 h-1 w-10 rounded-full bg-white/35" aria-hidden />
+                    <h3 className="px-5 pb-2 text-base font-semibold text-white">Post options</h3>
+                    <div className="overflow-y-auto px-2">
+                        {rows.map((item) => {
+                            const Icon = item.icon;
+                            const color = item.danger ? '#F43F5E' : '#FFFFFF';
+                            return (
+                                <button
+                                    key={item.label}
+                                    type="button"
+                                    onClick={() => runRow(item)}
+                                    disabled={isProcessing || item.disabled}
+                                    className="flex w-full items-center gap-3 border-b border-white/10 px-3 py-3.5 text-left disabled:opacity-35"
+                                >
+                                    <Icon className="h-[22px] w-[22px] shrink-0" style={{ color }} />
+                                    <span className="min-w-0 flex-1 text-base font-medium" style={{ color }}>{item.label}</span>
+                                    <FiChevronRight className="h-[18px] w-[18px] shrink-0 text-white/55" />
+                                </button>
+                            );
+                        })}
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="mt-3 w-full py-3.5 text-center text-base font-semibold text-white"
+                        >
+                            Cancel
+                        </button>
                     </div>
                 </div>
             </div>

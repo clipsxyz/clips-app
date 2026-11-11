@@ -21,10 +21,52 @@ import { toggleFollow } from '../api/client';
 import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
 import { enqueue } from '../utils/mutationQueue';
 import Avatar from './Avatar';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import type { Comment, Post } from '../types';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import { getAvatarForHandle } from '../api/users';
-import { evaluateCommentModeration, getCommentModerationPreferences } from '../utils/commentModeration';
+import { evaluateCommentModeration, getCommentModerationPreferences, resolveCommentComposerAccess } from '../utils/commentModeration';
+
+const SHEET_GRADIENT = 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)';
+
+function commentSheetPreviewUrl(post: Post): string | undefined {
+    const anyPost = post as Post & {
+        posterUrl?: string;
+        thumbnailUrl?: string;
+        avatarUrl?: string;
+        author?: { avatarUrl?: string };
+    };
+    const mediaPosters = (post.mediaItems || []).flatMap((item) => {
+        const slide = item as { posterUrl?: string; thumbnailUrl?: string; url?: string; type?: string };
+        return [slide.posterUrl, slide.thumbnailUrl, slide.type === 'image' ? slide.url : undefined];
+    });
+    const isVideo =
+        post.mediaType === 'video' || (post.mediaItems || []).some((item) => item.type === 'video');
+    const raw = [
+        anyPost.posterUrl,
+        post.videoPosterUrl,
+        anyPost.thumbnailUrl,
+        ...mediaPosters,
+        !isVideo ? post.mediaUrl : undefined,
+        anyPost.author?.avatarUrl,
+        anyPost.avatarUrl,
+        post.userHandle ? getAvatarForHandle(post.userHandle) : undefined,
+    ].find((url): url is string => typeof url === 'string' && url.trim().length > 0);
+    return raw ? rewriteMediaUrlForClient(raw) : undefined;
+}
+
+function sheetAvatarSrc(
+    handle: string | undefined,
+    explicit?: string | null,
+    viewer?: { handle?: string; avatarUrl?: string } | null,
+): string | undefined {
+    const samePerson = Boolean(
+        viewer?.handle &&
+            handle &&
+            viewer.handle.trim().toLowerCase() === handle.trim().toLowerCase(),
+    );
+    const raw = (samePerson ? viewer?.avatarUrl : undefined) || explicit || getAvatarForHandle(handle);
+    return raw ? rewriteMediaUrlForClient(raw) : undefined;
+}
 
 interface CommentsModalProps {
     postId: string;
@@ -80,7 +122,7 @@ function renderTextWithMentions(
             <button
                 key={`h-${key++}`}
                 type="button"
-                className="inline p-0 m-0 bg-transparent border-none text-[#7A8AF0] hover:underline"
+                className="inline p-0 m-0 bg-transparent border-none font-semibold text-white hover:underline"
                 onClick={(e) => {
                     e.stopPropagation();
                     onHandleClick(handle);
@@ -122,7 +164,7 @@ function CommentItem({
     const [liked, setLiked] = React.useState(comment.userLiked);
     const [likes, setLikes] = React.useState(comment.likes);
     const [busy, setBusy] = React.useState(false);
-    const [showReplies, setShowReplies] = React.useState(false);
+    const [showReplies, setShowReplies] = React.useState(true);
 
     // Sync with comment data changes
     React.useEffect(() => {
@@ -142,25 +184,21 @@ function CommentItem({
     return (
         <div className="flex gap-3">
             <Avatar
-                src={
-                    comment.userHandle === user?.handle
-                        ? (user?.avatarUrl || getAvatarForHandle(comment.userHandle))
-                        : getAvatarForHandle(comment.userHandle)
-                }
+                src={sheetAvatarSrc(comment.userHandle, comment.avatarUrl, user)}
                 name={comment.userHandle?.split('@')[0] || 'User'}
                 size="sm"
-                className="flex-shrink-0 ring-1 ring-white/20"
+                className="flex-shrink-0 ring-1 ring-white/12"
             />
             <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 mb-0.5">
-                    <span className="font-semibold text-sm text-[#e8eef2]">
+                    <span className="font-semibold text-sm text-white">
                         {comment.userHandle}
                     </span>
-                    <span className="text-xs text-white/55">
+                    <span className="text-xs text-[#D1E4FF]">
                         {formatTime(comment.createdAt)}
                     </span>
                 </div>
-                <p className="text-sm text-[#e8eef2] mb-2">
+                <p className="text-sm text-white mb-2">
                     {isHiddenForViewer
                         ? 'Comment hidden for safety.'
                         : renderTextWithMentions(comment.text || '', (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
@@ -173,7 +211,7 @@ function CommentItem({
                         <button
                             type="button"
                             onClick={() => onModerateComment(comment.id, comment.moderationState === 'hidden_by_filter' ? 'unhide' : 'hide')}
-                            className="text-[11px] font-medium text-white/60 hover:text-[#e8eef2]"
+                            className="text-[11px] font-medium text-[#D1E4FF] hover:text-white"
                         >
                             {comment.moderationState === 'hidden_by_filter' ? 'Unhide' : 'Hide'}
                         </button>
@@ -191,7 +229,7 @@ function CommentItem({
                 <div className="flex items-center justify-between">
                     <button
                         onClick={() => onStartReply(comment.id, comment.userHandle || '')}
-                        className={`text-xs font-medium disabled:opacity-50 ${isReplyingTo ? 'text-[#3d9b8f]' : 'text-white/55 hover:text-[#e8eef2]'}`}
+                        className={`text-xs text-white disabled:opacity-50 ${isReplyingTo ? 'font-semibold' : 'font-medium'}`}
                         disabled={isHiddenForViewer}
                     >
                         {isReplyingTo ? 'Replying…' : 'Reply'}
@@ -215,11 +253,11 @@ function CommentItem({
                             }
                         }}
                         disabled={busy || isHiddenForViewer}
-                        className="flex items-center gap-1 text-white/55 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
+                        className="flex items-center gap-1 text-[#D1E4FF] disabled:opacity-50 disabled:pointer-events-none"
                         aria-pressed={liked}
                         aria-label={liked ? 'Unlike comment' : 'Like comment'}
                     >
-                        <FiThumbsUp className={`w-4 h-4 ${liked ? 'text-blue-500' : ''}`} />
+                        <FiThumbsUp className={`w-4 h-4 ${liked ? 'text-white' : ''}`} />
                         <span className="text-xs">{likes}</span>
                     </button>
                 </div>
@@ -229,7 +267,7 @@ function CommentItem({
                     <div className="mt-2 ml-2">
                         <button
                             onClick={() => setShowReplies(!showReplies)}
-                            className="flex items-center gap-1 text-xs text-white/55 hover:text-[#e8eef2]"
+                            className="flex items-center gap-1 text-xs text-[#D1E4FF]"
                         >
                             {showReplies ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
                             {showReplies
@@ -238,36 +276,32 @@ function CommentItem({
                         </button>
 
                         {showReplies && visibleReplies.length > 0 && (
-                            <div className="mt-2 pl-4 border-l-2 border-white/15 bg-[rgba(15,36,48,0.55)] rounded-r-md py-2 space-y-3">
+                            <div className="mt-2 pl-4 border-l-2 border-white/12 bg-[rgba(15,36,48,0.45)] rounded-r-md py-2 space-y-3">
                                 {visibleReplies.map(reply => (
                                     <div key={reply.id} className="flex gap-2">
                                         <Avatar
-                                            src={
-                                                reply.userHandle === user?.handle
-                                                    ? (user?.avatarUrl || getAvatarForHandle(reply.userHandle))
-                                                    : getAvatarForHandle(reply.userHandle)
-                                            }
+                                            src={sheetAvatarSrc(reply.userHandle, reply.avatarUrl, user)}
                                             name={reply.userHandle?.split('@')[0] || 'User'}
                                             size="sm"
-                                            className="flex-shrink-0 ring-1 ring-white/20 w-6 h-6"
+                                            className="flex-shrink-0 ring-1 ring-white/12 w-6 h-6"
                                         />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-baseline gap-2 mb-0.5">
-                                                <span className="font-semibold text-xs text-[#e8eef2]">
+                                                <span className="font-semibold text-xs text-white">
                                                     {reply.userHandle}
                                                 </span>
-                                                <span className="text-xs text-white/45">
+                                                <span className="text-xs text-[#D1E4FF]">
                                                     {formatTime(reply.createdAt)}
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-[#e8eef2] mb-1">
+                                            <p className="text-xs text-white mb-1">
                                                 {renderTextWithMentions(reply.text, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
                                             </p>
                                             <button
                                                 onClick={() => onLikeReply(comment.id, reply.id)}
-                                                className="flex items-center gap-1 text-xs text-white/55 hover:text-red-500 transition-colors"
+                                                className="flex items-center gap-1 text-xs text-[#D1E4FF]"
                                             >
-                                                <FiThumbsUp className={`w-3.5 h-3.5 ${reply.userLiked ? 'text-blue-500' : ''}`} />
+                                                <FiThumbsUp className={`w-3.5 h-3.5 ${reply.userLiked ? 'text-white' : ''}`} />
                                                 <span className="text-xs">{reply.likes ?? 0}</span>
                                             </button>
                                         </div>
@@ -318,59 +352,61 @@ function CommentInput({
     };
 
     return (
-        <div className="border-t border-white/10 bg-[rgba(6,13,22,0.55)]">
+        <div>
             {replyingToHandle ? (
-                <div className="flex items-center justify-between gap-2 px-3 pt-2">
-                    <p className="text-xs text-white/55 truncate">Replying to {replyingToHandle}</p>
-                    <button type="button" onClick={onCancelReply} className="p-1 text-white/55 hover:text-white" aria-label="Cancel reply">
-                        <FiX size={14} />
+                <div className="flex items-center justify-between gap-2 px-3 pt-2.5">
+                    <p className="text-xs font-medium text-[#D1E4FF] truncate">Replying to {replyingToHandle}</p>
+                    <button type="button" onClick={onCancelReply} className="p-1 text-white" aria-label="Cancel reply">
+                        <FiX size={16} />
                     </button>
                 </div>
             ) : null}
             {showEmojiPicker && (
-                <div className="p-2 border-b border-white/10 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                <div className="max-h-24 overflow-y-auto border-b border-white/12 px-2 py-2">
+                    <div className="flex flex-wrap">
                     {COMMENT_EMOJIS.map((emoji) => (
                         <button
                             key={emoji}
                             type="button"
                             onClick={() => setText((prev) => prev + emoji)}
-                            className="w-8 h-8 flex items-center justify-center text-lg rounded hover:bg-transparent/10"
+                            className="m-0.5 flex h-8 w-8 items-center justify-center rounded-md text-lg"
                             aria-label={`Add ${emoji}`}
                         >
                             {emoji}
                         </button>
                     ))}
+                    </div>
                 </div>
             )}
-            <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
+            <form onSubmit={handleSubmit} className="flex items-center gap-3 px-3 py-3">
                 <Avatar
-                    src={user?.avatarUrl}
+                    src={sheetAvatarSrc(user?.handle, user?.avatarUrl, user)}
                     name={user?.name || 'User'}
                     size="sm"
+                    className="ring-1 ring-white/12"
                 />
                 <button
                     type="button"
                     onClick={() => setShowEmojiPicker((v) => !v)}
-                    className={`p-2 rounded-lg flex-shrink-0 ${showEmojiPicker ? 'bg-transparent/15 text-white' : 'text-white/55 hover:text-white/70 hover:bg-transparent/10'}`}
+                    className={`flex-shrink-0 rounded-lg p-2 ${showEmojiPicker ? 'bg-white/12 text-white' : 'text-[#D1E4FF]'}`}
                     aria-label="Add emoji"
                 >
                     <FiSmile size={20} />
                 </button>
-                <div className="flex-1 rounded-lg p-[2px] bg-transparent/20 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        placeholder={placeholder}
-                        className="w-full px-3 py-2 rounded-[6px] border-0 bg-[rgba(6,13,22,0.72)] text-[#e8eef2] placeholder-white/45 focus:outline-none focus:ring-0"
-                        disabled={isLoading}
-                    />
-                </div>
+                <input
+                    ref={inputRef}
+                    type="text"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    placeholder={placeholder}
+                    className="min-w-0 flex-1 rounded-lg border border-white/12 bg-[rgba(6,13,22,0.72)] px-3 py-2 text-sm text-white placeholder:text-[#94A3B8] focus:outline-none"
+                    disabled={isLoading}
+                />
                 <button
                     type="submit"
                     disabled={!text.trim() || isLoading}
-                    className="p-2 rounded-lg bg-brand-600 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-700 transition-colors"
+                    className="rounded-xl bg-white p-2.5 text-[#03091B] disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Send comment"
                 >
                     <FiSend size={16} />
                 </button>
@@ -566,6 +602,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             id: `temp-${Date.now()}`,
             postId,
             userHandle: user.handle || 'Anonymous',
+            avatarUrl: user.avatarUrl,
             text,
             createdAt: Date.now(),
             likes: 0,
@@ -702,6 +739,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             id: `temp-reply-${Date.now()}`,
             postId,
             userHandle: user.handle || 'Anonymous',
+            avatarUrl: user.avatarUrl,
             text,
             createdAt: Date.now(),
             likes: 0,
@@ -818,72 +856,63 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const isPostOwner = Boolean(user?.handle && authorHandle && String(user.handle).trim().toLowerCase() === String(authorHandle).trim().toLowerCase());
     const showFollow =
         Boolean(user?.handle && authorHandle && user.handle !== authorHandle);
+    const previewUrl = post ? commentSheetPreviewUrl(post) : undefined;
+    const commentAccess = resolveCommentComposerAccess(post, user);
 
     return createPortal(
-        <div className="fixed inset-0 z-[230] flex items-end md:items-center justify-center">
-            {/* Backdrop */}
-            <div
-                className="absolute inset-0 bg-black bg-opacity-50"
+        <div className="fixed inset-0 z-[230] flex items-end justify-center">
+            <button
+                type="button"
+                className="absolute inset-0 bg-black/55"
                 onClick={onClose}
+                aria-label="Dismiss comments"
             />
 
-            {/* Modal — View Profile passport canvas */}
-            <div className="relative w-full h-[min(58dvh,520px)] md:max-w-md md:h-[80vh] rounded-t-2xl md:rounded-2xl shadow-xl flex flex-col min-h-0 overflow-hidden border border-white/10 border-b-0 bg-[#060d16] text-[#e8eef2]">
-                <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                <div className="relative z-10 flex flex-col min-h-0 flex-1">
-                {post?.mediaUrl ? (
-                    <div className="flex items-center gap-3 px-4 pt-3 pb-2 flex-shrink-0 border-b border-white/10">
-                        <div className="w-14 h-14 rounded-lg overflow-hidden bg-[rgba(15,36,48,0.88)] flex-shrink-0">
-                            {post.mediaType === 'video' ? (
-                                <video
-                                    src={post.mediaUrl}
-                                    className="w-full h-full object-cover"
-                                    muted
-                                    playsInline
-                                />
+            <div
+                className="relative flex h-[78%] w-full max-w-[min(400px,calc(100vw-32px))] min-h-0 flex-col overflow-hidden rounded-t-2xl border border-b-0 border-white/15 text-white shadow-xl"
+                style={{ background: SHEET_GRADIENT }}
+            >
+                {post && (post.mediaUrl || authorHandle) ? (
+                    <div className="flex flex-shrink-0 items-center gap-4 border-b border-white/12 px-4 pb-2 pt-3">
+                        <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-[rgba(15,36,48,0.72)]">
+                            {previewUrl ? (
+                                <img src={previewUrl} alt="" className="h-full w-full object-cover" />
                             ) : (
-                                <img
-                                    src={post.mediaUrl}
-                                    alt="Post preview"
-                                    className="w-full h-full object-cover"
-                                />
+                                <div className="flex h-full w-full items-center justify-center bg-[#121212]">
+                                    <Avatar name={authorHandle.split('@')[0] || 'User'} size="md" />
+                                </div>
                             )}
                         </div>
                         {authorHandle ? (
-                            <p className="text-sm font-semibold text-[#e8eef2] truncate">{authorHandle}</p>
+                            <p className="truncate text-sm font-semibold text-white">{authorHandle}</p>
                         ) : null}
                     </div>
                 ) : null}
-                {/* Mobile drag affordance */}
-                <div className="flex justify-center pt-2 pb-0.5 flex-shrink-0 md:hidden">
-                    <div className="w-10 h-1 bg-transparent/20 rounded-full" aria-hidden />
-                </div>
 
-                {/* Header: comment count + close */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 flex-shrink-0">
-                    <h2 className="text-base font-semibold text-[#e8eef2]">
+                <div className="flex flex-shrink-0 items-center justify-between border-b border-white/12 px-4 py-3">
+                    <h2 className="text-base font-semibold text-white">
                         {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
                     </h2>
-                    <div className="flex items-center gap-2">
-                        <div className="flex items-center rounded-lg border border-white/15 p-0.5">
+                    <div className="flex items-center">
+                        <div className="flex items-center rounded-lg border border-white/12 p-0.5">
                             <button
                                 type="button"
                                 onClick={() => setSortMode('top')}
-                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'top' ? 'bg-[#3d9b8f]/35 text-white' : 'text-white/60 hover:bg-transparent/10'}`}
+                                className={`rounded-md px-2.5 py-1 text-xs font-semibold ${sortMode === 'top' ? 'bg-[rgba(15,36,48,0.72)] text-white' : 'text-[#D1E4FF]'}`}
                             >
                                 Top
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setSortMode('newest')}
-                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'newest' ? 'bg-[#3d9b8f]/35 text-white' : 'text-white/60 hover:bg-transparent/10'}`}
+                                className={`rounded-md px-2.5 py-1 text-xs font-semibold ${sortMode === 'newest' ? 'bg-[rgba(15,36,48,0.72)] text-white' : 'text-[#D1E4FF]'}`}
                             >
                                 Newest
                             </button>
                         </div>
                         <button
                             onClick={onClose}
-                            className="p-2 -mr-1 rounded-lg text-white/60 hover:text-[#e8eef2] hover:bg-transparent/10 transition-colors"
+                            className="ml-2 p-1 text-white"
                             aria-label="Close comments"
                         >
                             <FiX size={20} />
@@ -899,32 +928,29 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 >
                     {loading ? (
                         <div className="flex items-center justify-center py-12">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3d9b8f]" />
+                            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-white" />
                         </div>
                     ) : (
                         <>
-                            {/* 1 — Post author + Follow */}
-                            <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-white/10">
+                            <div className="flex items-center gap-3 border-b border-white/12 px-4 pb-3 pt-4">
                                 <Avatar
-                                    src={authorHandle ? getAvatarForHandle(authorHandle) : undefined}
+                                    src={sheetAvatarSrc(authorHandle, post?.avatarUrl, user)}
                                     name={authorHandle.split('@')[0] || 'User'}
                                     size="md"
-                                    className="flex-shrink-0 ring-1 ring-white/20"
+                                    className="flex-shrink-0 ring-1 ring-white/12"
                                 />
-                                <div className="flex-1 min-w-0">
-                                    <p className="font-semibold text-sm text-[#e8eef2] truncate">
-                                        {authorHandle || 'Unknown'}
-                                    </p>
-                                </div>
+                                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">
+                                    {authorHandle || 'Unknown'}
+                                </p>
                                 {showFollow && (
                                     <button
                                         type="button"
                                         onClick={handleFollowAuthor}
                                         disabled={followBusy}
-                                        className={`flex-shrink-0 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
+                                        className={`flex-shrink-0 rounded-lg px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50 ${
                                             post?.isFollowing
-                                                ? 'bg-transparent/15 text-white'
-                                                : 'bg-[#3d9b8f]/35 text-white hover:bg-[#3d9b8f]/45'
+                                                ? 'border border-white/12 bg-white/12'
+                                                : 'bg-[rgba(15,36,48,0.72)]'
                                         }`}
                                     >
                                         {post?.isFollowing ? 'Following' : 'Follow'}
@@ -932,27 +958,25 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                 )}
                             </div>
 
-                            {/* 2 — Story / caption */}
                             {storyText ? (
-                                <div className="px-4 py-3 border-b border-white/10">
-                                    <p className="text-sm text-[#e8eef2] whitespace-pre-wrap leading-relaxed">
+                                <div className="border-b border-white/12 px-4 py-3">
+                                    <p className="whitespace-pre-wrap text-sm leading-5 text-white">
                                         {renderTextWithMentions(storyText, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
                                     </p>
                                     {post?.createdAt != null && (
-                                        <p className="text-xs text-white/55 mt-2">
+                                        <p className="mt-2 text-xs text-[#D1E4FF]">
                                             {formatPostRelative(post.createdAt)}
                                         </p>
                                     )}
                                 </div>
                             ) : null}
 
-                            {/* 3 — Comments list */}
                             <div className="p-4">
                                 {filteredComments.length === 0 ? (
-                                    <div className="text-center py-8 text-white/55">
-                                        <FiMessageSquare size={48} className="mx-auto mb-4 opacity-50" />
-                                        <p>No comments yet</p>
-                                        <p className="text-sm">Be the first to comment!</p>
+                                    <div className="py-8 text-center">
+                                        <FiMessageSquare size={48} className="mx-auto mb-4 text-[#D1E4FF] opacity-50" />
+                                        <p className="text-[15px] font-semibold text-white">No comments yet</p>
+                                        <p className="mt-2 text-sm text-[#94A3B8]">Be the first to comment!</p>
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
@@ -976,7 +1000,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                                     type="button"
                                                     onClick={handleLoadMoreComments}
                                                     disabled={commentsLoadingMore}
-                                                    className="w-full min-h-[40px] rounded-lg border border-white/15 bg-[rgba(15,36,48,0.72)] text-sm text-white/70 disabled:opacity-60"
+                                                    className="w-full min-h-[40px] rounded-lg border border-white/12 bg-[rgba(15,36,48,0.72)] text-sm font-semibold text-white disabled:opacity-60"
                                                 >
                                                     {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
                                                 </button>
@@ -989,8 +1013,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     )}
                 </div>
 
-                {/* Comment Input */}
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 border-t border-white/12 bg-[rgba(6,13,22,0.92)]">
+                    {commentAccess.canComment ? (
                     <CommentInput
                         placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
                         onSubmit={async (text) => {
@@ -1010,15 +1034,18 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                         replyingToHandle={replyingTo?.handle}
                         onCancelReply={() => setReplyingTo(null)}
                     />
+                    ) : (
+                        <div className="mx-4 mb-2 mt-3 rounded-[14px] bg-white/[0.06] px-4 py-3.5 text-center text-sm font-semibold text-[#8B949E]">
+                            {commentAccess.message}
+                        </div>
+                    )}
                 </div>
 
-                {/* Offline indicator */}
                 {!online && (
-                    <div className="px-4 py-2 bg-amber-500/15 text-amber-100 text-xs border-t border-amber-400/30">
+                    <div className="border-t border-amber-400/30 bg-amber-500/15 px-4 py-2 text-xs text-amber-100">
                         You're offline. Comments will sync when back online.
                     </div>
                 )}
-                </div>
             </div>
         </div>,
         document.body

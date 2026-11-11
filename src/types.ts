@@ -226,6 +226,8 @@ export type Comment = {
   postId: string;
   user_id?: string; // Backend field
   userHandle: string;
+  /** Author photo from the comment payload (`user.avatar_url`). */
+  avatarUrl?: string;
   text: string;
   text_content?: string; // Backend field
   createdAt: number;

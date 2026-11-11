@@ -8,7 +8,8 @@ import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon';
 import type { Post } from '../types';
 import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
 import { generateShareTextImage } from '../utils/generateShareTextImage';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
+
+const SHEET_GRADIENT = 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)';
 
 interface ShareToStoriesModalProps {
   isOpen: boolean;
@@ -101,29 +102,25 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 px-4"
       onClick={onClose}
     >
       <div
-        className="relative max-w-sm w-full mx-4 overflow-hidden rounded-2xl border border-white/12 bg-[#060d16] p-6 shadow-2xl shadow-black/50"
+        className="relative w-full max-w-[360px] overflow-hidden rounded-2xl border border-white/12 p-6 shadow-2xl shadow-black/50"
+        style={{ background: SHEET_GRADIENT }}
         onClick={(e) => e.stopPropagation()}
       >
-        <DiscoverAmbientCanvas fixed={false} variant="passport" />
-        <div className="relative z-10">
-        {/* Icon — white on passport canvas (same glyph as feed) */}
-        <div className="flex justify-center mb-5">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/10">
+        <div className="mb-5 flex justify-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/[0.06]">
             <ShareToStoriesFeedIcon className="h-[52px] w-[52px] text-white" />
           </div>
         </div>
 
-        <div className="flex justify-center mb-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[#3d9b8f]">
-            Gazetteer says
-          </p>
-        </div>
+        <p className="mb-2 text-center text-[11px] font-bold uppercase tracking-[1.2px] text-white">
+          Gazetteer says
+        </p>
 
-        <p className="text-center text-lg font-medium text-white mb-6">
+        <p className="mb-6 text-center text-lg font-semibold text-white">
           Share this post to your stories
         </p>
 
@@ -144,7 +141,6 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
           >
             {isSharing ? 'Sharing...' : 'OK'}
           </button>
-        </div>
         </div>
       </div>
     </div>

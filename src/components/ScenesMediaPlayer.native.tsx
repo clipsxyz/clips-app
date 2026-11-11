@@ -39,6 +39,8 @@ type Props = {
     suspendPlayback?: boolean;
     width?: number;
     height: number;
+    /** Rounded clip while the comments sheet has shrunk the frame. 0 keeps square edges. */
+    cornerRadius?: number;
     videoRef?: React.RefObject<VideoRef | null>;
     onVideoLoad?: () => void;
     onVideoProgress?: (e: OnProgressData) => void;
@@ -61,6 +63,7 @@ export default function ScenesMediaPlayer({
     suspendPlayback = false,
     width: widthProp,
     height,
+    cornerRadius = 0,
     videoRef: externalVideoRef,
     onVideoLoad,
     onVideoProgress,
@@ -226,7 +229,15 @@ export default function ScenesMediaPlayer({
         return null;
     };
 
-    const videoFillStyle = { width: '100%' as const, height: '100%' as const };
+    const videoFillStyle = {
+        width: '100%' as const,
+        height: '100%' as const,
+        borderRadius: cornerRadius,
+    };
+    const frameClipStyle =
+        cornerRadius > 0
+            ? { borderRadius: cornerRadius, overflow: 'hidden' as const }
+            : null;
 
     const renderTapCapture = (enabled: boolean) =>
         enabled && onMediaPress ? (
@@ -268,7 +279,11 @@ export default function ScenesMediaPlayer({
     ) => (
         <>
             <Animated.View
-                style={[StyleSheet.absoluteFill, { opacity: videoSurfaceReady ? videoOpacity : 0 }]}
+                style={[
+                    StyleSheet.absoluteFill,
+                    frameClipStyle,
+                    { opacity: videoSurfaceReady ? videoOpacity : 0 },
+                ]}
                 pointerEvents="none"
                 collapsable={false}
             >
@@ -307,14 +322,14 @@ export default function ScenesMediaPlayer({
                 />
             </Animated.View>
             <Animated.View
-                style={[StyleSheet.absoluteFill, { opacity: posterOpacity }]}
+                style={[StyleSheet.absoluteFill, frameClipStyle, { opacity: posterOpacity }]}
                 pointerEvents="none"
                 collapsable={false}
             >
                 {posterUri ? (
                     <Image
                         source={{ uri: posterUri }}
-                        style={StyleSheet.absoluteFill}
+                        style={[StyleSheet.absoluteFill, frameClipStyle]}
                         resizeMode={frameResizeMode}
                     />
                 ) : (
@@ -355,7 +370,10 @@ export default function ScenesMediaPlayer({
                 key={`${post.id}-${index}-${rawUrl}`}
                 style={[styles.slide, styles.slideCenter, { width, height }]}
             >
-                <View style={{ width: frame.width, height: frame.height }} collapsable={false}>
+                <View
+                    style={[{ width: frame.width, height: frame.height }, frameClipStyle]}
+                    collapsable={false}
+                >
                     {slide.type === 'video' ? (
                         slideActive && canPlayVideo && playableSource(rawUrl) ? (
                             renderCoveredVideo(
@@ -374,7 +392,7 @@ export default function ScenesMediaPlayer({
                         ) : poster ? (
                             <Image
                                 source={{ uri: poster }}
-                                style={StyleSheet.absoluteFill}
+                                style={[StyleSheet.absoluteFill, frameClipStyle]}
                                 resizeMode={frameResizeMode}
                             />
                         ) : (
@@ -383,7 +401,7 @@ export default function ScenesMediaPlayer({
                     ) : playbackUrl ? (
                         <Image
                             source={{ uri: playbackUrl }}
-                            style={StyleSheet.absoluteFill}
+                            style={[StyleSheet.absoluteFill, frameClipStyle]}
                             resizeMode="contain"
                         />
                     ) : (
@@ -396,7 +414,7 @@ export default function ScenesMediaPlayer({
 
     return (
         <View
-            style={[styles.root, { height }]}
+            style={[styles.root, { height }, frameClipStyle]}
             onLayout={(e) => {
                 const { width: w, height: h } = e.nativeEvent.layout;
                 if (w > 0 && h > 0) setContainerSize({ width: w, height: h });
@@ -427,10 +445,13 @@ export default function ScenesMediaPlayer({
                                 ) : slide.type === 'video' && slideActive && canPlayVideo && playableSource(slide.url) ? (
                                     <View style={[styles.slide, styles.slideCenter, { width, height }]}>
                                         <View
-                                            style={{
-                                                width: slideFrame(slide, i).width,
-                                                height: slideFrame(slide, i).height,
-                                            }}
+                                            style={[
+                                                {
+                                                    width: slideFrame(slide, i).width,
+                                                    height: slideFrame(slide, i).height,
+                                                },
+                                                frameClipStyle,
+                                            ]}
                                             collapsable={false}
                                         >
                                             {renderCoveredVideo(
@@ -460,10 +481,13 @@ export default function ScenesMediaPlayer({
                 ) : slides[0].type === 'video' && canPlayVideo && playableSource(slides[0].url) ? (
                     <View style={[styles.slide, styles.slideCenter, { width, height }]}>
                         <View
-                            style={{
-                                width: slideFrame(slides[0], 0).width,
-                                height: slideFrame(slides[0], 0).height,
-                            }}
+                            style={[
+                                {
+                                    width: slideFrame(slides[0], 0).width,
+                                    height: slideFrame(slides[0], 0).height,
+                                },
+                                frameClipStyle,
+                            ]}
                             collapsable={false}
                         >
                             {renderCoveredVideo(

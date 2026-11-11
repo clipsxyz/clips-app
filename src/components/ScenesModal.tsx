@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiChevronLeft, FiBookmark, FiMoreHorizontal, FiSend, FiSmile, FiPlus, FiPlay } from 'react-icons/fi';
+import { FiX, FiThumbsUp, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiChevronLeft, FiBookmark, FiMoreHorizontal, FiSend, FiSmile, FiPlus, FiPlay } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
 import CreateGroupModal from './CreateGroupModal';
@@ -25,6 +25,7 @@ import { bottomSheet } from '../utils/swalBottomSheet';
 import type { Comment } from '../types';
 import { enqueue } from '../utils/mutationQueue';
 import { getAvatarForHandle } from '../api/users';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { postHasVideoMedia } from '../utils/postMedia';
@@ -1576,6 +1577,12 @@ export default function ScenesModal({
 
     if (!isOpen) return null;
 
+    const sceneAvatarRaw =
+        (user?.handle === post.userHandle
+            ? user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || post.avatarUrl
+            : post.avatarUrl) || getAvatarForHandle(post.userHandle);
+    const sceneAvatarSrc = sceneAvatarRaw ? rewriteMediaUrlForClient(sceneAvatarRaw) : undefined;
+
     const carouselIdx = effectivePosts.length > 0 ? Math.max(0, effectivePosts.findIndex((p) => p.id === post.id)) : 0;
     const carouselPrevPost = carouselIdx > 0 ? effectivePosts[carouselIdx - 1] : null;
     const carouselNextPost = carouselIdx >= 0 && carouselIdx < effectivePosts.length - 1 ? effectivePosts[carouselIdx + 1] : null;
@@ -1695,7 +1702,7 @@ export default function ScenesModal({
                                     )}
 
                                     {/* Top left — back button */}
-                                    <div className="absolute left-4 z-30 flex flex-col items-start gap-2" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
+                                    <div className="absolute left-2.5 z-30" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 0.85rem))' }}>
                                         <button
                                             onClick={() => {
                                                 let savedTime: number | undefined;
@@ -1705,50 +1712,56 @@ export default function ScenesModal({
                                                 onClose(savedTime);
                                             }}
                                             aria-label="Back"
-                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white text-xs font-semibold transition-colors"
+                                            className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-white/20 bg-black/40 text-white"
                                         >
-                                            <FiChevronLeft size={14} />
-                                            Back
+                                            <FiChevronLeft size={18} />
                                         </button>
                                     </div>
 
-                                    {/* Top right — carousel index + metadata display */}
-                                    <div className="absolute right-4 z-30 flex flex-col items-end gap-2 max-w-[min(100%,16rem)]" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
-                                        {hasMultipleItems && (
-                                            <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
-                                                {currentIndex + 1} / {items.length}
+                                    {!isCaptionExpanded && (
+                                    <div className="absolute right-2.5 z-30 flex items-center gap-2" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 0.85rem))' }}>
+                                        {scenesMetadataItems.length > 0 && (
+                                            <div
+                                                className="flex max-w-[160px] items-center gap-1 rounded-full border border-white/20 bg-black/40 px-2 py-1"
+                                                title={scenesMetadataItems.map((m) => m.label).join(' · ')}
+                                            >
+                                                {(() => {
+                                                    const current = scenesMetadataItems[scenesMetadataIndex];
+                                                    if (!current) return null;
+                                                    const Icon =
+                                                        current.type === 'venue'
+                                                            ? FiHome
+                                                            : current.type === 'timestamp'
+                                                                ? FiClock
+                                                                : FiMapPin;
+                                                    return (
+                                                        <>
+                                                            <Icon className="h-2.5 w-2.5 shrink-0 text-white" />
+                                                            <span className="truncate text-[10px] font-medium text-white">
+                                                                {current.label}
+                                                            </span>
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
-                                        {scenesMetadataItems.length > 0 && (
-                                            <div className="flex items-center min-h-[1.5rem] overflow-visible animate-chyron-emerge origin-right">
-                                                <div
-                                                    key={scenesMetadataIndex}
-                                                    className="flex items-center gap-1 justify-end min-w-0 max-w-[140px] px-0 py-0"
-                                                    title={scenesMetadataItems.map((m) => m.label).join(' · ')}
-                                                >
-                                                    {(() => {
-                                                        const current = scenesMetadataItems[scenesMetadataIndex];
-                                                        const Icon =
-                                                            current.type === 'feed'
-                                                                ? FiMapPin
-                                                                : current.type === 'location'
-                                                                    ? FiMapPin
-                                                                    : current.type === 'venue'
-                                                                        ? FiHome
-                                                                        : FiClock;
-                                                        return (
-                                                            <>
-                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-white" />
-                                                                <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-white text-right">
-                                                                    {current.label}
-                                                                </span>
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </div>
-                                            </div>
+                                        {currentItem?.type === 'video' && (
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const next = !isMuted;
+                                                    setIsMuted(next);
+                                                    setGlobalVideoMuted(next);
+                                                }}
+                                                aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                                                className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-white/20 bg-black/40 text-white"
+                                            >
+                                                {isMuted ? <FiVolumeX size={16} /> : <FiVolume2 size={16} />}
+                                            </button>
                                         )}
                                     </div>
+                                    )}
                                             </>
                                         );
                                     })()}
@@ -1807,7 +1820,7 @@ export default function ScenesModal({
                                             <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200">
                                                 <div className="flex items-center gap-3 flex-1">
                                                     <Avatar
-                                                        src={getAvatarForHandle(post.userHandle)}
+                                                        src={sceneAvatarSrc}
                                                         name={post.userHandle.split('@')[0]}
                                                         size="sm"
                                                     />
@@ -1852,10 +1865,15 @@ export default function ScenesModal({
 
                             // Create media element
                             let mediaElement = currentItem.type === 'video' ? (
-                                <div className="relative w-full h-full">
+                                <div className="relative flex h-full w-full items-center justify-center">
                                     <video
                                         ref={videoRef}
-                                        className="w-full h-full bg-black object-contain pointer-events-none transition-opacity duration-200"
+                                        className={
+                                            isCaptionExpanded
+                                                ? 'max-h-full max-w-full bg-black pointer-events-none transition-opacity duration-200'
+                                                : 'h-full w-full bg-black object-contain pointer-events-none transition-opacity duration-200'
+                                        }
+                                        style={{ borderRadius: isCaptionExpanded ? 20 : 0 }}
                                         src={currentItem.url}
                                         controls={false}
                                         autoPlay
@@ -1875,7 +1893,12 @@ export default function ScenesModal({
                                 </div>
                             ) : (
                                 <img
-                                    className="w-full h-full bg-black object-contain"
+                                    className={
+                                        isCaptionExpanded
+                                            ? 'max-h-full max-w-full bg-black'
+                                            : 'h-full w-full bg-black object-contain'
+                                    }
+                                    style={{ borderRadius: isCaptionExpanded ? 20 : 0 }}
                                     src={currentItem.url}
                                     alt={post.caption || post.text || 'Post media'}
                                 />
@@ -2091,71 +2114,28 @@ export default function ScenesModal({
                     {/* Bottom Section with Profile, Caption, and Bottom Action Bar (Bluesky-style) - hidden for text-only fullscreen */}
                     {!isCaptionExpanded && (post.mediaUrl || (post.mediaItems && post.mediaItems.length) || !post.text) && (
                         <div
-                            className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent"
+                            className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/70 via-black/35 to-transparent"
                         >
                             <div className="max-w-md mx-auto px-4 pb-safe">
                                 {/* Profile & Caption Section */}
                                 <div className="pt-12 pb-4">
                                     {/* Profile Section */}
                                     <div className="flex items-center gap-3 mb-4 pr-[70px]">
-                                        {/* Profile picture with rounded-md shape and animated white border */}
+                                        <div className="relative shrink-0">
                                         <button
                                             onClick={() => {
                                                 window.scrollTo(0, 0);
                                                 navigate(`/user/${encodeURIComponent(post.userHandle)}`);
                                                 onClose();
                                             }}
-                                            className="relative w-8 h-8 rounded-md overflow-visible cursor-pointer"
+                                            className="relative h-9 w-9 overflow-hidden rounded-full"
                                         >
-                                            {/* Animated white border wrapper */}
-                                            <div
-                                                className="absolute inset-0 rounded-md p-0.5 overflow-hidden z-0"
-                                                style={{
-                                                    background: 'white',
-                                                }}
-                                            >
-                                                {/* Overlay that covers border initially, then rotates to reveal it */}
-                                                <div
-                                                    ref={profileBorderOverlayRef}
-                                                    className="absolute inset-0 bg-black rounded-md"
-                                                    style={{
-                                                        maskImage: 'conic-gradient(from 0deg, black 360deg)',
-                                                        WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
-                                                    }}
-                                                />
-                                                <div className="w-full h-full rounded-md bg-black" />
-                                            </div>
-                                            {/* Profile picture content - positioned above border */}
-                                            <div className="absolute inset-[2px] rounded-md overflow-hidden flex items-center justify-center bg-black z-10">
-                                                {user?.handle === post.userHandle && user?.avatarUrl ? (
-                                                    <img
-                                                        src={user.avatarUrl}
-                                                        alt={post.userHandle.split('@')[0]}
-                                                        className="w-full h-full object-cover"
-                                                        onError={(e) => {
-                                                            (e.target as HTMLImageElement).style.display = 'none';
-                                                        }}
-                                                    />
-                                                ) : getAvatarForHandle(post.userHandle) ? (
-                                                    <img
-                                                        src={getAvatarForHandle(post.userHandle)}
-                                                        alt={post.userHandle.split('@')[0]}
-                                                        className="w-full h-full object-cover"
-                                                        onError={(e) => {
-                                                            (e.target as HTMLImageElement).style.display = 'none';
-                                                        }}
-                                                    />
-                                                ) : null}
-                                                {/* Fallback initials if no image */}
-                                                {(!user?.avatarUrl && (!getAvatarForHandle(post.userHandle) || 
-                                                    (user?.handle === post.userHandle && !user?.avatarUrl))) && (
-                                                    <div className="w-full h-full bg-gray-700 flex items-center justify-center">
-                                                        <span className="text-white text-xs font-semibold">
-                                                            {post.userHandle.split('@')[0].charAt(0).toUpperCase()}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                            </div>
+                                            <Avatar
+                                                src={sceneAvatarSrc}
+                                                name={post.userHandle.split('@')[0]}
+                                                size={36}
+                                                hideBorder
+                                            />
                                         </button>
                                         {!isFollowing && !hasPendingRequest && user?.handle !== post.userHandle && (
                                             <button
@@ -2163,23 +2143,25 @@ export default function ScenesModal({
                                                 onClick={handleFollow}
                                                 disabled={followBusy}
                                                 aria-label="Follow user"
-                                                className={`-ml-5 mt-5 w-5 h-5 rounded-full bg-white text-black border border-black/20 shadow flex items-center justify-center z-10 ${
+                                                className={`absolute -bottom-0.5 -right-1 z-10 flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-black bg-[#0095F6] text-white ${
                                                     followBusy ? 'opacity-60 cursor-not-allowed' : 'hover:scale-105'
                                                 }`}
                                             >
-                                                <FiPlus className="w-3 h-3" />
+                                                <FiPlus className="h-3 w-3" />
                                             </button>
                                         )}
-                                        <div className="flex-1 min-w-0">
+                                        </div>
+                                        <div className="min-w-0 flex-1">
                                             <button
                                                 onClick={() => {
                                                     window.scrollTo(0, 0);
                                                     navigate(`/user/${encodeURIComponent(post.userHandle)}`);
                                                     onClose();
                                                 }}
-                                                className="text-white font-semibold text-sm hover:opacity-80 truncate"
+                                                className="flex min-w-0 items-center gap-1 text-left text-sm font-bold text-white hover:opacity-80"
                                             >
-                                                {post.userHandle}
+                                                <span className="truncate">{post.userHandle.replace(/^@/, '')}</span>
+                                                <VerifiedBadge accountType={post.userAccountType} size={12} />
                                             </button>
                                             <div className="mt-0.5 flex items-center gap-2">
                                                 {post.locationLabel && (
@@ -2226,7 +2208,7 @@ export default function ScenesModal({
                                         return !!displayCaption && (post.mediaUrl || post.mediaItems?.length);
                                     })() && (
                                         <div className="text-white text-sm mb-2 text-left w-full">
-                                            <span className="line-clamp-1">
+                                            <span className="line-clamp-2">
                                                 {renderTextWithMentions(([
                                                     (post as any).captionText,
                                                     post.caption,
@@ -2264,7 +2246,7 @@ export default function ScenesModal({
                                     ) : !post.mediaUrl && post.text ? (
                                         // Other text-only cases (if any) - show text
                                         <div className="text-white text-sm opacity-90 mb-2 text-left w-full">
-                                            <span className="line-clamp-1">{renderTextWithMentions(post.text)}</span>
+                                            <span className="line-clamp-2">{renderTextWithMentions(post.text)}</span>
                                             {post.text.length > 50 && (
                                                 <button
                                                     onClick={openCommentsSheet}
@@ -2281,21 +2263,17 @@ export default function ScenesModal({
                                         <button
                                             type="button"
                                             onClick={openCommentsSheet}
-                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3 inline-flex items-center gap-1.5"
+                                            className="mb-3 text-left text-xs font-medium text-white/55 hover:text-white/80"
                                         >
-                                            <FiMessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
-                                            <span>
-                                                View all {comments} {comments === 1 ? 'comment' : 'comments'}
-                                            </span>
+                                            <span>View all {comments} comments</span>
                                         </button>
                                     ) : (
                                         <button
                                             type="button"
                                             onClick={openCommentsSheet}
-                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3 inline-flex items-center gap-1.5"
+                                            className="mb-3 text-left text-xs font-medium text-white/55 hover:text-white/80"
                                         >
-                                            <FiMessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
-                                            <span>Add the first comment</span>
+                                            <span>Add a comment…</span>
                                         </button>
                                     )}
 
@@ -2303,50 +2281,50 @@ export default function ScenesModal({
                                 </div>
 
                                 {/* Floating action rail (always visible) */}
-                                <div className="absolute right-3 bottom-24 sm:bottom-20 flex flex-col items-center gap-1.5 z-20">
+                                <div className="absolute bottom-24 right-1.5 z-20 flex flex-col items-center gap-3.5">
                                     <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             ref={likeButtonRef}
                                             onClick={handleLike}
                                             aria-label={liked ? 'Unlike' : 'Like'}
-                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
                                         >
-                                            <FiThumbsUp className="w-[22px] h-[22px] text-black" />
+                                            <FiThumbsUp className={`h-[26px] w-[26px] text-white ${liked ? 'fill-white' : ''}`} />
                                         </button>
-                                        <span className="text-[11px] font-bold text-white/90">{likes}</span>
+                                        <span className="text-[11px] font-semibold text-white drop-shadow">{likes}</span>
                                     </div>
 
                                     <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             onClick={openCommentsSheet}
                                             aria-label="Open comments"
-                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
                                         >
-                                            <FiMessageCircle className="w-[22px] h-[22px] text-black" />
+                                            <FiMessageCircle className="h-[26px] w-[26px] text-white" />
                                         </button>
-                                        <span className="text-[11px] font-bold text-white/90">{comments}</span>
+                                        <span className="text-[11px] font-semibold text-white drop-shadow">{comments}</span>
                                     </div>
 
                                     <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             onClick={handleShare}
                                             aria-label="Share"
-                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
                                         >
-                                            <FiShare2 className="w-[22px] h-[22px] text-black" />
+                                            <FiSend className="h-[26px] w-[26px] text-white" />
                                         </button>
-                                        <span className="text-[11px] font-bold text-white/90">{shares}</span>
+                                        <span className="text-[11px] font-semibold text-white drop-shadow">{shares}</span>
                                     </div>
 
                                     <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             onClick={() => setSaveModalOpen(true)}
                                             aria-label="Save to collection"
-                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
                                         >
-                                            <FiBookmark className={`w-[22px] h-[22px] ${isSaved ? 'text-black fill-black' : 'text-black'}`} />
+                                            <FiBookmark className={`h-[26px] w-[26px] text-white ${isSaved ? 'fill-white' : ''}`} />
                                         </button>
-                                        <span className="text-[11px] font-bold text-white/90">{isSaved ? 'Saved' : 'Save'}</span>
+                                        <span className="text-[11px] font-semibold text-white drop-shadow">{isSaved ? 'Saved' : 'Save'}</span>
                                     </div>
 
                                     <div className="flex flex-col items-center gap-0.5">
@@ -2363,15 +2341,15 @@ export default function ScenesModal({
                                                         ? "Post already reclipped"
                                                         : "Reclip"
                                             }
-                                            className={`w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] transition-transform flex items-center justify-center ${
+                                            className={`flex h-11 w-11 items-center justify-center rounded-full text-white ${
                                                 post.userHandle === user?.handle || reclipBusy
                                                     ? 'opacity-40 cursor-not-allowed'
                                                     : 'hover:scale-[1.02]'
                                             }`}
                                         >
-                                            <FiRepeat className={`w-[22px] h-[22px] ${userReclipped ? 'text-black' : 'text-black'}`} />
+                                            <FiRepeat className={`h-[26px] w-[26px] ${userReclipped ? 'text-[#4ADE80]' : 'text-white'}`} />
                                         </button>
-                                        <span className="text-[11px] font-bold text-white/90">{reclips}</span>
+                                        <span className="text-[11px] font-semibold text-white drop-shadow">{reclips}</span>
                                     </div>
                                 </div>
 
@@ -2380,9 +2358,9 @@ export default function ScenesModal({
                                     <button
                                         type="button"
                                         onClick={openCommentsSheet}
-                                        className="flex-1 min-h-[44px] flex items-center px-4 py-2.5 rounded-full bg-white/95 text-gray-900 text-sm font-medium text-left shadow-[0_10px_24px_rgba(0,0,0,0.28)]"
+                                        className="flex min-h-[38px] flex-1 items-center rounded-full border border-white/30 bg-white/10 px-3.5 py-2 text-left text-[13px] font-medium text-white/60"
                                     >
-                                        <span className="opacity-90">Add comment...</span>
+                                        <span>Add a comment…</span>
                                     </button>
                                     {/* DM + more keep same behavior, compact chips */}
                                     <button
@@ -2430,17 +2408,17 @@ export default function ScenesModal({
                                             onClose();
                                         }}
                                         disabled={!user || post.userHandle === user?.handle}
-                                        className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                                        className="flex h-[38px] w-[38px] items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:cursor-not-allowed disabled:opacity-35"
                                         aria-label="Send direct message"
                                     >
-                                        <FiSend className="w-[22px] h-[22px] text-black" />
+                                        <FiSend className="h-5 w-5 text-white" />
                                     </button>
                                     <button
                                         onClick={() => setMenuOpen(true)}
-                                        className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] flex items-center justify-center"
+                                        className="flex h-[38px] w-[38px] items-center justify-center rounded-full border border-white/20 bg-white/10 text-white"
                                         aria-label="More options"
                                     >
-                                        <FiMoreHorizontal className="w-[22px] h-[22px] text-black" />
+                                        <FiMoreHorizontal className="h-5 w-5 text-white" />
                                     </button>
                                 </div>
                             </div>

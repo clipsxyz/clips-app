@@ -2,6 +2,7 @@ import React from 'react';
 import { FiBookmark } from 'react-icons/fi';
 import type { Collection } from '../types';
 import { getCollectionThumbnailUrl } from '../api/collections';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 
 type Props = {
     collection: Collection;
@@ -14,7 +15,8 @@ export default function CollectionCoverThumb({
     className = 'h-full w-full rounded-xl object-cover',
     iconClassName = 'w-7 h-7 text-white/45',
 }: Props) {
-    const src = getCollectionThumbnailUrl(collection);
+    const rawSrc = getCollectionThumbnailUrl(collection);
+    const src = rawSrc ? rewriteMediaUrlForClient(rawSrc) : '';
     const [failed, setFailed] = React.useState(false);
     const [loaded, setLoaded] = React.useState(false);
     const empty = (collection.postIds?.length || 0) === 0 && !collection.latestPost;

@@ -845,6 +845,16 @@ video {
   }
 }
 
+@keyframes feedPostNewsTicker {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(var(--ticker-shift, 0px));
+  }
+}
+
 /* YouTube Shorts-style: big thumbs-up flash (scale + fade; position is centered by parent) */
 @keyframes heartPopUp {
   0% {

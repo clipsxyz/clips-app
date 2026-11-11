@@ -3187,12 +3187,26 @@ export type HiddenCommentReviewItem = {
   parentId?: string;
 };
 
+function commentAvatarFromRaw(raw: any): string | undefined {
+  const url =
+    raw?.avatar_url ||
+    raw?.avatarUrl ||
+    raw?.user?.avatar_url ||
+    raw?.user?.avatarUrl;
+  return typeof url === 'string' && url.trim() ? url.trim() : undefined;
+}
+
 function mapLaravelCommentToComment(raw: any): Comment {
   const mappedReplies: Comment[] = Array.isArray(raw?.replies)
-    ? raw.replies.map((r: any) => ({
+    ? raw.replies.map((r: any) => {
+        const replyHandle = r.user_handle || r.userHandle || r.user?.handle || '';
+        const replyAvatar = commentAvatarFromRaw(r);
+        if (replyHandle && replyAvatar) setAvatarForHandle(replyHandle, replyAvatar);
+        return {
         id: r.id,
         postId: r.post_id || r.postId || raw.post_id || raw.postId || '',
-        userHandle: r.user_handle || r.userHandle || r.user?.handle || '',
+        userHandle: replyHandle,
+        avatarUrl: replyAvatar,
         text: r.text_content || r.text || '',
         createdAt: (() => {
           const ts = r.created_at || r.createdAt;
@@ -3202,13 +3216,19 @@ function mapLaravelCommentToComment(raw: any): Comment {
         likes: Number(r.likes_count ?? r.likes ?? 0) || 0,
         userLiked: !!(r.user_liked ?? r.userLiked),
         parentId: r.parent_id || r.parentId || raw.id,
-      }))
+      };
+      })
     : [];
+
+  const handle = raw.user_handle || raw.userHandle || raw.user?.handle || '';
+  const avatarUrl = commentAvatarFromRaw(raw);
+  if (handle && avatarUrl) setAvatarForHandle(handle, avatarUrl);
 
   return {
     id: raw.id,
     postId: raw.post_id || raw.postId || '',
-    userHandle: raw.user_handle || raw.userHandle || raw.user?.handle || '',
+    userHandle: handle,
+    avatarUrl,
     text: raw.text_content || raw.text || '',
     createdAt: (() => {
       const ts = raw.created_at || raw.createdAt;
@@ -3417,10 +3437,14 @@ export async function addComment(postId: string, userHandle: string, text: strin
     const moderation = evaluateCommentModeration(response?.text || response?.text_content || text);
     const rawTs = response?.created_at || response?.createdAt;
     const createdAtMs = rawTs ? new Date(rawTs).getTime() : Date.now();
+    const savedHandle = response.user_handle || response.userHandle || userHandle;
+    const savedAvatar = commentAvatarFromRaw(response);
+    if (savedHandle && savedAvatar) setAvatarForHandle(savedHandle, savedAvatar);
     const saved: Comment = {
       id: response.id,
       postId: response.post_id || response.postId || resolvedPostId,
-      userHandle: response.user_handle || response.userHandle || userHandle,
+      userHandle: savedHandle,
+      avatarUrl: savedAvatar,
       text: response.text || response.text_content || text,
       userLiked: false,
       createdAt: Number.isFinite(createdAtMs) ? createdAtMs : Date.now(),
@@ -3611,10 +3635,14 @@ export async function addReply(postId: string, parentId: string, userHandle: str
     const savedPostId = String(response?.post_id || response?.postId || resolvedPostId);
     bumpCachedCommentCount(savedPostId, 1);
     const moderation = evaluateCommentModeration(response?.text || response?.text_content || text);
+    const savedReplyHandle = response.user_handle || response.userHandle || userHandle;
+    const savedReplyAvatar = commentAvatarFromRaw(response);
+    if (savedReplyHandle && savedReplyAvatar) setAvatarForHandle(savedReplyHandle, savedReplyAvatar);
     const savedReply: Comment = {
       id: response.id,
       postId: savedPostId,
-      userHandle: response.user_handle || response.userHandle || userHandle,
+      userHandle: savedReplyHandle,
+      avatarUrl: savedReplyAvatar,
       text: response.text || response.text_content || text,
       userLiked: false,
       createdAt: (() => {

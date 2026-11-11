@@ -4,10 +4,9 @@ import {
     View,
     Text,
     StyleSheet,
-    Dimensions,
     Pressable,
     Platform,
-    Modal,
+    BackHandler,
     useWindowDimensions,
     type GestureResponderEvent,
 } from 'react-native';
@@ -88,10 +87,11 @@ import {
     isProfilePrivate,
 } from '../api/privacy';
 
-/** Match web ScenesModal comments open ease (~Reels mini viewport). */
+/** Match web ScenesModal: post shrinks to the top 40%, comments fill the rest. */
 const COMMENTS_MEDIA_MS = 640;
 const COMMENTS_MEDIA_EASE = Easing.bezier(0.16, 1, 0.3, 1);
-const COMMENTS_SHEET_HEIGHT = Math.round(Dimensions.get('window').height * 0.78);
+const COMMENTS_PREVIEW_RATIO = 0.4;
+const COMMENTS_MEDIA_RADIUS = 20;
 
 type MetadataItem = { label: string; type: 'feed' | 'location' | 'venue' | 'timestamp' };
 
@@ -149,6 +149,13 @@ export default function ScenesViewer({
     // Reactive (not Dimensions.get) so the media viewport tracks rotation/resize.
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const mediaHeightSv = useSharedValue(windowHeight);
+    /** 0 = fullscreen post, 1 = comments open (post pinned to the top 40%). */
+    const commentsProgressSv = useSharedValue(0);
+    const commentsPreviewSv = useSharedValue(Math.round(windowHeight * COMMENTS_PREVIEW_RATIO));
+    const windowHeightSv = useSharedValue(windowHeight);
+    /** Full viewer height captured while comments are closed, so the keyboard
+     * resize does not recompute the split. */
+    const stageHeightSv = useSharedValue(windowHeight);
     /** Fitted media height for the active slide, kept in a ref so effects declared
      * before the slide memo can restore to it (see the comments-close effect). */
     const activeFittedHeightRef = useRef(windowHeight);
@@ -163,6 +170,7 @@ export default function ScenesViewer({
     // Android Video surfaces ignore overflow clipping — drive the player height explicitly
     // so the MP4 actually becomes a Reels-style mini viewport above the sheet.
     const [mediaViewportHeight, setMediaViewportHeight] = useState(windowHeight);
+    const [mediaCornerRadius, setMediaCornerRadius] = useState(0);
     const posts = useMemo(() => {
         const filtered = postsProp.filter(postHasVideoMedia);
         if (filtered.length > 0) return filtered;
@@ -177,6 +185,8 @@ export default function ScenesViewer({
     const [paused, setPaused] = useState(false);
     const [progress, setProgress] = useState(0);
     const [commentsOpen, setCommentsOpen] = useState(false);
+    /** Stays mounted through the close animation so the sheet can slide down. */
+    const [commentsMounted, setCommentsMounted] = useState(false);
     const [sharePost, setSharePost] = useState<Post | null>(null);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
     const [burstKey, setBurstKey] = useState(0);
@@ -203,15 +213,8 @@ export default function ScenesViewer({
     const currentTimeRef = useRef(0);
     const timesByPostId = useRef<Map<string, number>>(new Map());
     const didSeekInitialRef = useRef(false);
-    /** Resume play after comments only if we were playing when the sheet opened. */
-    const wasPlayingBeforeCommentsRef = useRef(true);
-    /** Pending seek+unmute after remounting Video when comments close. */
-    const commentsResumePendingRef = useRef(false);
-    /** Unmount native Video while comments sheet is open (feed suspendNativeVideo parity). */
-    const [commentsSuspendVideo, setCommentsSuspendVideo] = useState(false);
-    const [commentsAudioLocked, setCommentsAudioLocked] = useState(false);
-    const commentsAudioUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const commentsOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const commentsOpenRef = useRef(false);
+    commentsOpenRef.current = commentsMounted;
     const lastMediaTapRef = useRef(0);
     const singleMediaTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -275,41 +278,84 @@ export default function ScenesViewer({
     }, [activePost?.id]);
 
     useEffect(() => {
+        windowHeightSv.value = windowHeight;
+        if (commentsOpen) return;
+        stageHeightSv.value = windowHeight;
+        commentsPreviewSv.value = Math.max(1, Math.round(windowHeight * COMMENTS_PREVIEW_RATIO));
+    }, [commentsOpen, commentsPreviewSv, stageHeightSv, windowHeight, windowHeightSv]);
+
+    useEffect(() => {
         if (commentsOpen) {
-            // Stay paused while comments are open — do not force play (avoids audio races).
+            const fullPreview = Math.max(1, Math.round(stageHeightSv.value * COMMENTS_PREVIEW_RATIO));
+            // Keep a usable sheet if the keyboard shrinks the window (adjustResize).
+            const preview = Math.max(96, Math.min(fullPreview, windowHeight - 240));
+            const duration = commentsProgressSv.value > 0.85 ? 200 : COMMENTS_MEDIA_MS;
+            commentsPreviewSv.value = preview;
+            commentsProgressSv.value = withTiming(1, {
+                duration,
+                easing: COMMENTS_MEDIA_EASE,
+            });
+            mediaHeightSv.value = withTiming(preview, {
+                duration,
+                easing: COMMENTS_MEDIA_EASE,
+            });
             return;
         }
-        // Restore to the ACTIVE slide's fitted height (below), not blindly to the
-        // full window: a landscape post must not re-expand into a portrait viewport
+        commentsProgressSv.value = withTiming(0, {
+            duration: COMMENTS_MEDIA_MS,
+            easing: COMMENTS_MEDIA_EASE,
+        });
+        // Restore to the ACTIVE slide's fitted height, not blindly to the full
+        // window: a landscape post must not re-expand into a portrait viewport
         // when the comments sheet closes.
         mediaHeightSv.value = withTiming(activeFittedHeightRef.current, {
             duration: COMMENTS_MEDIA_MS,
             easing: COMMENTS_MEDIA_EASE,
         });
-    }, [commentsOpen, mediaHeightSv, windowHeight]);
+    }, [commentsOpen, commentsPreviewSv, commentsProgressSv, mediaHeightSv, stageHeightSv, windowHeight]);
 
-    const applyMediaViewportHeight = useCallback((h: number) => {
-        const next = Math.max(1, Math.round(h));
-        setMediaViewportHeight((prev) => (prev === next ? prev : next));
+    const applyMediaFrame = useCallback((h: number, r: number) => {
+        const nextH = Math.max(1, Math.round(h));
+        const nextR = Math.max(0, Math.round(r));
+        setMediaViewportHeight((prev) => (prev === nextH ? prev : nextH));
+        setMediaCornerRadius((prev) => (prev === nextR ? prev : nextR));
     }, []);
 
     useAnimatedReaction(
-        () => Math.round(mediaHeightSv.value),
-        (h, prev) => {
-            if (h !== prev) {
-                runOnJS(applyMediaViewportHeight)(h);
+        () => ({
+            h: Math.round(mediaHeightSv.value),
+            r: Math.round(commentsProgressSv.value * COMMENTS_MEDIA_RADIUS),
+        }),
+        (next, prev) => {
+            if (!prev || next.h !== prev.h || next.r !== prev.r) {
+                runOnJS(applyMediaFrame)(next.h, next.r);
             }
         },
-        [applyMediaViewportHeight],
+        [applyMediaFrame],
     );
 
-    const mediaLayerAnimStyle = useAnimatedStyle(() => ({
-        height: mediaHeightSv.value,
-        // Centre the fitted media layer vertically on the black stage: a landscape
-        // frame is short, and anchoring it to the top would strand it under the
-        // progress bar instead of presenting it as the fullscreen picture.
-        top: Math.max(0, (windowHeight - mediaHeightSv.value) / 2),
-    }));
+    const mediaLayerAnimStyle = useAnimatedStyle(() => {
+        const centeredTop = Math.max(0, (stageHeightSv.value - mediaHeightSv.value) / 2);
+        return {
+            height: mediaHeightSv.value,
+            // Fullscreen landscape stays centred. With comments open the post pins
+            // to the top so the sheet can sit underneath it.
+            top: centeredTop * (1 - commentsProgressSv.value),
+            borderRadius: commentsProgressSv.value * COMMENTS_MEDIA_RADIUS,
+        };
+    });
+
+    const commentsDockStyle = useAnimatedStyle(() => {
+        const top =
+            stageHeightSv.value -
+            (stageHeightSv.value - commentsPreviewSv.value) * commentsProgressSv.value;
+        const parentHeight = windowHeightSv.value;
+        const clampedTop = Math.min(top, Math.max(0, parentHeight - 1));
+        return {
+            top: clampedTop,
+            height: Math.max(0, parentHeight - clampedTop),
+        };
+    });
 
     const activeMediaSlides = useMemo(
         () => (activePost ? getScenesMediaSlides(activePost) : []),
@@ -420,33 +466,6 @@ export default function ScenesViewer({
     const onVideoLoad = useCallback(() => {
         if (!activePost) return;
 
-        // Comments remount: seek to saved time while still muted/paused, then unlock.
-        if (commentsResumePendingRef.current) {
-            const t =
-                timesByPostId.current.get(activePost.id) ?? currentTimeRef.current ?? 0;
-            if (t > 0.05) {
-                try {
-                    videoRef.current?.seek(t);
-                } catch {
-                    /* ignore */
-                }
-                currentTimeRef.current = t;
-            }
-            commentsResumePendingRef.current = false;
-            didSeekInitialRef.current = true;
-            if (commentsAudioUnlockTimerRef.current) {
-                clearTimeout(commentsAudioUnlockTimerRef.current);
-            }
-            commentsAudioUnlockTimerRef.current = setTimeout(() => {
-                commentsAudioUnlockTimerRef.current = null;
-                setCommentsAudioLocked(false);
-                if (wasPlayingBeforeCommentsRef.current) {
-                    setPaused(false);
-                }
-            }, 60);
-            return;
-        }
-
         if (didSeekInitialRef.current) return;
         const t =
             activeIndex === initialIndex
@@ -469,56 +488,28 @@ export default function ScenesViewer({
     }, []);
 
     const openComments = useCallback(() => {
-        if (activePost) {
-            timesByPostId.current.set(activePost.id, currentTimeRef.current);
-        }
-        wasPlayingBeforeCommentsRef.current = !paused;
-        // Immediate hard stop + unmount (feed suspendNativeVideo parity). Delayed
-        // unmount left ExoPlayer audio running under the comments Modal.
-        setCommentsAudioLocked(true);
-        setPaused(true);
-        setCommentsSuspendVideo(true);
+        setCommentsMounted(true);
         setCommentsOpen(true);
-    }, [activePost, paused]);
+    }, []);
 
     const closeComments = useCallback(() => {
-        if (commentsOpenTimerRef.current) {
-            clearTimeout(commentsOpenTimerRef.current);
-            commentsOpenTimerRef.current = null;
-        }
-        if (commentsAudioUnlockTimerRef.current) {
-            clearTimeout(commentsAudioUnlockTimerRef.current);
-            commentsAudioUnlockTimerRef.current = null;
-        }
         setCommentsOpen(false);
-        // Remount Video muted+paused; onVideoLoad seeks then unlocks playback.
-        commentsResumePendingRef.current = true;
-        setPaused(true);
-        setCommentsAudioLocked(true);
-        setCommentsSuspendVideo(false);
-        // Fallback if onLoad is skipped on some OEMs after remount.
-        commentsAudioUnlockTimerRef.current = setTimeout(() => {
-            if (!commentsResumePendingRef.current) return;
-            commentsResumePendingRef.current = false;
-            const t = currentTimeRef.current;
-            if (t > 0.05) {
-                try {
-                    videoRef.current?.seek(t);
-                } catch {
-                    /* ignore */
-                }
-            }
-            setCommentsAudioLocked(false);
-            if (wasPlayingBeforeCommentsRef.current) setPaused(false);
-        }, 700);
     }, []);
 
     useEffect(() => {
-        return () => {
-            if (commentsOpenTimerRef.current) clearTimeout(commentsOpenTimerRef.current);
-            if (commentsAudioUnlockTimerRef.current) clearTimeout(commentsAudioUnlockTimerRef.current);
-        };
-    }, []);
+        if (commentsOpen || !commentsMounted) return undefined;
+        const t = setTimeout(() => setCommentsMounted(false), COMMENTS_MEDIA_MS);
+        return () => clearTimeout(t);
+    }, [commentsMounted, commentsOpen]);
+
+    useEffect(() => {
+        if (!commentsMounted) return undefined;
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            if (commentsOpen) closeComments();
+            return true;
+        });
+        return () => sub.remove();
+    }, [closeComments, commentsMounted, commentsOpen]);
 
     const handleDirectMessage = useCallback(async () => {
         if (!activePost?.userHandle || !viewerHandle || !viewerUserId) {
@@ -767,6 +758,7 @@ export default function ScenesViewer({
 
     const onVerticalPanUpdate = useCallback(
         (translationY: number) => {
+            if (commentsOpenRef.current) return;
             if (translationY > 0 && activeIndexRef.current === 0) {
                 setDismissPull(Math.min(translationY, windowHeight * 0.45));
             }
@@ -777,6 +769,7 @@ export default function ScenesViewer({
     const onVerticalPanEnd = useCallback(
         (translationY: number) => {
             setDismissPull(0);
+            if (commentsOpenRef.current) return;
             const threshold = windowHeight * 0.12;
             const idx = activeIndexRef.current;
 
@@ -878,41 +871,33 @@ export default function ScenesViewer({
             >
                     <Animated.View style={[styles.mediaLayer, mediaLayerAnimStyle]}>
                         <GestureDetector gesture={mediaGestures}>
-                            <View style={styles.mediaGestureHost}>
+                            <View
+                                style={[
+                                    styles.mediaGestureHost,
+                                    mediaCornerRadius > 0
+                                        ? { borderRadius: mediaCornerRadius, overflow: 'hidden' }
+                                        : null,
+                                ]}
+                                collapsable={false}
+                            >
                                 <ScenesMediaPlayer
                                     key={activePost.id}
                                     post={activePost}
                                     isActive
-                                    suspendPlayback={commentsSuspendVideo}
-                                    paused={paused || commentsOpen || commentsAudioLocked}
-                                    muted={muted || commentsOpen || commentsAudioLocked}
-                                    volume={
-                                        muted || commentsOpen || commentsAudioLocked ? 0 : 1
-                                    }
+                                    paused={paused}
+                                    muted={muted}
+                                    volume={muted ? 0 : 1}
                                     width={windowWidth}
                                     height={mediaViewportHeight}
+                                    cornerRadius={mediaCornerRadius}
                                     videoRef={videoRef}
                                     onVideoLoad={onVideoLoad}
                                     onVideoProgress={onVideoProgress}
                                     onSlideProgress={setMediaSlideProgress}
                                     onSlideIndexChange={setMediaSlideIndex}
-                                    showPauseOverlay={!commentsOpen && !commentsSuspendVideo}
-                                    onMediaPress={commentsOpen ? undefined : handleMediaPress}
+                                    showPauseOverlay
+                                    onMediaPress={commentsMounted ? undefined : handleMediaPress}
                                 />
-                                {commentsOpen || commentsSuspendVideo ? (
-                                    // Opaque cover while sheet is up — blocks TextureView punch-through
-                                    // without leaving a live ExoPlayer under the Modal.
-                                    <View
-                                        style={[
-                                            styles.commentsVideoCover,
-                                            {
-                                                width: windowWidth,
-                                                height: mediaViewportHeight,
-                                            },
-                                        ]}
-                                        pointerEvents="none"
-                                    />
-                                ) : null}
                             </View>
                         </GestureDetector>
                     </Animated.View>
@@ -944,7 +929,7 @@ export default function ScenesViewer({
             </Pressable>
 
             <View style={[styles.topRight, { top: insets.top + 14 }]}>
-                {!commentsOpen && metadataItems.length > 0 ? (
+                {!commentsMounted && metadataItems.length > 0 ? (
                     <View style={styles.metaPill}>
                         <Icon
                             name={metadataIcon(metadataItems[metadataIndex]?.type ?? 'feed')}
@@ -958,7 +943,7 @@ export default function ScenesViewer({
                 ) : null}
             </View>
 
-            {!commentsOpen ? (
+            {!commentsMounted ? (
                 <Pressable style={[styles.muteBtn, { top: insets.top + 14 }]} onPress={toggleMute}>
                     <View style={styles.chromeCircle}>
                         <Icon name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#FFFFFF" />
@@ -966,7 +951,7 @@ export default function ScenesViewer({
                 </Pressable>
             ) : null}
 
-            {!commentsOpen ? (
+            {!commentsMounted ? (
             <View style={[styles.actionRail, { bottom: insets.bottom + 96 }]}>
                 <View style={styles.actionCol}>
                     <View collapsable={false}>
@@ -1037,7 +1022,7 @@ export default function ScenesViewer({
             </View>
             ) : null}
 
-            {!commentsOpen ? (
+            {!commentsMounted ? (
             <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.72)']}
                 locations={[0, 0.4, 1]}
@@ -1122,7 +1107,7 @@ export default function ScenesViewer({
             </LinearGradient>
             ) : null}
 
-            {!commentsOpen ? (
+            {!commentsMounted ? (
                 <ScenesFooterBar
                     bottomInset={insets.bottom}
                     isOwnPost={isOwn}
@@ -1143,42 +1128,25 @@ export default function ScenesViewer({
                 ) : null}
             </View>
 
-            {/* Modal (same as feed) — absolute Reels dock + adjustResize was crushing
-                the sheet to blank when the keyboard opened on Android OEMs. */}
-            {commentsOpen ? (
-                <Modal
-                    visible
-                    transparent
-                    animationType="slide"
-                    statusBarTranslucent
-                    onRequestClose={closeComments}
-                >
-                    <View style={styles.commentsModalRoot}>
-                        <Pressable
-                            style={styles.commentsModalBackdrop}
-                            onPress={closeComments}
-                            accessibilityLabel="Dismiss comments"
-                        />
-                        <View style={styles.commentsModalSheet}>
-                            <PostCommentsSheet
-                                variant="scenesEmbed"
-                                postId={String(activePost.id)}
-                                onCommentCountChange={(pid, count) => {
-                                    patchPost(String(pid), (p) => ({
-                                        ...p,
-                                        comments_count: count,
-                                        stats: { ...p.stats, comments: count },
-                                    }));
-                                }}
-                                post={activePost}
-                                isOpen={commentsOpen}
-                                commentAuthorHandle={viewerHandle ?? ''}
-                                currentUserHandle={viewerHandle}
-                                onClose={closeComments}
-                            />
-                        </View>
-                    </View>
-                </Modal>
+            {commentsMounted ? (
+                <Animated.View style={[styles.commentsDock, commentsDockStyle]}>
+                    <PostCommentsSheet
+                        variant="scenesEmbed"
+                        postId={String(activePost.id)}
+                        onCommentCountChange={(pid, count) => {
+                            patchPost(String(pid), (p) => ({
+                                ...p,
+                                comments_count: count,
+                                stats: { ...p.stats, comments: count },
+                            }));
+                        }}
+                        post={activePost}
+                        isOpen={commentsMounted}
+                        commentAuthorHandle={viewerHandle ?? ''}
+                        currentUserHandle={viewerHandle}
+                        onClose={closeComments}
+                    />
+                </Animated.View>
             ) : null}
 
             <PostOverflowMenuModal
@@ -1391,7 +1359,6 @@ const styles = StyleSheet.create({
         right: 0,
         backgroundColor: '#000',
         overflow: 'hidden',
-        // Keep below the comments sheet so the sheet can dock under the mini video.
         zIndex: 10,
     },
     mediaGestureHost: {
@@ -1401,11 +1368,16 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         position: 'relative',
     },
-    commentsVideoCover: {
-        ...StyleSheet.absoluteFill,
-        backgroundColor: '#121212',
-        zIndex: 4,
-        elevation: Platform.OS === 'android' ? 4 : 0,
+    commentsDock: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        zIndex: 40,
+        elevation: 16,
+        backgroundColor: '#060d16',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        overflow: 'hidden',
     },
     fxLayer: {
         ...StyleSheet.absoluteFill,
@@ -1705,21 +1677,6 @@ const styles = StyleSheet.create({
         color: '#111827',
         fontSize: 14,
         fontWeight: '500',
-    },
-    commentsModalRoot: {
-        flex: 1,
-        justifyContent: 'flex-end',
-    },
-    commentsModalBackdrop: {
-        ...StyleSheet.absoluteFill,
-        backgroundColor: 'rgba(0,0,0,0.45)',
-    },
-    commentsModalSheet: {
-        height: COMMENTS_SHEET_HEIGHT,
-        backgroundColor: 'transparent',
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        overflow: 'hidden',
     },
     pauseOverlay: {
         ...StyleSheet.absoluteFill,

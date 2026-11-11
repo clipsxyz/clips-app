@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { FiLink, FiSearch, FiMessageCircle } from 'react-icons/fi';
+import { FiLink, FiMail, FiMessageCircle, FiSearch, FiCheck, FiShare2 } from 'react-icons/fi';
 import { SiFacebook, SiInstagram, SiWhatsapp, SiX, SiThreads } from 'react-icons/si';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle, resolveAvatarForUser } from '../api/users';
 import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
+import { appendMessage } from '../api/messages';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import * as apiClient from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
-import { showUploadOverlay } from '../utils/uploadOverlay';
 import { buildPublicPostUrl } from '../utils/publicShare';
 import Avatar from './Avatar';
 import type { Post } from '../types';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
+
+const SHEET_GRADIENT = 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)';
 
 type ShareContact = {
     handle: string;
@@ -59,17 +59,24 @@ interface ShareModalProps {
 const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareSuccess }) => {
     const [copied, setCopied] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedHandles, setSelectedHandles] = useState<string[]>([]);
+    const [shareCaption, setShareCaption] = useState('');
+    const [sending, setSending] = useState(false);
     const [followedContacts, setFollowedContacts] = useState<ShareContact[]>([]);
     const [loadingFollowed, setLoadingFollowed] = useState(false);
     const [activeShareToken, setActiveShareToken] = useState<string | undefined>(post.publicShareToken);
     const [regeneratingToken, setRegeneratingToken] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
-    const navigate = useNavigate();
+    const [showViaMenu, setShowViaMenu] = useState(false);
     const { user } = useAuth();
 
     useEffect(() => {
         setActiveShareToken(post.publicShareToken);
     }, [post.id, post.publicShareToken]);
+
+    useEffect(() => {
+        if (!isOpen) setShowViaMenu(false);
+    }, [isOpen]);
 
     const postUrl = buildPublicPostUrl(activeShareToken, post.id);
     const postTitle = post.text ? post.text.substring(0, 100) + (post.text.length > 100 ? '...' : '') : 'Check out this post';
@@ -142,16 +149,143 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
         }
     };
 
-    const handleCopyLink = async () => {
+    const copyText = async (text: string) => {
         try {
-            await navigator.clipboard.writeText(postUrl);
-            setCopied(true);
-            showToast?.('Link copied!');
-            setTimeout(() => setCopied(false), 2000);
-            await recordShare();
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch {
+            /* fall through to the selection copy */
+        }
+        try {
+            const area = document.createElement('textarea');
+            area.value = text;
+            area.setAttribute('readonly', '');
+            area.style.position = 'fixed';
+            area.style.top = '0';
+            area.style.left = '0';
+            area.style.opacity = '0';
+            document.body.appendChild(area);
+            area.focus();
+            area.select();
+            const ok = document.execCommand('copy');
+            area.remove();
+            return ok;
         } catch (err) {
             console.error('Failed to copy link:', err);
+            return false;
         }
+    };
+
+    const handleCopyLink = async () => {
+        const ok = await copyText(postUrl);
+        if (!ok) {
+            showToast?.('Could not copy the link. Try again.');
+            return false;
+        }
+        setCopied(true);
+        showToast?.('Link copied!');
+        setTimeout(() => setCopied(false), 2000);
+        await recordShare();
+        return true;
+    };
+
+    const openShareTarget = (url: string) => {
+        const popup = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!popup) window.location.href = url;
+    };
+
+    const openExternal = (url: string) => {
+        const opener = document.createElement('a');
+        opener.href = url;
+        document.body.appendChild(opener);
+        opener.click();
+        opener.remove();
+    };
+
+    const shareMessage = `${shareText}\n${postUrl}`;
+
+    /** Local addresses often reject the url field, so share the message text instead. */
+    const pickShareData = (): ShareData | null => {
+        const host = window.location.hostname.toLowerCase();
+        const privateHost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]'
+            || /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+        const textOnly: ShareData = { title: shareText, text: shareMessage };
+        const withUrl: ShareData = { title: shareText, text: shareText, url: postUrl };
+        const candidates = privateHost
+            ? [textOnly, { text: shareMessage }]
+            : [withUrl, { title: shareText, url: postUrl }, textOnly];
+        if (typeof navigator.canShare !== 'function') return candidates[0];
+        for (const data of candidates) {
+            try {
+                if (navigator.canShare(data)) return data;
+            } catch {
+                /* this browser cannot share that shape */
+            }
+        }
+        return null;
+    };
+
+    /**
+     * Open the installed app the way the APK does. Android uses an intent so
+     * Chrome hands the post to that package. Everywhere else tries the app
+     * scheme, then the website composer if the app did not take the screen.
+     */
+    const launchShareApp = (kind: 'whatsapp' | 'x' | 'facebook' | 'instagram' | 'threads') => {
+        const message = `${shareText}\n${postUrl}`;
+        const encodedMessage = encodeURIComponent(message);
+        const encodedUrl = encodeURIComponent(postUrl);
+        const targets = {
+            whatsapp: {
+                app: `whatsapp://send?text=${encodedMessage}`,
+                web: `https://wa.me/?text=${encodedMessage}`,
+                intent: `intent://send?text=${encodedMessage}#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=${encodeURIComponent(`https://wa.me/?text=${encodedMessage}`)};end`,
+            },
+            x: {
+                app: `twitter://post?message=${encodedMessage}`,
+                web: `https://twitter.com/intent/tweet?text=${encodedMessage}`,
+                intent: `intent://post?message=${encodedMessage}#Intent;scheme=twitter;package=com.twitter.android;S.browser_fallback_url=${encodeURIComponent(`https://twitter.com/intent/tweet?text=${encodedMessage}`)};end`,
+            },
+            facebook: {
+                app: `fb://share?link=${encodedUrl}`,
+                web: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
+                intent: `intent://share?link=${encodedUrl}#Intent;scheme=fb;package=com.facebook.katana;S.browser_fallback_url=${encodeURIComponent(`https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`)};end`,
+            },
+            instagram: {
+                app: `instagram://sharesheet?text=${encodedMessage}`,
+                web: `https://www.instagram.com/`,
+                intent: `intent://sharesheet?text=${encodedMessage}#Intent;scheme=instagram;package=com.instagram.android;S.browser_fallback_url=${encodeURIComponent('https://www.instagram.com/')};end`,
+            },
+            threads: {
+                app: `barcelona://create?text=${encodedMessage}`,
+                web: `https://www.threads.net/intent/post?text=${encodedMessage}`,
+                intent: `intent://www.threads.net/intent/post?text=${encodedMessage}#Intent;scheme=https;package=com.instagram.barcelona;S.browser_fallback_url=${encodeURIComponent(`https://www.threads.net/intent/post?text=${encodedMessage}`)};end`,
+            },
+        } as const;
+        const target = targets[kind];
+        const agent = navigator.userAgent || '';
+        if (/Android/i.test(agent)) {
+            window.location.href = target.intent;
+            return;
+        }
+        if (/iPhone|iPad|iPod/i.test(agent)) {
+            window.location.href = target.app;
+            window.setTimeout(() => {
+                if (document.visibilityState === 'visible') window.location.href = target.web;
+            }, 900);
+            return;
+        }
+        const opener = document.createElement('a');
+        opener.href = target.app;
+        opener.target = '_blank';
+        opener.rel = 'noopener noreferrer';
+        document.body.appendChild(opener);
+        opener.click();
+        opener.remove();
+        window.setTimeout(() => {
+            if (document.visibilityState === 'visible') openShareTarget(target.web);
+        }, 700);
     };
 
     const handleRegenerateLink = async () => {
@@ -177,153 +311,63 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
         }
     };
 
-    async function generateImageFromText(text: string): Promise<string> {
-        const width = 1080;
-        const height = 1920;
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d')!;
-        const grad = ctx.createLinearGradient(0, 0, width, height);
-        grad.addColorStop(0, '#0ea5e9');
-        grad.addColorStop(0.5, '#8b5cf6');
-        grad.addColorStop(1, '#f43f5e');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, width, height);
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const margin = 96;
-        const maxWidth = width - margin * 2;
-        let fontSize = 64;
-        ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-        function wrapLines(t: string): string[] {
-            const words = t.split(/\s+/);
-            const lines: string[] = [];
-            let line = '';
-            for (const w of words) {
-                const test = line ? line + ' ' + w : w;
-                if (ctx.measureText(test).width > maxWidth) {
-                    if (line) lines.push(line);
-                    line = w;
-                } else {
-                    line = test;
-                }
-            }
-            if (line) lines.push(line);
-            return lines;
-        }
-        const safeText = (text || 'Shared from the feed').slice(0, 240);
-        let lines = wrapLines(safeText);
-        while (lines.length > 10 && fontSize > 36) {
-            fontSize -= 6;
-            ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-            lines = wrapLines(safeText);
-        }
-        const lineHeight = fontSize * 1.35;
-        const totalHeight = lines.length * lineHeight;
-        let y = height / 2 - totalHeight / 2;
-        for (const ln of lines) {
-            ctx.fillText(ln, width / 2, y);
-            y += lineHeight;
-        }
-        return canvas.toDataURL('image/png');
-    }
 
-    const handleShareToStory = async () => {
-        if (!user) {
-            alert('Please sign in to share clips.');
-            return;
-        }
-        const maxLength = 200;
-        const truncatedText = post.text && post.text.length > maxLength
-            ? post.text.substring(0, maxLength) + '...'
-            : post.text;
+    const toggleHandle = (handle: string) => {
+        setSelectedHandles((prev) => (
+            prev.includes(handle) ? prev.filter((item) => item !== handle) : [...prev, handle]
+        ));
+    };
 
-        let overlay: ReturnType<typeof showUploadOverlay> | null = null;
+    const handleSendSelected = async () => {
+        if (!user?.handle || sending || selectedHandles.length === 0) return;
+        setSending(true);
+        const caption = shareCaption.trim();
+        const recipients = [...selectedHandles];
         try {
-            let mediaUrl = post.mediaUrl;
-            let mediaType: 'image' | 'video' = (post.mediaType || 'image');
-            if (!mediaUrl) {
-                mediaUrl = await generateImageFromText(truncatedText || '');
-                mediaType = 'image';
+            for (const recipientHandle of recipients) {
+                await appendMessage(user.handle, recipientHandle, {
+                    text: caption || postUrl,
+                    sourcePostId: String(post.id),
+                });
             }
-            overlay = showUploadOverlay({
-                thumbUrl: mediaUrl,
-                thumbType: mediaType === 'video' ? 'video' : 'image',
-                initialMessage: 'Sharing to Stories 24...',
-                uploadingTitle: 'Preparing story...',
-                successTitle: 'Story shared!',
-                errorTitle: 'Story share failed',
-            });
-            onClose();
-            await createStory(
-                user.id,
-                user.handle || '',
-                mediaUrl,
-                mediaType,
-                truncatedText,
-                post.locationLabel,
-                undefined,
-                undefined,
-                post.id,
-                post.userHandle
-            );
-            overlay.success('Shared to Stories 24.');
-            showToast?.('You shared this to Stories 24!');
             await recordShare();
-        } catch (e) {
-            console.error('Failed to share to clips:', e);
-            if (overlay) {
-                overlay.error('Failed to share to Stories 24. Please try again.');
-            } else {
-                showToast?.('Failed to share to Stories 24. Please try again.');
-            }
+            showToast?.(recipients.length === 1
+                ? `Sent to ${recipients[0].split('@')[0] || recipients[0]}`
+                : `Sent to ${recipients.length} people`);
+            setShareCaption('');
+            setSelectedHandles([]);
+            onClose();
+        } catch (err) {
+            console.error('Send post to DM failed:', err);
+            showToast?.('Could not send. Please try again.');
+        } finally {
+            setSending(false);
         }
     };
 
-    const handleShare = (platform: string) => {
-        const encodedUrl = encodeURIComponent(postUrl);
-        const encodedText = encodeURIComponent(shareText);
-        let shareUrl = '';
-        switch (platform) {
-            case 'whatsapp':
-                shareUrl = `https://wa.me/?text=${encodedText}%20${encodedUrl}`;
-                break;
-            case 'facebook':
-                shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`;
-                break;
-            case 'twitter':
-                shareUrl = `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`;
-                break;
-            case 'gmail':
-                shareUrl = `mailto:?subject=${encodedText}&body=${encodedText}%0A%0A${encodedUrl}`;
-                break;
-        case 'linkedin':
-            shareUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`;
-            break;
-        case 'sms':
-            shareUrl = `sms:?body=${encodedText}%20${encodedUrl}`;
-            window.location.href = shareUrl;
-            // Do not recordShare — leaving to SMS does not confirm a send.
-            return;
-        case 'threads':
-            shareUrl = `https://www.threads.net/intent/post?text=${encodedText}%20${encodedUrl}`;
-            break;
-        default:
-            return;
-    }
-    // Opening an intent/popup is not a completed share (blockers / cancel still fire).
-    window.open(shareUrl, '_blank', 'width=600,height=400');
-};
+    const handleShareVia = () => {
+        if (typeof navigator.share === 'function') {
+            const data = pickShareData();
+            if (data) {
+                // Must start in the click turn, or the browser rejects the sheet.
+                navigator.share(data).then(() => {
+                    void recordShare();
+                    onClose();
+                }).catch((err: unknown) => {
+                    const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
+                    if (name === 'AbortError') return;
+                    setShowViaMenu(true);
+                });
+                return;
+            }
+        }
+        setShowViaMenu(true);
+    };
 
-    const handleShareToDM = (handle: string) => {
-        onClose();
-        navigate(`/messages/${encodeURIComponent(handle)}`, {
-            state: { sharePostUrl: postUrl, sharePostId: post.id }
-        });
-        showToast?.('Post link ready to send!');
-        // Count when the DM is actually sent (MessagesPage), not when the composer opens.
+    const finishViaChoice = (run: () => void) => {
+        run();
+        void recordShare();
+        window.setTimeout(() => onClose(), 300);
     };
 
     const q = searchQuery.trim().toLowerCase();
@@ -339,160 +383,236 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
     );
     const shareOptions = [
         {
-            id: 'whatsapp',
+            id: 'whatsapp' as const,
             label: 'WhatsApp',
             icon: iconWrap(<SiWhatsapp className="w-6 h-6 text-white" aria-hidden />, 'bg-[#25D366]'),
-            action: () => handleShare('whatsapp')
         },
         {
-            id: 'x',
+            id: 'x' as const,
             label: 'X',
             icon: iconWrap(<SiX className="w-5 h-5 text-white" aria-hidden />, 'bg-black'),
-            action: () => handleShare('twitter')
         },
         {
-            id: 'facebook',
+            id: 'facebook' as const,
             label: 'Facebook',
             icon: iconWrap(<SiFacebook className="w-6 h-6 text-white" aria-hidden />, 'bg-[#1877F2]'),
-            action: () => handleShare('facebook')
         },
         {
-            id: 'instagram',
+            id: 'instagram' as const,
             label: 'Instagram',
             icon: iconWrap(<SiInstagram className="w-6 h-6 text-white" aria-hidden />, 'bg-gradient-to-br from-[#833AB4] via-[#E1306C] to-[#F77737]'),
-            action: async () => {
-                await handleCopyLink();
-                showToast?.('Link copied – paste in Instagram');
-            }
         },
         {
-            id: 'threads',
+            id: 'threads' as const,
             label: 'Threads',
             icon: iconWrap(<SiThreads className="w-5 h-5 text-white" aria-hidden />, 'bg-black'),
-            action: () => handleShare('threads')
         },
-        {
-            id: 'sms',
-            label: 'SMS',
-            icon: iconWrap(<FiMessageCircle className="w-6 h-6 text-white" aria-hidden />, 'bg-gray-600'),
-            action: () => handleShare('sms')
-        },
-        {
-            id: 'story',
-            label: 'Add to story',
-            icon: iconWrap(<span className="text-gray-300 text-xl font-light leading-none">+</span>, 'bg-gray-800/80', 'border-2 border-dashed border-gray-500'),
-            action: handleShareToStory
-        },
-        {
-            id: 'copy',
-            label: 'Copy link',
-            icon: iconWrap(<FiLink className="w-5 h-5 text-white" aria-hidden />, 'bg-gray-600'),
-            action: handleCopyLink
-        }
     ];
 
+    const sendLabel = selectedHandles.length === 0
+        ? 'Send'
+        : selectedHandles.length === 1
+            ? `Send to ${selectedHandles[0].split('@')[0] || selectedHandles[0]}`
+            : `Send to ${selectedHandles.length}`;
+
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-[280]" onClick={onClose}>
+        <div className="fixed inset-0 z-[280] flex items-end justify-center bg-black/50" onClick={onClose}>
             <div
-                className="relative w-full max-w-md overflow-hidden rounded-t-2xl border border-white/10 border-b-0 bg-[#060d16] shadow-2xl max-h-[85vh] flex flex-col"
+                className="relative flex max-h-[85%] w-full max-w-[min(400px,calc(100vw-32px))] flex-col overflow-hidden rounded-t-xl border border-b-0 border-white/10"
+                style={{ background: SHEET_GRADIENT }}
                 onClick={e => e.stopPropagation()}
             >
-                <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                <div className="relative z-10 flex max-h-[85vh] flex-col">
-                {/* Drag handle */}
-                <div className="flex justify-center pt-3 pb-1">
-                    <div className="w-10 h-1 rounded-full bg-white/30" />
+                <div className="flex items-center justify-between border-b border-white/10 px-5 pb-4 pt-5">
+                    <h2 className="text-lg font-semibold text-white">Share</h2>
+                    <button type="button" onClick={onClose} className="text-sm font-medium text-white" aria-label="Close">
+                        Close
+                    </button>
                 </div>
-
-                {/* Search bar */}
-                <div className="px-4 pb-3">
-                    <div className="flex items-center gap-2 rounded-lg bg-[rgba(15,36,48,0.72)] border border-white/10 px-3 py-2.5">
-                        <FiSearch className="w-5 h-5 text-white/45 flex-shrink-0" />
+                <div className="px-5 pb-3 pt-3.5">
+                    <div className="flex items-center gap-3.5 rounded-full border border-white/10 bg-white/5 px-3.5 py-2.5">
+                        <FiSearch className="h-5 w-5 flex-shrink-0 text-[#94A3B8]" />
                         <input
                             type="text"
                             placeholder="Search"
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
-                            className="flex-1 bg-transparent text-white placeholder-white/45 text-sm outline-none min-w-0"
+                            className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#94A3B8]"
                         />
                     </div>
                 </div>
-
-                {/* List of people you follow */}
-                <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-0">
+                <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                     {loadingFollowed ? (
-                        <div className="py-8 text-center text-gray-400 text-sm">Loading...</div>
+                        <div className="py-8 text-center text-sm text-[#D1E4FF]">Loading...</div>
                     ) : filteredContacts.length === 0 ? (
-                        <div className="py-8 text-center text-gray-400 text-sm">
+                        <div className="py-8 text-center text-sm text-[#D1E4FF]">
                             {q ? 'No matches' : 'No people you follow yet'}
                         </div>
                     ) : (
-                        <div className="grid grid-cols-3 gap-4 sm:gap-6">
-                            {filteredContacts.map(contact => (
+                        filteredContacts.map(contact => {
+                            const selected = selectedHandles.includes(contact.handle);
+                            const photo = contact.avatarUrl ? rewriteMediaUrlForClient(contact.avatarUrl) : undefined;
+                            return (
                                 <button
                                     key={contact.handle}
                                     type="button"
-                                    onClick={() => handleShareToDM(contact.handle)}
-                                    className="flex flex-col items-center gap-2 p-2 rounded-xl hover:bg-gray-800/80 active:bg-gray-800 transition-colors"
+                                    onClick={() => toggleHandle(contact.handle)}
+                                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-white/5"
                                 >
-                                    <Avatar
-                                        src={contact.avatarUrl}
-                                        name={contact.handle.split('@')[0]}
-                                        size="lg"
-                                    />
-                                    <span className="text-xs text-white text-center truncate w-full" title={contact.handle}>
+                                    <Avatar src={photo} name={contact.handle.split('@')[0]} size="md" />
+                                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white">
                                         {contact.handle.split('@')[0]}
                                     </span>
+                                    <span className={`flex h-6 w-6 items-center justify-center rounded-full border ${selected ? 'border-[#00F2FF] bg-[#00F2FF] text-black' : 'border-white/35 text-transparent'}`}>
+                                        <FiCheck size={14} />
+                                    </span>
                                 </button>
-                            ))}
-                        </div>
+                            );
+                        })
                     )}
                 </div>
-
-                {/* Share to – social logos row (always visible at bottom) */}
-                <div className="border-t border-white/10 flex-shrink-0 bg-[rgba(6,13,22,0.72)]">
-                    <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-3">
-                        <p className="text-xs font-medium text-white/45 uppercase tracking-wide">Share to</p>
+                {selectedHandles.length > 0 ? (
+                    <div className="border-t border-white/10 px-4 py-3">
+                        <p className="mb-2 truncate text-xs text-[#D1E4FF]">To: {selectedHandles.map((h) => h.split('@')[0]).join(', ')}</p>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="text"
+                                value={shareCaption}
+                                onChange={(e) => setShareCaption(e.target.value)}
+                                placeholder="Include message..."
+                                className="min-w-0 flex-1 rounded-full border border-white/12 bg-[rgba(6,13,22,0.72)] px-3 py-2 text-sm text-white placeholder:text-[#94A3B8] outline-none"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => void handleSendSelected()}
+                                disabled={sending}
+                                className="shrink-0 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+                            >
+                                {sending ? 'Sending…' : sendLabel}
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
+                <div className="border-t border-white/10 px-4 pb-5 pt-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-white">Share to</p>
                         <button
                             type="button"
                             onClick={() => setShowResetConfirm(true)}
                             disabled={regeneratingToken}
-                            className="text-[11px] text-[#3d9b8f] hover:text-[#9fd4cb] disabled:opacity-60 disabled:cursor-not-allowed"
+                            className="text-[11px] text-[#00F2FF] disabled:opacity-60"
                         >
                             {regeneratingToken ? 'Resetting…' : 'Reset shared link'}
                         </button>
                     </div>
-                    <div className="px-2 pb-4 overflow-x-auto overflow-y-hidden scrollbar-hide">
-                        <div className="flex items-center gap-5 sm:gap-6 min-w-max px-2">
-                            {shareOptions.map(({ id, label, icon, action }) => (
+                    <div className="overflow-x-auto pb-2">
+                        <div className="flex min-w-max items-center gap-5 px-1">
+                            {shareOptions.map(({ id, label, icon }) => (
                                 <button
                                     key={id}
                                     type="button"
-                                    onClick={() => {
-                                        action();
-                                        if (id === 'copy') return;
-                                        onClose();
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        launchShareApp(id);
+                                        void recordShare();
+                                        window.setTimeout(() => onClose(), 300);
                                     }}
-                                    className="flex flex-col items-center gap-2 flex-shrink-0 min-w-[56px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3d9b8f] rounded-lg"
+                                    className="flex min-w-[56px] flex-shrink-0 flex-col items-center gap-2"
                                 >
                                     {icon}
-                                    <span className="text-[10px] sm:text-xs text-white/55 whitespace-nowrap">
-                                        {id === 'copy' && copied ? 'Copied!' : label}
-                                    </span>
+                                    <span className="whitespace-nowrap text-[10px] text-[#D1E4FF]">{label}</span>
                                 </button>
                             ))}
                         </div>
                     </div>
-                </div>
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            handleShareVia();
+                        }}
+                        className="flex w-full items-center gap-3 py-2.5 text-left text-sm font-medium text-white"
+                    >
+                        <FiShare2 size={22} />
+                        Share via…
+                    </button>
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            void (async () => {
+                                if (await handleCopyLink()) onClose();
+                            })();
+                        }}
+                        className="flex w-full items-center gap-3 py-2.5 text-left text-sm font-medium text-white"
+                    >
+                        <FiLink size={22} />
+                        {copied ? 'Copied!' : 'Copy link'}
+                    </button>
                 </div>
             </div>
+            {showViaMenu && (
+                <div
+                    className="absolute inset-0 z-[290] flex items-end justify-center bg-black/50"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        setShowViaMenu(false);
+                    }}
+                >
+                    <div
+                        className="w-full max-w-[min(400px,calc(100vw-32px))] rounded-t-xl border border-b-0 border-white/10 px-4 pb-5 pt-4"
+                        style={{ background: SHEET_GRADIENT }}
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <h3 className="mb-1 text-base font-semibold text-white">Share via</h3>
+                        {(
+                            [
+                                {
+                                    label: 'Messages',
+                                    icon: <FiMessageCircle size={22} />,
+                                    run: () => openExternal(/Android/i.test(navigator.userAgent || '')
+                                        ? `sms:?body=${encodeURIComponent(shareMessage)}`
+                                        : `sms:&body=${encodeURIComponent(shareMessage)}`),
+                                },
+                                {
+                                    label: 'Mail',
+                                    icon: <FiMail size={22} />,
+                                    run: () => openExternal(`mailto:?subject=${encodeURIComponent(shareText)}&body=${encodeURIComponent(shareMessage)}`),
+                                },
+                                { label: 'WhatsApp', icon: <SiWhatsapp size={22} />, run: () => launchShareApp('whatsapp') },
+                                { label: 'X', icon: <SiX size={22} />, run: () => launchShareApp('x') },
+                                { label: 'Facebook', icon: <SiFacebook size={22} />, run: () => launchShareApp('facebook') },
+                                { label: 'Instagram', icon: <SiInstagram size={22} />, run: () => launchShareApp('instagram') },
+                                { label: 'Threads', icon: <SiThreads size={22} />, run: () => launchShareApp('threads') },
+                            ] as const
+                        ).map((choice) => (
+                            <button
+                                key={choice.label}
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    finishViaChoice(choice.run);
+                                }}
+                                className="flex w-full items-center gap-3 py-2.5 text-left text-sm font-medium text-white"
+                            >
+                                <span className="flex h-6 w-6 items-center justify-center text-white">{choice.icon}</span>
+                                {choice.label}
+                            </button>
+                        ))}
+                        <button
+                            type="button"
+                            onClick={() => setShowViaMenu(false)}
+                            className="mt-1 w-full py-2.5 text-center text-sm font-medium text-[#D1E4FF]"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
             {showResetConfirm && (
-                <div className="absolute inset-0 bg-black/70 flex items-center justify-center px-4 z-[290]">
-                    <div className="relative w-full max-w-sm overflow-hidden rounded-xl border border-white/10 bg-[#060d16] p-4 shadow-2xl">
-                        <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                        <div className="relative z-10">
+                <div className="absolute inset-0 z-[290] flex items-center justify-center bg-black/70 px-4">
+                    <div className="w-full max-w-sm rounded-xl border border-white/12 p-4 shadow-2xl" style={{ background: SHEET_GRADIENT }}>
                         <h3 className="text-sm font-semibold text-white">Reset shared link?</h3>
-                        <p className="mt-2 text-xs text-white/65">
+                        <p className="mt-2 text-xs text-[#D1E4FF]">
                             Existing shared URLs for this post will stop working. A new link will be created and copied.
                         </p>
                         <div className="mt-4 flex items-center justify-end gap-2">
@@ -500,7 +620,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
                                 type="button"
                                 onClick={() => setShowResetConfirm(false)}
                                 disabled={regeneratingToken}
-                                className="px-3 py-1.5 text-xs rounded-md border border-white/15 text-white/80 hover:bg-white/10 disabled:opacity-60"
+                                className="rounded-md border border-white/35 px-3 py-1.5 text-xs text-white disabled:opacity-60"
                             >
                                 Cancel
                             </button>
@@ -508,11 +628,10 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
                                 type="button"
                                 onClick={handleRegenerateLink}
                                 disabled={regeneratingToken}
-                                className="px-3 py-1.5 text-xs rounded-md bg-[#3d9b8f] text-white hover:bg-[#348a7f] disabled:opacity-60"
+                                className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-60"
                             >
                                 {regeneratingToken ? 'Resetting…' : 'Reset link'}
                             </button>
-                        </div>
                         </div>
                     </div>
                 </div>

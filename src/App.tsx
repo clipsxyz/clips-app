@@ -2,12 +2,12 @@
 import { createPortal } from 'react-dom';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiUserMinus, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation, FiFlag, FiSlash } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
 import ShareToStoriesFeedIcon from './components/ShareToStoriesFeedIcon';
-import Stories24HeaderIcon from './components/Stories24HeaderIcon';
+import FeedPostNewsTicker from './components/FeedPostNewsTicker';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
@@ -25,7 +25,14 @@ import {
   buildSuggestedFollowerFromPosts,
   type SuggestedFollowerSuggestion,
 } from './utils/suggestedFollowerFeed';
-import { resolveStories24OpenTarget } from './utils/stories24Rail';
+import {
+  isStories24AddYoursHandle,
+  orderStories24RailItems,
+  rankStories24RailItems,
+  resolveStories24OpenTarget,
+  STORIES24_RAIL_MAX_CARDS,
+  stories24RailItemIsSeen,
+} from './utils/stories24Rail';
 import {
   getFeedNewPostsPollMs,
   getHeaderCountsPollMs,
@@ -48,6 +55,8 @@ import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe } from './api/client';
+import { rewriteMediaUrlForClient } from './api/apiBaseUrl';
+import { hasPendingFollowRequest } from './api/privacy';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { loadFeed, saveFeed, clearFeed } from './utils/feedCache';
@@ -94,7 +103,6 @@ import type { EffectConfig } from './utils/effects';
 import ProgressiveImage from './components/ProgressiveImage';
 import ZoomableMedia from './components/ZoomableMedia';
 import ImageFullscreenViewer from './components/ImageFullscreenViewer';
-import VideoCTAOverlay from './components/VideoCTAOverlay';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
@@ -405,7 +413,7 @@ export default function App() {
                 background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)',
                 backgroundColor: '#000000',
               }
-            : { backgroundColor: '#030712' }
+            : { backgroundColor: isFeedPage ? '#000000' : '#030712' }
         }
       >
         {loc.pathname !== '/login'
@@ -629,19 +637,15 @@ function PillTabs(props: {
 
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0;
   const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
+  const passportPhoto = rewriteMediaUrlForClient(
+    String(user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || ''),
+  );
+  const [passportPhotoFailed, setPassportPhotoFailed] = React.useState(false);
+  React.useEffect(() => {
+    setPassportPhotoFailed(false);
+  }, [passportPhoto]);
   const activeLabel = props.customLocationLabel || props.customLocation || (props.active === local ? 'Nearby' : props.active);
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
-  const activeHeaderDotClass = props.customLocation
-    ? 'bg-red-500'
-    : props.active === local
-    ? 'bg-[#34D399]'
-    : props.active === regional
-      ? 'bg-[#7A8AF0]'
-      : props.active === national
-        ? 'bg-[#93C5FD]'
-        : props.active === 'Following'
-          ? 'bg-pink-400'
-          : 'bg-white/85';
 
   React.useEffect(() => {
     const timeout = window.setTimeout(() => setShowGazetteerTitle(false), 2000);
@@ -665,7 +669,7 @@ function PillTabs(props: {
 
   React.useEffect(() => {
     if (!menuOpen) return;
-    setLocationQuery(props.customLocation || '');
+    setLocationQuery('');
     setLocationSuggestions([]);
   }, [menuOpen, props.customLocation]);
 
@@ -816,6 +820,18 @@ function PillTabs(props: {
 
   if (isInFullscreen) return null;
 
+  const activeFeedKey = props.customLocation
+    ? null
+    : props.active === 'Following'
+      ? 'following'
+      : props.active === local
+        ? 'nearby'
+        : props.active === regional
+          ? 'regional'
+          : props.active === national
+            ? 'national'
+            : null;
+
   const menuItems: Array<{
     key: string;
     label: string;
@@ -823,9 +839,20 @@ function PillTabs(props: {
     onClick: () => void;
   }> = [
     {
+      key: 'following',
+      label: 'Following',
+      icon: <FiUserPlus className="h-[22px] w-[22px]" />,
+      onClick: () => {
+        props.onChange('Following');
+        window.dispatchEvent(new CustomEvent('setFollowingTab'));
+        props.onClearCustom?.();
+        setMenuOpen(false);
+      },
+    },
+    {
       key: 'nearby',
       label: 'Nearby',
-      icon: <FiNavigation className="h-4 w-4 text-[#34D399]" />,
+      icon: <FiNavigation className="h-[22px] w-[22px]" />,
       onClick: () => {
         props.onChange(local);
         props.onClearCustom?.();
@@ -835,7 +862,7 @@ function PillTabs(props: {
     {
       key: 'regional',
       label: regional,
-      icon: <FiMapPin className="h-4 w-4 text-[#7A8AF0]" />,
+      icon: <FiMapPin className="h-[22px] w-[22px]" />,
       onClick: () => {
         props.onChange(regional);
         props.onClearCustom?.();
@@ -845,7 +872,7 @@ function PillTabs(props: {
     {
       key: 'national',
       label: national,
-      icon: <FiGlobe className="h-4 w-4 text-[#93C5FD]" />,
+      icon: <FiGlobe className="h-[22px] w-[22px]" />,
       onClick: () => {
         props.onChange(national);
         props.onClearCustom?.();
@@ -855,21 +882,10 @@ function PillTabs(props: {
     {
       key: 'discover',
       label: 'Discover',
-      icon: <FiCompass className="h-4 w-4 text-white/90" />,
+      icon: <FiCompass className="h-[22px] w-[22px]" />,
       onClick: () => {
         setMenuOpen(false);
         navigate('/discover');
-      },
-    },
-    {
-      key: 'following',
-      label: 'Following',
-      icon: <FiUserPlus className="h-4 w-4 text-pink-400" />,
-      onClick: () => {
-        props.onChange('Following');
-        window.dispatchEvent(new CustomEvent('setFollowingTab'));
-        props.onClearCustom?.();
-        setMenuOpen(false);
       },
     },
   ];
@@ -902,13 +918,15 @@ function PillTabs(props: {
         <div className="relative grid grid-cols-[auto_1fr_auto] items-center gap-2">
           <button
             type="button"
-            aria-label="Stories 24"
-            title="Stories"
-            onClick={() => props.onOpenStories24?.()}
-            className="inline-flex flex-col items-center justify-center gap-1 shrink-0 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+            aria-label="Discover"
+            title="Discover"
+            onClick={() => navigate('/discover')}
+            className="inline-flex flex-col items-center justify-center gap-0.5 shrink-0 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
           >
-            <Stories24HeaderIcon size={32} />
-            <span className="text-[10px] leading-none font-medium text-white">Stories</span>
+            <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-white/15 bg-white/5">
+              <FiCompass className="h-5 w-5 text-white" aria-hidden />
+            </span>
+            <span className="text-[10px] font-medium leading-3 text-white">Discover</span>
           </button>
 
           <div ref={menuRef} className="relative flex justify-center">
@@ -918,17 +936,17 @@ function PillTabs(props: {
               aria-expanded={menuOpen}
               aria-label="Change feed"
               onClick={() => setMenuOpen((prev) => !prev)}
-              className="relative inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="relative inline-flex max-w-full items-center gap-2 rounded-[10px] border border-white/30 bg-transparent px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
             >
               {showFeedSwitchCue && !menuOpen ? (
                 <span
-                  className={`contribute-badge-pop pointer-events-none absolute top-full mt-2 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white bg-black text-white text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(0,0,0,0.45)] ${showFeedSwitchBurst ? 'contribute-badge-burst' : ''}`}
+                  className={`contribute-badge-pop pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white bg-black px-2.5 py-1 text-[11px] font-bold text-white ${showFeedSwitchBurst ? 'contribute-badge-burst' : ''}`}
                 >
                   <span className="inline-flex items-center gap-1">
-                    <FiMapPin className="w-3.5 h-3.5 text-white" />
+                    <FiMapPin className="h-3 w-3 text-white" />
                     <span>Switch feed</span>
                   </span>
-                  <span className="absolute left-1/2 -top-1 -translate-x-1/2 w-2 h-2 bg-black border-l border-t border-white rotate-45 rounded-[2px]" />
+                  <span className="absolute left-1/2 -bottom-1 h-2 w-2 -translate-x-1/2 rotate-45 rounded-[1px] border-b border-r border-white bg-black" />
                 </span>
               ) : null}
               <span className="shrink-0" aria-hidden>
@@ -940,9 +958,9 @@ function PillTabs(props: {
                   <FiMapPin className="h-4 w-4 text-white" />
                 )}
               </span>
-              <span className={`shrink-0 h-2.5 w-2.5 rounded-full ${activeHeaderDotClass}`} aria-hidden />
+              <span className="h-2 w-2 shrink-0 rounded-full bg-white" aria-hidden />
               <span
-                className="max-w-[9rem] truncate sm:max-w-[11rem]"
+                className="max-w-[160px] truncate"
                 style={{
                   fontSize: '18px',
                   fontWeight: 700,
@@ -968,47 +986,44 @@ function PillTabs(props: {
               >
                 <button
                   type="button"
-                  className="absolute inset-0 bg-black/60"
+                  className="absolute inset-0 bg-black/70"
                   aria-label="Dismiss"
                   onClick={() => setMenuOpen(false)}
                 />
                 <div
-                  className="relative w-full max-w-[400px] overflow-hidden rounded-t-[1.5rem] border border-white/10 border-b-0 bg-[#060d16] shadow-[0_-12px_40px_rgba(0,0,0,0.55)] pb-[max(1rem,env(safe-area-inset-bottom))] animate-[feedSwitchSheetUp_280ms_cubic-bezier(0.22,1,0.36,1)_both]"
+                  className="relative w-full max-w-[400px] overflow-hidden rounded-t-3xl border border-b-0 border-white/10 pb-[max(1rem,env(safe-area-inset-bottom))] animate-[feedSwitchSheetUp_280ms_cubic-bezier(0.22,1,0.36,1)_both]"
+                  style={{ background: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)' }}
                 >
-                  <DiscoverAmbientCanvas fixed={false} variant="passport" />
                   <div className="relative z-10">
-                  <div className="mx-auto mt-2.5 mb-1 h-1 w-10 rounded-full bg-white/30" aria-hidden />
-                  <div className="relative px-4 pt-1 pb-1">
+                  <div className="mx-auto mt-2 mb-1.5 h-[5px] w-11 rounded-full bg-white/30" aria-hidden />
+                  <div className="relative flex min-h-10 items-center justify-end px-3">
                     <button
                       type="button"
                       aria-label="Close"
                       onClick={() => setMenuOpen(false)}
-                      className="absolute right-3 top-0 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/15"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white"
                     >
-                      <FiX className="h-5 w-5" strokeWidth={2.2} />
+                      <FiX className="h-6 w-6" strokeWidth={2.2} />
                     </button>
-                    <p className="text-center text-[12px] font-semibold tracking-[0.12em] uppercase text-[#3d9b8f]">
-                      Gazetteer says
-                    </p>
-                    <h3
-                      className="mt-2 text-center text-white"
-                      style={{ fontSize: '20px', fontWeight: 700, fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif' }}
-                    >
-                      Switch feed
-                    </h3>
-                    <p className="mt-1 text-center text-[14px] leading-snug text-[#a3a3a3]">
-                      Nearby, city, country, Discover, or Following
-                    </p>
                   </div>
+                  <p className="mb-3 px-5 text-center text-[13px] font-semibold uppercase tracking-[1.4px] text-[#00F2FF]">
+                    Gazetteer says
+                  </p>
+                  <h3 className="px-5 text-center text-2xl font-semibold text-white">
+                    Switch feed
+                  </h3>
+                  <p className="mb-[18px] mt-2 px-5 text-center text-[15px] leading-[22px] text-[#D1E4FF]">
+                    Following, Nearby, city, country, or Discover
+                  </p>
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
                       submitLocationSearch();
                     }}
-                    className="px-4 pt-2"
+                    className="px-4"
                   >
-                    <div className="flex items-center gap-2 rounded-full border border-white bg-transparent px-3 py-2.5">
-                      <FiSearch className="h-4 w-4 text-white/75" aria-hidden />
+                    <div className="flex items-center gap-2 rounded-full border-[1.5px] border-white bg-transparent px-3.5 py-3">
+                      <FiSearch className="h-[18px] w-[18px] text-white" aria-hidden />
                       <input
                         type="text"
                         value={locationQuery}
@@ -1016,16 +1031,16 @@ function PillTabs(props: {
                         placeholder={searchHints[searchHintIndex]}
                         onFocus={() => setSearchInputFocused(true)}
                         onBlur={() => setSearchInputFocused(false)}
-                        className="w-full border-0 bg-transparent text-sm text-white placeholder:text-white/45 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                        className="w-full border-0 bg-transparent text-base text-white placeholder:text-[#94A3B8] outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
                         style={{ WebkitAppearance: 'none', appearance: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
                         aria-label="Search location feed"
                       />
                     </div>
-                    <div className="px-1 pt-1.5 text-[11px] text-white/45">
-                      Tip: use <span className="text-white/65">venue:</span> or <span className="text-white/65">landmark:</span>
+                    <div className="px-1 pb-2.5 pt-2 text-xs text-[#94A3B8]">
+                      Tip: use venue: or landmark:
                     </div>
                   </form>
-                  <div className="max-h-[min(48vh,360px)] overflow-y-auto py-2">
+                  <div className="max-h-[360px] overflow-y-auto pb-2.5">
                     {locationQuery.trim().length >= 2 && (
                       <div className="px-4 pb-2">
                         {loadingSuggestions ? (
@@ -1083,25 +1098,35 @@ function PillTabs(props: {
                           props.onClearCustom?.();
                           setMenuOpen(false);
                         }}
-                        className="w-full px-4 py-3 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
-                        style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
+                        className="mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-4 rounded-[14px] px-3 py-4 text-left text-lg font-semibold text-white"
                       >
-                        <span className="shrink-0"><FiHome className="h-4 w-4 text-white/80" /></span>
-                        <span className="truncate">Back to home feed</span>
+                        <FiHome className="h-[22px] w-[22px] shrink-0" />
+                        <span className="min-w-0 flex-1 truncate">Back to home feed</span>
+                        <span className="h-[22px] w-[22px] shrink-0" />
                       </button>
                     )}
-                    {menuItems.map((item) => (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={item.onClick}
-                        className="w-full px-4 py-3 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
-                        style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
-                      >
-                        <span className="shrink-0">{item.icon}</span>
-                        <span className="truncate">{item.label}</span>
-                      </button>
-                    ))}
+                    {menuItems.map((item) => {
+                      const selected = item.key === activeFeedKey;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={item.onClick}
+                          aria-pressed={selected}
+                          className={`mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-4 rounded-[14px] px-3 py-4 text-left text-lg ${
+                            selected
+                              ? 'border border-[#00F2FF]/90 bg-[#00F2FF]/15 font-bold text-white'
+                              : 'font-medium text-white/60'
+                          }`}
+                        >
+                          <span className={`shrink-0 ${selected ? 'text-[#00F2FF]' : 'text-white/60'}`}>{item.icon}</span>
+                          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                          <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center">
+                            {selected ? <FiCheck className="h-[22px] w-[22px] text-[#00F2FF]" /> : null}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                   </div>
                 </div>
@@ -1135,20 +1160,22 @@ function PillTabs(props: {
               aria-label="My Passport"
               title="My Passport"
               onClick={() => navigate('/profile')}
-              className="relative inline-flex flex-col items-center justify-center gap-1 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="relative inline-flex flex-col items-center justify-center gap-0.5 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
             >
-              <span className="w-8 h-8 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center border-2 border-white">
-                {user?.avatarUrl ? (
+              <span className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-[10px] bg-[#374151]">
+                {passportPhoto && !passportPhotoFailed ? (
                   <img
-                    src={user.avatarUrl}
+                    src={passportPhoto}
                     alt="My Passport"
-                    className="w-full h-full object-cover"
+                    className="h-full w-full object-cover"
+                    onError={() => setPassportPhotoFailed(true)}
                   />
                 ) : (
-                  <span className="text-[10px] font-semibold text-white">{passportInitials}</span>
+                  <span className="text-xs font-bold text-white">{passportInitials.slice(0, 1)}</span>
                 )}
+                <span className="pointer-events-none absolute inset-0 rounded-[10px] border border-white/30" aria-hidden />
               </span>
-              <span className="text-[10px] leading-none font-medium text-white">Passport</span>
+              <span className="text-[10px] font-medium leading-3 text-white">Passport</span>
             </button>
           </div>
         </div>
@@ -1417,31 +1444,13 @@ function PostHeader({
     post.userReclipped === true;
   const profileTargetHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
 
-  // Metadata carousel: location â†’ venue â†’ landmark â†’ timestamp, one at a time
-  const metadataItems = React.useMemo(() => {
-    const out: Array<{ label: string; type: 'location' | 'venue' | 'landmark' | 'timestamp' }> = [];
-    if (post.locationLabel && post.locationLabel !== 'Unknown Location') out.push({ label: post.locationLabel, type: 'location' });
-    if (post.venue) out.push({ label: post.venue, type: 'venue' });
-    if (post.landmark) out.push({ label: post.landmark, type: 'landmark' });
-    const ts = post.createdAt != null ? (typeof post.createdAt === 'string' ? parseInt(post.createdAt, 10) : post.createdAt) : null;
-    if (typeof ts === 'number' && !Number.isNaN(ts)) out.push({ label: timeAgo(ts), type: 'timestamp' });
-    return out;
-  }, [post.locationLabel, post.venue, post.landmark, post.createdAt]);
-  const [metadataIndex, setMetadataIndex] = React.useState(0);
-  // Transition style for carousel (currently fixed to slide-left)
-  const metadataTransitionClass = 'metadata-carousel-slide-left';
-  React.useEffect(() => {
-    if (metadataItems.length <= 1) return;
-    const t = setInterval(() => {
-      setMetadataIndex((i) => (i + 1) % metadataItems.length);
-    }, 3000);
-    return () => clearInterval(t);
-  }, [metadataItems.length]);
-
   // Check if this is the current user's post
   const isCurrentUser = user?.handle === post.userHandle;
-  // Use current user's avatarUrl if it's their post, otherwise get from handle
-  const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(post.userHandle);
+  const rawAvatar =
+    (isCurrentUser
+      ? user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || post.avatarUrl
+      : post.avatarUrl) || getAvatarForHandle(profileTargetHandle);
+  const avatarSrc = rawAvatar ? rewriteMediaUrlForClient(rawAvatar) : undefined;
 
   // Check if user has unviewed stories using API
   React.useEffect(() => {
@@ -1502,6 +1511,16 @@ function PostHeader({
 
   // Small profile action card (visit profile / follow / view stories)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false);
+  const avatarAnchorRef = React.useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = React.useState<{ top: number; left: number } | null>(null);
+
+  const openAvatarTarget = (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    setProfileMenuOpen((open) => !open);
+  };
 
   const handleVisitProfile = (e?: React.MouseEvent) => {
     if (e) {
@@ -1627,24 +1646,180 @@ function PostHeader({
     ? "text-white/90 drop-shadow-md"
     : "text-gray-500 dark:text-gray-400";
 
+  React.useEffect(() => {
+    if (!profileMenuOpen) {
+      setMenuPos(null);
+      return;
+    }
+    const place = () => {
+      const el = avatarAnchorRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const menuWidth = 224;
+      const menuHeight = 240;
+      const left = Math.min(Math.max(12, rect.left), window.innerWidth - menuWidth - 12);
+      let top = rect.bottom + 6;
+      if (top + menuHeight > window.innerHeight - 12) {
+        top = rect.top - menuHeight - 6;
+      }
+      top = Math.min(Math.max(12, top), window.innerHeight - menuHeight - 12);
+      setMenuPos({ top, left });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [profileMenuOpen]);
+
+  const followRequested =
+    !isCurrentUser &&
+    !isFollowingThisUser &&
+    hasPendingFollowRequest(user?.handle || '', profileTargetHandle);
+  const quickActionClass = 'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-[#F9FAFB]';
+  const profileQuickMenu = profileMenuOpen ? (
+    <>
+      {createPortal(
+        <button
+          type="button"
+          aria-label="Dismiss"
+          className="fixed inset-0 z-[180] bg-black/35"
+          onClick={() => setProfileMenuOpen(false)}
+        />,
+        document.body,
+      )}
+      {menuPos ? createPortal(
+      <div
+        className="fixed z-[190] w-56 overflow-hidden rounded-[14px] border border-white/[0.08] shadow-[0_6px_10px_rgba(0,0,0,0.35)]"
+        style={{
+          top: menuPos.top,
+          left: menuPos.left,
+          background: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.8px] text-white/60">Quick actions</p>
+          <button
+            type="button"
+            aria-label="Close quick actions"
+            className="text-white/85"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              setProfileMenuOpen(false);
+            }}
+          >
+            <FiX className="h-[18px] w-[18px]" />
+          </button>
+        </div>
+        <button type="button" className={quickActionClass} onClick={handleVisitProfile}>
+          <FiUser className="h-[18px] w-[18px] shrink-0 text-white" />
+          <span>Visit profile</span>
+        </button>
+        {!isCurrentUser && onFollow ? (
+          <button
+            type="button"
+            className={quickActionClass}
+            onClick={async (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              setProfileMenuOpen(false);
+              try {
+                await onFollow();
+              } catch (error) {
+                console.error('Error in onFollow from quick actions:', error);
+              }
+            }}
+          >
+            {isFollowingThisUser ? (
+              <FiUserMinus className="h-[18px] w-[18px] shrink-0 text-white" />
+            ) : followRequested ? (
+              <FiClock className="h-[18px] w-[18px] shrink-0 text-white" />
+            ) : (
+              <FiUserPlus className="h-[18px] w-[18px] shrink-0 text-white" />
+            )}
+            <span>{isFollowingThisUser ? 'Unfollow' : followRequested ? 'Requested' : 'Follow'}</span>
+          </button>
+        ) : null}
+        {hasStory ? (
+          <button type="button" className={quickActionClass} onClick={handleViewStories}>
+            <FiPlayCircle className="h-[18px] w-[18px] shrink-0 text-white" />
+            <span>View stories</span>
+          </button>
+        ) : null}
+        {!isCurrentUser && isMutualFollow && isFollowingThisUser && onOpenDM ? (
+          <button
+            type="button"
+            className={quickActionClass}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              setProfileMenuOpen(false);
+              onOpenDM(profileTargetHandle);
+            }}
+          >
+            <FiMessageSquare className="h-[18px] w-[18px] shrink-0 text-white" />
+            <span>Message</span>
+          </button>
+        ) : null}
+        {!isCurrentUser ? (
+          <button type="button" className={quickActionClass} onClick={handleBlockFromQuickActions}>
+            <FiSlash className="h-[18px] w-[18px] shrink-0 text-[#FCA5A5]" />
+            <span className="text-[#FCA5A5]">Block user</span>
+          </button>
+        ) : null}
+        {!isCurrentUser ? (
+          <button type="button" className={quickActionClass} onClick={handleReportFromQuickActions}>
+            <FiFlag className="h-[18px] w-[18px] shrink-0 text-[#FDE68A]" />
+            <span className="text-[#FDE68A]">Report</span>
+          </button>
+        ) : null}
+      </div>,
+      document.body,
+      ) : null}
+    </>
+  ) : null;
+
+  const feedAvatar = (
+    <span
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+      style={
+        hasStory
+          ? {
+              padding: 0.75,
+              background: 'linear-gradient(to top right, #2DD4BF, #0EA5E9, #D946EF)',
+            }
+          : undefined
+      }
+    >
+      <span
+        className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-black"
+        style={hasStory ? { padding: 2.5 } : undefined}
+      >
+        <Avatar
+          src={avatarSrc}
+          name={post.userHandle.split('@')[0]}
+          size={hasStory ? 26 : 'sm'}
+          hideBorder
+          hasStory={false}
+          onClick={openAvatarTarget}
+        />
+      </span>
+    </span>
+  );
+
   if (variant === "textOnlyFeed" && children != null) {
     const avatarBlock = (
       <div
+        ref={avatarAnchorRef}
         className="relative shrink-0 pb-0.5"
         data-feed-author-handle={post.userHandle}
         data-feed-dm-anchor={post.id}
       >
-        <Avatar
-          src={avatarSrc}
-          name={post.userHandle.split("@")[0]}
-          size="sm"
-          hasStory={hasStory}
-          onClick={(e) => {
-            e?.stopPropagation();
-            e?.preventDefault();
-            setProfileMenuOpen((open) => !open);
-          }}
-        />
+        {feedAvatar}
         {!isCurrentUser && onFollow && !isFollowingThisUser && (
           <button
             type="button"
@@ -1703,7 +1878,7 @@ function PostHeader({
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Top row: @handle + flag (left), same metadata carousel as media cards + menu (right). Byline stays inside the bubble below. */}
+        {/* Top row: @handle + flag (left), menu (right). Place and time sit in the ticker under the card. */}
         {/* z-40 so the quick-actions sheet (absolute below header) paints above the bubble row â€” a following sibling would otherwise cover it. */}
         <div className="relative z-40">
           <div className="flex items-start justify-between gap-3 pt-1">
@@ -1749,37 +1924,6 @@ function PostHeader({
               ) : null}
             </div>
             <div className="flex flex-col items-end shrink-0 gap-0.5 pt-0.5">
-              {metadataItems.length > 0 && (() => {
-                const current = metadataItems[metadataIndex];
-                const Icon =
-                  current.type === 'location'
-                    ? FiMapPin
-                    : current.type === 'venue'
-                      ? FiHome
-                      : current.type === 'landmark'
-                        ? GiGreekTemple
-                        : FiClock;
-                const iconMuted = isOverlaid ? 'text-white/80' : 'text-gray-500 dark:text-gray-400';
-                const labelMuted = isOverlaid ? 'text-white/90' : 'text-gray-600 dark:text-gray-300';
-                return (
-                  <div
-                    className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
-                    title={metadataItems.map((m) => m.label).join(' Â· ')}
-                  >
-                    <div
-                      key={metadataIndex}
-                      className={`flex items-center gap-1 justify-end min-w-0 max-w-[140px] ${metadataTransitionClass}`}
-                    >
-                      <Icon className={`w-3 h-3 flex-shrink-0 ${iconMuted}`} />
-                      <span
-                        className={`text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight ${labelMuted}`}
-                      >
-                        {current.label}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
               {onMenuClick ? (
                 <button
                   type="button"
@@ -1804,124 +1948,7 @@ function PostHeader({
             </div>
           </div>
 
-          {profileMenuOpen && (
-            <div className="absolute left-0 top-full z-[200] mt-1 w-56 overflow-hidden rounded-2xl border border-white/20 bg-[#060d16] shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
-            <DiscoverAmbientCanvas fixed={false} variant="passport" />
-            <div className="relative z-10">
-            <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
-              <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
-              <button
-                type="button"
-                className="p-1.5 rounded-full text-white/80 hover:bg-white/10 hover:text-white transition-colors"
-                aria-label="Close quick actions"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  setProfileMenuOpen(false);
-                }}
-              >
-                <FiX className="w-4 h-4" strokeWidth={2.2} />
-              </button>
-            </div>
-            <button
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-100 hover:bg-sky-500/10 transition-colors"
-              onClick={handleVisitProfile}
-            >
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500/15 border border-sky-400/30">
-                <FiUser className="w-3.5 h-3.5 text-sky-300" />
-              </span>
-              <span className="font-medium">Visit profile</span>
-            </button>
-
-            {!isCurrentUser && (
-              <button
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-white/5 transition-colors"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  try {
-                    if (onFollow) await onFollow();
-                  } finally {
-                    setProfileMenuOpen(false);
-                  }
-                }}
-              >
-                {isFollowingThisUser ? (
-                  <>
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
-                      <FiUserX className="w-3.5 h-3.5 text-rose-300" />
-                    </span>
-                    <span className="font-medium text-rose-300">Unfollow</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-400/30">
-                      <FiUserPlus className="w-3.5 h-3.5 text-emerald-300" />
-                    </span>
-                    <span className="font-medium text-emerald-300">Follow</span>
-                  </>
-                )}
-              </button>
-            )}
-
-            {!isCurrentUser && isMutualFollow && onOpenDM && (
-              <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-cyan-500/10 transition-colors"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  onOpenDM(post.userHandle);
-                  setProfileMenuOpen(false);
-                }}
-              >
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/15 border border-cyan-400/30">
-                  <FiMessageSquare className="w-3.5 h-3.5 text-cyan-300" />
-                </span>
-                <span className="font-medium text-cyan-200">Message</span>
-              </button>
-            )}
-
-            {!isCurrentUser && (
-              <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-rose-500/10 transition-colors"
-                onClick={handleBlockFromQuickActions}
-              >
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
-                  <FiUserX className="w-3.5 h-3.5 text-rose-300" />
-                </span>
-                <span className="font-medium text-rose-300">Block user</span>
-              </button>
-            )}
-
-            {!isCurrentUser && (
-              <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-amber-500/10 transition-colors"
-                onClick={handleReportFromQuickActions}
-              >
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 border border-amber-400/30">
-                  <FiHelpCircle className="w-3.5 h-3.5 text-amber-300" />
-                </span>
-                <span className="font-medium text-amber-200">Report</span>
-              </button>
-            )}
-
-            {hasAnyStory && (
-              <button
-                className="w-full flex flex-row items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-violet-500/10 transition-colors"
-                onClick={handleViewStories}
-              >
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 border border-violet-400/30">
-                  <FiPlayCircle className="w-3.5 h-3.5 text-violet-300" />
-                </span>
-                <span className="font-medium text-violet-300">View stories</span>
-              </button>
-            )}
-            </div>
-          </div>
-          )}
+          {profileQuickMenu}
         </div>
 
         {/* Card + profile pic: bottom-right row, avatar beside card (aligned to bottom) */}
@@ -1937,7 +1964,7 @@ function PostHeader({
   }
 
   return (
-    <div className="relative flex items-start justify-between px-3 pt-3 pb-2">
+    <div className="relative flex items-center justify-between px-2.5 py-2">
       {/* Scrim effect - only show when overlaid on media */}
       {isOverlaid && (
         <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
@@ -1945,23 +1972,14 @@ function PostHeader({
 
       {/* Content layer - above scrim */}
       <div className="relative z-10 flex items-start justify-between w-full">
-        <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
+        <div className="flex items-center flex-1 min-w-0 pr-2">
           <div
+            ref={avatarAnchorRef}
             className="relative overflow-visible"
             data-feed-author-handle={post.userHandle}
             data-feed-dm-anchor={post.id}
           >
-            <Avatar
-              src={avatarSrc}
-              name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
-              size="sm"
-              hasStory={hasStory}
-              onClick={(e) => {
-                e?.stopPropagation();
-                e?.preventDefault();
-                setProfileMenuOpen((open) => !open);
-              }}
-            />
+            {feedAvatar}
             {/* + icon overlay on profile picture to follow (TikTok style) */}
             {!isCurrentUser && onFollow && !isFollowingThisUser && (
               <button
@@ -2015,7 +2033,7 @@ function PostHeader({
               </div>
             )}
           </div>
-          <div className="flex-1 min-w-0 flex flex-col gap-0" onClick={(e) => e.stopPropagation()}>
+          <div className="ml-2.5 flex-1 min-w-0 flex flex-col gap-0" onClick={(e) => e.stopPropagation()}>
             {/* Show reclip indicator if this is a reclipped post */}
             {isReclippedPost && (
               <div className={`text-xs mb-1 flex items-center gap-1 ${reclipColorClass}`}>
@@ -2031,14 +2049,16 @@ function PostHeader({
               }}
               className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
             >
-              <h3 id={titleId} className={`text-xs font-semibold flex items-center gap-1 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              <h3 id={titleId} className={`text-sm font-semibold flex items-center leading-[18px] ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
-                <VerifiedBadge
-                  accountType={
-                    isCurrentUser ? user?.accountType : post.userAccountType
-                  }
-                  size={12}
-                />
+                <span className="ml-1 inline-flex shrink-0">
+                  <VerifiedBadge
+                    accountType={
+                      isCurrentUser ? user?.accountType : post.userAccountType
+                    }
+                    size={14}
+                  />
+                </span>
               </h3>
             </button>
             {socialSourceLabel ? (
@@ -2055,32 +2075,6 @@ function PostHeader({
           </div>
         </div>
         <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
-          {/* Metadata pill on top: location â†’ venue â†’ landmark â†’ timestamp (Instagram-style: clean, minimal, no shimmer) */}
-          {metadataItems.length > 0 && (() => {
-            const current = metadataItems[metadataIndex];
-            const Icon =
-              current.type === 'location' ? FiMapPin
-                : current.type === 'venue' ? FiHome
-                  : current.type === 'landmark' ? GiGreekTemple
-                    : FiClock;
-            return (
-              <div
-                className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
-                title={metadataItems.map((m) => m.label).join(' Â· ')}
-              >
-                <div
-                  key={metadataIndex}
-                  className={`flex items-center gap-1 justify-end min-w-0 max-w-[140px] ${metadataTransitionClass}`}
-                >
-                  <Icon className="w-3 h-3 flex-shrink-0 text-white/80" />
-                  <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-white/90">
-                    {current.label}
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
-          {/* 3 dots underneath */}
           {onMenuClick && (
             <button
               onClick={(e) => {
@@ -2103,126 +2097,7 @@ function PostHeader({
         </div>
       </div>
 
-      {/* Inline profile actions card (Visit profile / Follow-Unfollow / View stories) */}
-      {profileMenuOpen && (
-        <div className="absolute left-4 top-full mt-2 z-40 w-56 overflow-hidden rounded-2xl border border-white/20 bg-[#060d16] shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
-          <DiscoverAmbientCanvas fixed={false} variant="passport" />
-          <div className="relative z-10">
-          <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
-            <button
-              type="button"
-              className="p-1.5 rounded-full text-white/80 hover:bg-white/10 hover:text-white transition-colors"
-              aria-label="Close quick actions"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                setProfileMenuOpen(false);
-              }}
-            >
-              <FiX className="w-4 h-4" strokeWidth={2.2} />
-            </button>
-          </div>
-          <button
-            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-100 hover:bg-sky-500/10 transition-colors"
-            onClick={handleVisitProfile}
-          >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500/15 border border-sky-400/30">
-              <FiUser className="w-3.5 h-3.5 text-sky-300" />
-            </span>
-            <span className="font-medium">Visit profile</span>
-          </button>
-
-          {!isCurrentUser && (
-            <button
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-white/5 transition-colors"
-              onClick={async (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                try {
-                  if (onFollow) await onFollow();
-                } finally {
-                  setProfileMenuOpen(false);
-                }
-              }}
-            >
-              {isFollowingThisUser ? (
-                <>
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
-                    <FiUserX className="w-3.5 h-3.5 text-rose-300" />
-                  </span>
-                  <span className="font-medium text-rose-300">Unfollow</span>
-                </>
-              ) : (
-                <>
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-400/30">
-                    <FiUserPlus className="w-3.5 h-3.5 text-emerald-300" />
-                  </span>
-                  <span className="font-medium text-emerald-300">Follow</span>
-                </>
-              )}
-            </button>
-          )}
-
-          {!isCurrentUser && isMutualFollow && onOpenDM && (
-            <button
-              type="button"
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-cyan-500/10 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                onOpenDM(post.userHandle);
-                setProfileMenuOpen(false);
-              }}
-            >
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/15 border border-cyan-400/30">
-                <FiMessageSquare className="w-3.5 h-3.5 text-cyan-300" />
-              </span>
-              <span className="font-medium text-cyan-200">Message</span>
-            </button>
-          )}
-
-          {!isCurrentUser && (
-            <button
-              type="button"
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-rose-500/10 transition-colors"
-              onClick={handleBlockFromQuickActions}
-            >
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
-                <FiUserX className="w-3.5 h-3.5 text-rose-300" />
-              </span>
-              <span className="font-medium text-rose-300">Block user</span>
-            </button>
-          )}
-
-          {!isCurrentUser && (
-            <button
-              type="button"
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-amber-500/10 transition-colors"
-              onClick={handleReportFromQuickActions}
-            >
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 border border-amber-400/30">
-                <FiHelpCircle className="w-3.5 h-3.5 text-amber-300" />
-              </span>
-              <span className="font-medium text-amber-200">Report</span>
-            </button>
-          )}
-
-          {hasAnyStory && (
-            <button
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-violet-500/10 transition-colors"
-              onClick={handleViewStories}
-            >
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 border border-violet-400/30">
-                <FiPlayCircle className="w-3.5 h-3.5 text-violet-300" />
-              </span>
-              <span className="font-medium text-violet-300">View stories</span>
-            </button>
-          )}
-
-          </div>
-        </div>
-      )}
+      {profileQuickMenu}
     </div>
   );
 }
@@ -2791,9 +2666,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [showControls, setShowControls] = React.useState(false);
   const [isMuted, setIsMuted] = React.useState(getGlobalVideoMuted);
-  const [isPaused, setIsPaused] = React.useState(false);
-  const [showMuteButton, setShowMuteButton] = React.useState(true); // show when scroll onto card, hide after 2s; one tap brings back
-  const muteButtonHideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [, setIsPaused] = React.useState(false);
   const autoplayTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
   const [aspectRatio, setAspectRatio] = React.useState<number | null>(null); // width/height ratio
@@ -3195,12 +3068,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                     }, delayMs);
                   }
                 }
-                setShowMuteButton(true);
-                if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
-                muteButtonHideTimerRef.current = setTimeout(() => {
-                  setShowMuteButton(false);
-                  muteButtonHideTimerRef.current = null;
-                }, 2000);
               } else {
                 const v = videoRef.current;
                 if (v) {
@@ -3215,9 +3082,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   setIsPlaying(false);
                   setShowControls(false);
                 }
-                if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
-                muteButtonHideTimerRef.current = null;
-                setShowMuteButton(false);
               }
             } catch (err) {
               console.warn('IntersectionObserver callback error (mobile):', err);
@@ -3239,7 +3103,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         clearTimeout(autoplayTimerRef.current);
         autoplayTimerRef.current = null;
       }
-      if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
     };
   }, [currentItem?.type, postId, lowBandwidthMode, autoplayPref]);
 
@@ -3410,17 +3273,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       singleTapTimer.current = setTimeout(() => {
         // Only process single tap if no second tap came within threshold
         if (!isProcessingDoubleTap.current) {
-          // Still images: Threads-style fullscreen (not Scenes)
+          // One tap opens fullscreen. Photos use the still viewer; videos open Scenes.
           if (currentItem?.type === 'image') {
             openImageFullscreen();
           } else if (currentItem?.type === 'video') {
-            // Feed videos: single tap shows the mute button again (then it hides after 2s)
-            setShowMuteButton(true);
-            if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
-            muteButtonHideTimerRef.current = setTimeout(() => {
-              setShowMuteButton(false);
-              muteButtonHideTimerRef.current = null;
-            }, 2000);
+            handleOpenScenesPress();
           }
         }
         singleTapTimer.current = null;
@@ -3479,24 +3336,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
   }, [currentItem?.type, isLoading]);
 
-  // When switching to a video (e.g. carousel), show mute button for 2s
   React.useEffect(() => {
-    if (currentItem?.type === 'video') {
-      setShowMuteButton(true);
-      if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
-      muteButtonHideTimerRef.current = setTimeout(() => {
-        setShowMuteButton(false);
-        muteButtonHideTimerRef.current = null;
-      }, 2000);
-    }
     return () => {
       if (singleTapTimer.current) {
         clearTimeout(singleTapTimer.current);
         singleTapTimer.current = null;
-      }
-      if (muteButtonHideTimerRef.current) {
-        clearTimeout(muteButtonHideTimerRef.current);
-        muteButtonHideTimerRef.current = null;
       }
       // Reset double tap processing state
       isProcessingDoubleTap.current = false;
@@ -3983,66 +3827,26 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* Mute/Unmute Button - Center of video (show when scroll onto card, hide after 2s; one tap brings back) */}
-              {!isLoading && !hasError && currentItem.type === 'video' && showMuteButton && (
-                <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none" style={{ touchAction: 'auto' }}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      toggleGlobalMute();
-                    }}
-                    onTouchEnd={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      toggleGlobalMute();
-                    }}
-                    className="p-3 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors shadow-lg pointer-events-auto"
-                    aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-                    title={isMuted ? 'Unmute video' : 'Mute video'}
-                  >
-                    {isMuted ? (
-                      <FiVolumeX size={24} />
-                    ) : (
-                      <FiVolume2 size={24} />
-                    )}
-                  </button>
-                </div>
+              {!isLoading && !hasError && currentItem.type === 'video' && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    toggleGlobalMute();
+                  }}
+                  onTouchEnd={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    toggleGlobalMute();
+                  }}
+                  className="absolute bottom-3 right-3 z-30 flex h-[26px] w-[26px] items-center justify-center rounded-full border border-white/55 bg-black/70 text-white"
+                  aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                  title={isMuted ? 'Unmute video' : 'Mute video'}
+                >
+                  {isMuted ? <FiVolumeX size={13} /> : <FiVolume2 size={13} />}
+                </button>
               )}
-
-              {!isLoading && !hasError && currentItem.type === 'video' && onOpenScenes && (
-                <VideoCTAOverlay onPress={handleOpenScenesPress} userHandle={postUserHandle} />
-              )}
-              {/* Paused Overlay - Mute Button Only (no play/pause control); same show/hide as center mute */}
-              {isPaused && currentItem.type === 'video' && showMuteButton && (
-                <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
-                  <div className="flex flex-col items-center gap-3">
-                    {/* Centered Mute Button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        toggleGlobalMute();
-                      }}
-                      onTouchEnd={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        toggleGlobalMute();
-                      }}
-                      className="p-1.5 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors pointer-events-auto z-50"
-                      aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-                      title={isMuted ? 'Unmute video' : 'Mute video'}
-                    >
-                      {isMuted ? (
-                        <FiVolumeX size={16} />
-                      ) : (
-                        <FiVolume2 size={16} />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-
 
             </div>
           );
@@ -4322,6 +4126,7 @@ function EngagementBar({
   const navigate = useNavigate();
   const [isSaved, setIsSaved] = React.useState(false);
   const [showShareToStoriesModal, setShowShareToStoriesModal] = React.useState(false);
+  const [showReclipConfirm, setShowReclipConfirm] = React.useState(false);
 
   // Check if post is saved
   React.useEffect(() => {
@@ -4494,23 +4299,13 @@ function EngagementBar({
     onLike().catch(err => console.warn('Like error:', err));
   }
 
-  async function reclipClick() {
-    if (busy) return;
-    
-    // Show confirmation modal
-    const result = await Swal.fire(bottomSheet({
-      title: 'Reshare this to followers?',
-      message: 'This post will be shared to your followers in their Following feed.',
-      showCancelButton: true,
-      confirmButtonText: 'OK',
-      cancelButtonText: 'Cancel',
-    }));
+  function reclipClick() {
+    if (busy || post.userHandle === currentUserHandle) return;
+    setShowReclipConfirm(true);
+  }
 
-    // Only proceed if user clicked OK
-    if (!result.isConfirmed) {
-      return;
-    }
-
+  function confirmReclip() {
+    setShowReclipConfirm(false);
     setBusy(true);
     onReclip().finally(() => setBusy(false));
   }
@@ -4631,9 +4426,9 @@ function EngagementBar({
                 </div>
               </div>
             ) : (
-              <FiRepeat className={`${iconSize} text-gray-600 dark:text-gray-400`} />
+              <FiRepeat className={`${iconSize} text-gray-400`} />
             )}
-            <span className="text-xs text-gray-700 dark:text-gray-300 tabular-nums">{reclips}</span>
+            <span className="text-xs text-gray-300 tabular-nums">{reclips}</span>
           </button>
 
           {/* Save */}
@@ -4690,6 +4485,40 @@ function EngagementBar({
             onShareSuccess?.(postId);
           }}
         />
+        {showReclipConfirm && (
+          <div
+            className="fixed inset-0 z-[260] flex items-end justify-center bg-black/55 px-4 pb-6"
+            onClick={() => setShowReclipConfirm(false)}
+          >
+            <div
+              className="w-full max-w-[min(400px,calc(100vw-32px))] overflow-hidden rounded-t-[20px] border border-b-0 border-white/15 px-5 pb-6 pt-6 text-center"
+              style={{ background: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.2px] text-white">Gazetteer says</p>
+              <h3 className="text-lg font-semibold text-white">Reshare this to followers?</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#D1E4FF]">
+                This post will be shared to your followers in their Following feed.
+              </p>
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowReclipConfirm(false)}
+                  className="flex-1 rounded-xl border border-white/35 py-3 text-sm font-semibold text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmReclip}
+                  className="flex-1 rounded-xl bg-white py-3 text-sm font-semibold text-black"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Likes & plays sheet — View Profile passport canvas */}
@@ -5301,12 +5130,12 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       ref={articleRef}
       data-feed-post-id={String(post.id)}
       aria-labelledby={titleId}
-      className={`mx-0 border-0 border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out] relative ${
+      className={`animate-[cardBounce_0.6s_ease-out] relative ${
         isTileBoostMode
-          ? 'w-full overflow-hidden aspect-square rounded-xl mb-0'
-          : 'overflow-visible border-b mb-2'
+          ? 'mx-0 w-full overflow-hidden aspect-square rounded-xl mb-0 border-0'
+          : 'mx-4 my-2 overflow-visible rounded-[20px] border border-white/15'
       }`}
-      style={{ backgroundColor: '#030712' }}
+      style={{ backgroundColor: '#000000' }}
     >
       {/* overflow-visible: PostHeader quick-actions (absolute) must not be clipped by the card */}
       {/* Text-only: author chrome sits in a narrow column beside the bubble (see below). */}
@@ -5441,6 +5270,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           />
         )}
       </div>
+      {!isTileBoostMode && (
+        <FeedPostNewsTicker post={post} carouselIndex={carouselIndex} />
+      )}
       {!isTileBoostMode && carouselThumbItems.length > 1 ? (
         <div className="px-3 py-2 bg-black/95 border-t border-white/10">
           <div className="flex items-center justify-between mb-2">
@@ -5730,6 +5562,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             userHandle: post.userHandle,
             currentUserHandle: user?.handle,
             isFollowing: !!post.isFollowing,
+            authorAvatarUrl:
+              (user?.handle === post.userHandle
+                ? user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || post.avatarUrl
+                : post.avatarUrl) || getAvatarForHandle(post.userHandle),
             viewerAvatarUrl: user?.avatarUrl,
             viewerName: user?.name || user?.handle,
             onLike,
@@ -6047,12 +5883,12 @@ function Stories24RailCollapseOverlay() {
   return null;
 }
 
-/** Horizontal Stories 24 strip (map pin + title + cards). Colours match `Avatar` story ring (teal â†’ sky â†’ fuchsia). */
+/** Horizontal Stories 24 strip — short cards, rank numbers, and a white border on the front card. */
 function Stories24FeedRail({
   stories24Items,
   navigate,
   onBeforeOpenStoryFromRail,
-  previewVideosPaused = false,
+  previewVideosPaused: _previewVideosPaused = false,
 }: {
   stories24Items: Stories24RailItem[];
   navigate: ReturnType<typeof useNavigate>;
@@ -6117,122 +5953,149 @@ function Stories24FeedRail({
     };
   }, [expandingStory, openStoryFromRail]);
 
-  const firstStoryPreviewHandle = React.useMemo(
-    () => stories24Items.find((item) => item.handle !== '__add_yours__')?.handle ?? null,
-    [stories24Items],
+  const { user } = useAuth();
+  const orderedItems = React.useMemo(
+    () => orderStories24RailItems(stories24Items, user?.handle),
+    [stories24Items, user?.handle],
   );
+  const displayCards = React.useMemo(
+    () =>
+      rankStories24RailItems(orderedItems).filter(
+        ({ item }) => !isStories24AddYoursHandle(item.handle),
+      ),
+    [orderedItems],
+  );
+  const hasMoreStories =
+    orderedItems.filter((item) => !isStories24AddYoursHandle(item.handle)).length >
+    STORIES24_RAIL_MAX_CARDS;
+  const railSlotCount = displayCards.length + (hasMoreStories ? 1 : 0);
+  const [focusedCardIndex, setFocusedCardIndex] = React.useState(0);
+  const focusedCardIndexRef = React.useRef(0);
+  const onRailScroll = React.useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (railSlotCount <= 0) return;
+      const next = Math.max(
+        0,
+        Math.min(railSlotCount - 1, Math.round(event.currentTarget.scrollLeft / 264)),
+      );
+      if (next === focusedCardIndexRef.current) return;
+      focusedCardIndexRef.current = next;
+      setFocusedCardIndex(next);
+    },
+    [railSlotCount],
+  );
+  const litCardIndex = Math.min(focusedCardIndex, Math.max(0, railSlotCount - 1));
 
   if (stories24Items.length === 0) return null;
+
+  const openViewAll = () => {
+    const stories = orderedItems.filter((item) => !isStories24AddYoursHandle(item.handle));
+    const next = stories[STORIES24_RAIL_MAX_CARDS] || stories[0];
+    if (!next) return;
+    openStoryFromRail(
+      next,
+      stories.map((item) => item.handle),
+    );
+  };
+
   return (
-    <div
-      className="mx-3 my-3 rounded-2xl p-[1.5px] shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
-      style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
-    >
-      <div className="relative overflow-hidden rounded-2xl bg-[#0a1323] p-3">
-      <DiscoverAmbientCanvas fixed={false} variant="goldChrome" />
-      <div className="relative z-[2]">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-white text-base font-semibold flex items-center gap-1.5">
-          <span className="relative inline-flex h-4 w-4 shrink-0" aria-hidden>
-            <FiMapPin
-              className="absolute inset-0 h-4 w-4"
-              style={{ color: '#d7dde3', filter: 'drop-shadow(0 0 1px rgba(255,255,255,0.45))' }}
-            />
-            <FiMapPin
-              className="absolute inset-0 h-4 w-4"
-              style={{ color: '#d4af37', clipPath: 'inset(48% 0 0 0)', filter: 'drop-shadow(0 0 1px rgba(212,175,55,0.7))' }}
-            />
-            <FiMapPin
-              className="absolute inset-0 h-4 w-4"
-              style={{ color: 'rgba(255,255,255,0.25)', clipPath: 'inset(0 0 62% 0)' }}
-            />
-          </span>
+    <div className="py-1">
+      <div className="mb-3 flex items-center justify-between px-4">
+        <h3 className="flex min-w-0 items-center gap-1.5 text-[17px] font-normal tracking-[0.2px] text-white">
+          <FiMapPin className="h-4 w-4 shrink-0 text-white" aria-hidden />
           <span>Stories 24</span>
         </h3>
         <button
           type="button"
           onClick={() => navigate('/clip')}
-          className="inline-flex items-center gap-1 rounded-xl border border-white bg-white px-2.5 py-1 text-[11px] font-semibold text-[#111827] hover:bg-gray-100 transition-colors"
+          className="ml-3 inline-flex items-center gap-1.5 rounded-full border border-white/45 bg-white/[0.08] px-3 py-1.5 text-[13px] font-semibold text-white"
         >
-          <FiPlus className="w-3 h-3" />
+          <FiPlus className="h-3 w-3" />
           <span>Add yours</span>
         </button>
       </div>
-      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
-        {stories24Items.map((storyItem) => (
-          storyItem.handle === '__add_yours__' ? (
-            <button
-              key="stories24-add-yours"
-              type="button"
-              onClick={() => navigate('/clip')}
-              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/80 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1a1530] text-left"
-            >
-              <div
-                className="pointer-events-none absolute inset-0"
-                style={{ background: 'linear-gradient(135deg, rgba(246,226,122,0.22) 0%, rgba(212,175,55,0.2) 24%, rgba(244,244,244,0.15) 48%, rgba(191,197,204,0.2) 72%, rgba(255,232,163,0.22) 100%)' }}
-                aria-hidden
-              />
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                <span
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#111827] shadow-md"
-                  style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
-                >
-                  <FiPlus className="w-5 h-5" />
+      {displayCards.length > 0 ? (
+        <div
+          className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide pl-3 pr-4"
+          onScroll={onRailScroll}
+        >
+          {displayCards.map(({ item, index }, slot) => {
+            const seen = stories24RailItemIsSeen(item);
+            const rawTitle = (item.title || '').trim();
+            const caption =
+              rawTitle && !['shared a post', 'new story', 'add yours'].includes(rawTitle.toLowerCase())
+                ? rawTitle
+                : '';
+            const displayHandle = item.handle.replace(/^@/, '').includes('@')
+              ? item.handle.replace(/^@/, '')
+              : `@${item.handle.replace(/^@/, '')}`;
+            const cardLabel = caption || displayHandle;
+            const cardMeta = caption ? item.subtitle || displayHandle : '';
+            const still = item.thumb && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(item.thumb) ? item.thumb : '';
+            return (
+              <div key={item.handle} className="flex shrink-0 items-center">
+                <span className="mr-1.5 w-7 text-left text-[26px] font-extrabold leading-[30px] text-white">
+                  {(index ?? 0) + 1}
                 </span>
-                <p className="text-[12px] font-semibold text-white">Add yours</p>
-                <p className="text-[10px] text-white/80">Post to Stories 24</p>
+                <button
+                  type="button"
+                  data-stories24-card={encodeURIComponent(item.handle)}
+                  onClick={(e) => handleStoryCardTap(e, item)}
+                  className={`relative flex h-[72px] w-[220px] items-center overflow-hidden rounded-xl border bg-[#03091B] px-2.5 py-2 text-left ${
+                    slot === litCardIndex ? 'border-white' : 'border-[#2A2A3C]'
+                  }`}
+                >
+                  <span
+                    className="pointer-events-none absolute inset-0"
+                    style={{ background: 'linear-gradient(90deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)' }}
+                    aria-hidden
+                  />
+                  {still ? (
+                    <img
+                      src={still}
+                      alt=""
+                      className="pointer-events-none absolute inset-y-0 right-0 w-[108px] object-cover opacity-90"
+                    />
+                  ) : null}
+                  <span
+                    className="pointer-events-none absolute inset-0"
+                    style={{ background: 'linear-gradient(90deg, #03091B 0%, rgba(3,9,27,0.82) 46%, rgba(3,9,27,0.2) 100%)' }}
+                    aria-hidden
+                  />
+                  <Avatar
+                    src={item.avatarUrl || getAvatarForHandle(item.handle)}
+                    name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                    size={36}
+                    hasStory={!seen}
+                  />
+                  <span className="relative z-[1] ml-2.5 min-w-0 flex-1">
+                    <span className="block text-[13px] font-bold leading-4 text-white line-clamp-2">{cardLabel}</span>
+                    {cardMeta ? (
+                      <span className="mt-0.5 block truncate text-[11px] font-semibold leading-[13px] text-[#D1E4FF]">
+                        {cardMeta}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
               </div>
-            </button>
-          ) : (
-            <button
-              key={`stories24-${storyItem.handle}`}
-              type="button"
-              data-stories24-card={encodeURIComponent(storyItem.handle)}
-              onClick={(e) => handleStoryCardTap(e, storyItem)}
-              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
-            >
-              <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/20 via-sky-500/20 to-fuchsia-500/20" />
-              {storyItem.previewVideoUrl &&
-              storyItem.handle === firstStoryPreviewHandle &&
-              !previewVideosPaused ? (
-                <video
-                  src={storyItem.previewVideoUrl}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  muted
-                  playsInline
-                  autoPlay
-                  loop
-                  preload="metadata"
-                  onTimeUpdate={(e) => {
-                    if (e.currentTarget.currentTime > 3) {
-                      e.currentTarget.currentTime = 0;
-                    }
-                  }}
-                />
-              ) : storyItem.thumb ? (
-                <img
-                  src={storyItem.thumb}
-                  alt={`${storyItem.handle} story`}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  loading="lazy"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-              ) : null}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2">
-                <p className="text-[11px] text-white font-semibold leading-tight line-clamp-2">{storyItem.title}</p>
-                <p className="text-[10px] text-[#7A8AF0] mt-1 truncate">
-                  {storyItem.subtitle ||
-                    (storyItem.handle.startsWith('@') ? storyItem.handle : `@${storyItem.handle}`)}
-                </p>
-              </div>
-            </button>
-          )
-        ))}
-      </div>
-      </div>
-      </div>
+            );
+          })}
+          {hasMoreStories ? (
+            <div className="flex shrink-0 items-center">
+              <span className="mr-1.5 w-7" aria-hidden />
+              <button
+                type="button"
+                onClick={openViewAll}
+                className={`flex h-[72px] w-[220px] items-center justify-center overflow-hidden rounded-xl border bg-[#03091B] text-[15px] font-bold text-white ${
+                  displayCards.length === litCardIndex ? 'border-white' : 'border-[#2A2A3C]'
+                }`}
+              >
+                View all
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {expandingStory &&
         createPortal(
           <div className="fixed inset-0 z-[140] pointer-events-none">
@@ -7794,9 +7657,8 @@ function FeedPageWrapper() {
     if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
 
-    // Dev / explicit flag: optional layout QA tile â€” only for feeds where Ava's author location matches (e.g. Ireland/Galway), never London/Paris/Following.
-    const showAvaFeedDemo =
-      import.meta.env.DEV || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
+    // Optional layout QA tile. Live web must not invent Ava just because Vite is in dev mode.
+    const showAvaFeedDemo = import.meta.env.VITE_FEED_DEMO_AVA === 'true';
     const avaDemoId = 'ava-normal-ireland-demo';
     const avaDemoPost = getAvaNormalPost();
     const withAvaDemo =
@@ -7845,8 +7707,8 @@ function FeedPageWrapper() {
     if (!suggestedCardsV2Enabled) return flat;
     if (customLocation) return flat;
     if (!user) return flat;
-    // In explicit mock-preview mode, render only dedicated preview strips (avoid mixed real+mock cards).
-    if (previewSuggestedCards) return flat;
+    // ?mockcards=1 keeps the dedicated preview strips. Ireland still ranks real businesses.
+    if (previewSuggestedCardsFromQuery) return flat;
 
     const posts = flat
       .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
@@ -7997,7 +7859,8 @@ function FeedPageWrapper() {
     }
 
     let bundles = bundlesRaw;
-    if (suggestedPlacesPrefs.dismissAll) {
+    // Ireland keeps its places preview in the feed render. Business cards still rank here.
+    if (previewSuggestedCards || suggestedPlacesPrefs.dismissAll) {
       bundles = [];
     } else if (suggestedPlacesPrefs.dismissedBundles.length > 0) {
       const dismissed = new Set(suggestedPlacesPrefs.dismissedBundles);
@@ -8040,7 +7903,7 @@ function FeedPageWrapper() {
       });
     }
     return out;
-  }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions, previewSuggestedCards, userId, businessStripEligible, suggestedCardsV2Enabled]);
+  }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions, previewSuggestedCards, previewSuggestedCardsFromQuery, userId, businessStripEligible, suggestedCardsV2Enabled, active]);
 
   React.useEffect(() => {
     setInterestsDraft(user?.interests ?? []);
@@ -8802,8 +8665,15 @@ function FeedPageWrapper() {
         onTouchEnd={handleFeedPullEnd}
         onTouchCancel={handleFeedPullEnd}
       >
+      {stories24Items.length > 0 && !customLocation ? (
+        <Stories24FeedRail
+          stories24Items={stories24Items}
+          navigate={navigate}
+          onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
+          previewVideosPaused={feedScrolling || !feedTabVisible}
+        />
+      ) : null}
       {(() => {
-        // Stories 24: show once after the first post card (not above the feed). Custom/search feeds omit entirely.
         let postCounter = 0;
 
         return flatForRender.map((feedItem, index) => {
@@ -8941,11 +8811,10 @@ function FeedPageWrapper() {
             return null;
           }
           postCounter += 1;
-          const showStories24AfterThisPost =
-            stories24Items.length > 0 && postCounter === 1;
+          const showStories24AfterThisPost = false;
           const showPreviewBusinessAfterThisPost =
             suggestedCardsV2Enabled &&
-            previewSuggestedCards &&
+            previewSuggestedCardsFromQuery &&
             !customLocation &&
             previewLocalBusinessPosts.length > 0 &&
             postCounter === 2;
@@ -9150,12 +9019,11 @@ function FeedPageWrapper() {
       })()}
 
       {(loading || (pages.length === 0 && !end)) && (
-        <div className="space-y-4 px-4 py-6">
+        <div className="space-y-4 px-4 py-4">
           {[1, 2].map((i) => (
-            <div key={i} className="animate-pulse">
-              <div className="h-4 w-40 bg-gray-200 dark:bg-gray-800 rounded mb-2" />
-              <div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded mb-4" />
-              <div className="w-full aspect-square bg-gray-200 dark:bg-gray-800 rounded-xl" />
+            <div key={i} className="animate-pulse overflow-hidden rounded-[20px] border border-white/15 bg-black">
+              <div className="h-4 w-40 rounded bg-white/10 m-3" />
+              <div className="aspect-[4/5] bg-white/5" />
             </div>
           ))}
         </div>

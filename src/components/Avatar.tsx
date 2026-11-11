@@ -8,10 +8,16 @@ export default function Avatar({
     size = 'md',
     className = '',
     hasStory = false,
+    hideBorder = false,
     cornerRadius,
     onClick,
 }: AvatarProps) {
     const initials = getAvatarInitials(name);
+    const [photoFailed, setPhotoFailed] = React.useState(false);
+    React.useEffect(() => {
+        setPhotoFailed(false);
+    }, [src]);
+    const showPhoto = Boolean(src) && !photoFailed;
     const isNumericSize = typeof size === 'number';
     const { dim, fontSize } = isNumericSize ? resolveAvatarDimensions(size) : { dim: 0, fontSize: 14 };
 
@@ -28,19 +34,17 @@ export default function Avatar({
 
     const avatarContent = (
         <>
-            {src ? (
+            {showPhoto ? (
                 <img
                     src={src}
                     alt={`${name}'s profile picture`}
                     className="w-full h-full object-cover rounded-full"
-                    onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                    }}
+                    onError={() => setPhotoFailed(true)}
                 />
             ) : null}
             <div
                 className={`absolute inset-0 rounded-full flex items-center justify-center font-bold text-white ${
-                    src ? 'opacity-0' : 'opacity-100'
+                    showPhoto ? 'opacity-0' : 'opacity-100'
                 } transition-opacity duration-200`}
                 style={{ background: '#000000', ...(isNumericSize ? { fontSize } : {}) }}
             >
@@ -74,7 +78,7 @@ export default function Avatar({
     );
 
     const outerStyle = {
-        border: `2px solid ${borderColor}`,
+        border: hideBorder ? 'none' : `2px solid ${borderColor}`,
         ...(isNumericSize ? { width: dim, height: dim } : {}),
         ...(outerRadius != null ? { borderRadius: outerRadius } : {}),
     };

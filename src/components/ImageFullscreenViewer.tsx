@@ -11,9 +11,10 @@ import {
   FiChevronRight,
   FiBookmark,
   FiBarChart2,
-  FiArrowLeft,
 } from 'react-icons/fi';
 import { getAvatarForHandle } from '../api/users';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+import Avatar from './Avatar';
 
 export type ImageFullscreenItem = {
   url: string;
@@ -39,6 +40,7 @@ export type ImageFullscreenEngagement = {
   currentUserHandle?: string;
   isFollowing?: boolean;
   viewerAvatarUrl?: string;
+  authorAvatarUrl?: string;
   viewerName?: string;
   onLike: () => void | Promise<void>;
   onComment: () => void;
@@ -312,10 +314,13 @@ export default function ImageFullscreenViewer({
   const authorHandle = engagement?.userHandle || '';
   const authorName = displayNameFromHandle(authorHandle);
   const authorAt = atHandle(authorHandle);
-  const authorAvatar = authorHandle ? getAvatarForHandle(authorHandle) : undefined;
-  const viewerAvatar =
+  const authorAvatarRaw =
+    engagement?.authorAvatarUrl || (authorHandle ? getAvatarForHandle(authorHandle) : undefined);
+  const authorAvatar = authorAvatarRaw ? rewriteMediaUrlForClient(authorAvatarRaw) : undefined;
+  const viewerAvatarRaw =
     engagement?.viewerAvatarUrl ||
     (engagement?.currentUserHandle ? getAvatarForHandle(engagement.currentUserHandle) : undefined);
+  const viewerAvatar = viewerAvatarRaw ? rewriteMediaUrlForClient(viewerAvatarRaw) : undefined;
   const showChrome = isExpanded && chromeVisible;
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -424,44 +429,35 @@ export default function ImageFullscreenViewer({
             )}
           </main>
 
-          {/* X-style header */}
+          <button
+            type="button"
+            onClick={requestClose}
+            className="absolute left-3 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white"
+            style={{ top: 'max(0.65rem, calc(env(safe-area-inset-top) + 0.4rem))' }}
+            aria-label="Close fullscreen"
+          >
+            <FiX size={22} />
+          </button>
+
+          {/* Author row. The close control stays up even when the rest of the chrome hides. */}
           {engagement && (
             <header
-              className="absolute top-0 left-0 right-0 z-40 flex items-center gap-1 px-1.5 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]"
+              className="absolute top-0 left-0 right-0 z-40 flex items-center gap-1 pb-2 pl-14 pr-1.5 pt-[max(0.5rem,env(safe-area-inset-top))]"
               style={{
                 opacity: showChrome ? 1 : 0,
                 transition: `opacity ${transitionMs}ms ${transitionEase}`,
                 pointerEvents: showChrome ? 'auto' : 'none',
-                background: 'linear-gradient(to bottom, rgba(0,0,0,0.72), rgba(0,0,0,0))',
+                background: 'rgba(0,0,0,0.72)',
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                type="button"
-                onClick={requestClose}
-                className="flex h-10 w-10 items-center justify-center text-white"
-                aria-label="Close"
-              >
-                <FiArrowLeft size={22} strokeWidth={2.25} />
-              </button>
-
               <button
                 type="button"
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 onClick={() => engagement.onVisitProfile?.()}
                 disabled={!engagement.onVisitProfile}
               >
-                {authorAvatar ? (
-                  <img
-                    src={authorAvatar}
-                    alt=""
-                    className="h-[34px] w-[34px] shrink-0 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gray-700 text-xs font-semibold text-white">
-                    {authorName.slice(0, 1).toUpperCase()}
-                  </div>
-                )}
+                <Avatar src={authorAvatar} name={authorName} size={34} hideBorder />
                 <span className="min-w-0">
                   <span className="block truncate text-[15px] font-bold text-white">{authorName}</span>
                   <span className="block truncate text-[13px] text-[#8B98A5]">{authorAt}</span>
@@ -494,16 +490,7 @@ export default function ImageFullscreenViewer({
                 >
                   <FiMoreVertical size={20} strokeWidth={2.25} />
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={requestClose}
-                  className="flex h-10 w-10 items-center justify-center text-white"
-                  aria-label="Close"
-                >
-                  <FiX size={20} />
-                </button>
-              )}
+              ) : null}
             </header>
           )}
 
@@ -591,17 +578,7 @@ export default function ImageFullscreenViewer({
               </div>
 
               <div className="flex items-center gap-2.5 border-t border-white/10 px-3.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2">
-                {viewerAvatar ? (
-                  <img
-                    src={viewerAvatar}
-                    alt=""
-                    className="h-8 w-8 shrink-0 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-700 text-[10px] font-semibold text-white">
-                    {(engagement.viewerName || 'Y').slice(0, 1).toUpperCase()}
-                  </div>
-                )}
+                <Avatar src={viewerAvatar} name={engagement.viewerName || 'You'} size={32} hideBorder />
                 <button
                   type="button"
                   onClick={engagement.onComment}

@@ -40,6 +40,9 @@ export default defineConfig({
       '@react-navigation/native',
       '@react-navigation/native-stack',
       '@react-navigation/bottom-tabs',
+      '@react-native-firebase/app',
+      '@react-native-firebase/auth',
+      '@react-native-firebase/messaging',
     ],
   },
   // Ignore React Native dependencies in build
@@ -80,6 +83,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false, // Allow self-signed certificates
         rewrite: (path) => path.replace(/^\/api/, '/api'),
+      },
+      '/storage': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
       },
     },
   },

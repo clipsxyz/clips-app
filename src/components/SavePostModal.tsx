@@ -1,6 +1,6 @@
 import React from 'react';
 import { Collection, Post } from '../types';
-import { FiX, FiPlus, FiBookmark, FiCheck } from 'react-icons/fi';
+import { FiX, FiPlus, FiBookmark, FiCheck, FiChevronRight } from 'react-icons/fi';
 import {
     createCollection,
     getUserCollections,
@@ -10,8 +10,11 @@ import {
     savePostToDefaultCollection,
 } from '../api/collections';
 import { showToast } from '../utils/toast';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import CollectionCoverThumb from './CollectionCoverThumb';
+import { resolvePostThumbnail } from '../api/collections';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+
+const SHEET_GRADIENT = 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)';
 const DEFAULT_COLLECTION_NAME = 'All Posts';
 
 interface SavePostModalProps {
@@ -29,7 +32,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
     const [newCollectionName, setNewCollectionName] = React.useState('');
     const [isLoading, setIsLoading] = React.useState(false);
     const [isSaving, setIsSaving] = React.useState<string | null>(null); // Collection ID being saved to
-    const [showSavedToast, setShowSavedToast] = React.useState(false);
+    const [thumbFailed, setThumbFailed] = React.useState(false);
     const autoSavedOnceRef = React.useRef(false);
 
     // Load collections and check which ones contain this post
@@ -37,6 +40,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
         if (isOpen && userId) {
             loadCollections();
             autoSavedOnceRef.current = false;
+            setThumbFailed(false);
         }
     }, [isOpen, userId, post.id]);
 
@@ -51,9 +55,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
             try {
                 await savePostToDefaultCollection(userId, post.id, post);
                 await loadCollections();
-                setShowSavedToast(true);
                 window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
-                window.setTimeout(() => setShowSavedToast(false), 2200);
             } catch (error) {
                 console.error('Error auto-saving post to default collection:', error);
             }
@@ -124,8 +126,6 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
             if (onSaved) {
                 onSaved();
             }
-            setShowSavedToast(true);
-            window.setTimeout(() => setShowSavedToast(false), 2200);
         } catch (error) {
             console.error('Error toggling collection:', error);
             showToast('Could not save this post to collection.');
@@ -148,225 +148,166 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
     const customCollections = collections.filter((c) => c.name !== DEFAULT_COLLECTION_NAME);
     const isInDefaultCollection = !!defaultCollection && postCollections.includes(defaultCollection.id);
 
+    const stillRaw = resolvePostThumbnail(post) || (previewType !== 'video' ? previewUrl : '');
+    const thumbSrc = !thumbFailed && stillRaw ? rewriteMediaUrlForClient(stillRaw) : '';
+    const videoRaw = previewType === 'video' ? (post.mediaUrl || firstPreviewMedia?.url) : '';
+    const videoSrc = videoRaw ? rewriteMediaUrlForClient(videoRaw) : '';
+    const postThumb = thumbSrc ? (
+        <img src={thumbSrc} alt="" className="h-full w-full object-cover" onError={() => setThumbFailed(true)} />
+    ) : videoSrc ? (
+        <video src={videoSrc} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+    ) : post.text ? (
+        <p className="line-clamp-5 px-1.5 text-center text-[11px] font-semibold leading-tight text-white">
+            {post.text}
+        </p>
+    ) : (
+        <FiBookmark className="h-8 w-8 text-[#D1E4FF]" />
+    );
+
     return (
-        <div className="fixed inset-0 z-[280] flex items-end">
-            {/* Backdrop */}
+        <div className="fixed inset-0 z-[280] flex items-end justify-center">
+            <button type="button" className="absolute inset-0 bg-black/55" onClick={onClose} aria-label="Dismiss save" />
             <div
-                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                onClick={onClose}
-            />
-
-            {/* Modal Sheet — View Profile passport canvas */}
-            <div className="relative w-full max-h-[85vh] overflow-hidden flex flex-col rounded-t-3xl border border-white/10 border-b-0 bg-[#060d16] shadow-2xl animate-in slide-in-from-bottom duration-300">
-                <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                <div className="relative z-10 flex max-h-[85vh] flex-col">
-                {/* Drag Handle */}
-                <div className="flex justify-center pt-3 pb-2">
-                    <div className="w-12 h-1 bg-white/30 rounded-full" />
+                className="relative flex max-h-[78%] w-full max-w-[min(400px,calc(100vw-32px))] flex-col overflow-hidden rounded-t-[20px] border border-b-0 border-white/15 pb-3"
+                style={{ background: SHEET_GRADIENT }}
+            >
+                <div className="flex justify-center pb-1.5 pt-2.5">
+                    <div className="h-1 w-10 rounded-full bg-white/30" />
+                </div>
+                <div className="relative flex min-h-11 items-center justify-center px-4 pb-2">
+                    <h2 className="text-base font-semibold text-white">{isCreatingCollection ? 'New collection' : 'Save'}</h2>
+                    <button type="button" onClick={onClose} className="absolute right-3.5 top-0 flex h-9 w-9 items-center justify-center text-white" aria-label="Close">
+                        <FiX size={22} />
+                    </button>
                 </div>
 
-                {/* Header */}
-                <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
-                    <h2 className="text-xl font-semibold text-white">Save Post</h2>
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setIsCreatingCollection(true)}
-                            className="p-2 rounded-full hover:bg-white/10 transition-colors"
-                            aria-label="New collection"
-                            title="New collection"
-                        >
-                            <FiPlus className="w-5 h-5 text-white/80" />
-                        </button>
-                        <button
-                            onClick={onClose}
-                            className="p-2 rounded-full hover:bg-white/10 transition-colors"
-                            aria-label="Close"
-                            title="Close"
-                        >
-                            <FiX className="w-5 h-5 text-white/80" />
-                        </button>
-                    </div>
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 overflow-y-auto px-6 py-4">
-                    {/* Saved Section (Default collection) */}
-                    <div className="mb-6" id={`save-collections-${post.id}`}>
-                        <div
-                            className="flex items-center gap-4 p-4 rounded-xl hover:bg-white/5 transition-colors cursor-pointer"
-                            onClick={() => {
-                                if (defaultCollection) {
-                                    handleToggleCollection(defaultCollection.id);
+                {isCreatingCollection ? (
+                    <div className="px-4 pb-4">
+                        <div className="mb-4 flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl bg-[rgba(15,36,48,0.88)]">
+                            {postThumb}
+                        </div>
+                        <input
+                            type="text"
+                            value={newCollectionName}
+                            onChange={(e) => setNewCollectionName(e.target.value)}
+                            placeholder="Collection name"
+                            maxLength={60}
+                            className="mb-2 w-full rounded-lg border border-white/12 bg-[rgba(6,13,22,0.72)] px-3 py-2 text-sm text-white placeholder:text-[#94A3B8] focus:outline-none"
+                            autoFocus
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleCreateCollection();
+                                else if (e.key === 'Escape') {
+                                    setIsCreatingCollection(false);
+                                    setNewCollectionName('');
                                 }
                             }}
-                        >
-                            <div className="w-16 h-16 rounded-lg bg-[rgba(15,36,48,0.88)] border border-white/10 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                {previewUrl && previewUrl.trim() !== '' ? (
-                                    previewType === 'video' ? (
-                                        <video
-                                            src={previewUrl}
-                                            className="w-full h-full object-cover"
-                                            muted
-                                            playsInline
-                                            preload="metadata"
-                                        />
-                                    ) : (
-                                        <img
-                                            src={previewUrl}
-                                            alt="Post thumbnail"
-                                            className="w-full h-full object-cover"
-                                        />
-                                    )
-                                ) : post.text ? (
-                                    <div className="w-full h-full p-2 flex items-center justify-center">
-                                        <p className="text-xs text-gray-300 text-center line-clamp-3 leading-tight">
-                                            {post.text.length > 50 ? post.text.substring(0, 50) + '...' : post.text}
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <FiBookmark className="w-8 h-8 text-white/45" />
-                                )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="font-semibold text-white">All Posts</div>
-                                <div className="text-sm text-white/55">Private - every saved post</div>
-                            </div>
-                            {isInDefaultCollection && (
-                                <FiBookmark className="w-5 h-5 text-[#3d9b8f] fill-[#3d9b8f] flex-shrink-0" />
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Collections Section */}
-                    <div className="mb-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold text-white">Collections</h3>
+                        />
+                        <p className="mb-4 text-[13px] text-[#94A3B8]">Collections are private. Only you can see them.</p>
+                        <div className="flex gap-2">
                             <button
-                                onClick={() => setIsCreatingCollection(true)}
-                                className="text-[#3d9b8f] hover:text-[#9fd4cb] text-sm font-medium"
+                                type="button"
+                                onClick={handleCreateCollection}
+                                disabled={!newCollectionName.trim() || isLoading}
+                                className="flex-1 rounded-xl bg-white py-2.5 text-sm font-semibold text-black disabled:opacity-50"
                             >
-                                Create new
+                                Create
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsCreatingCollection(false);
+                                    setNewCollectionName('');
+                                }}
+                                className="rounded-xl border border-white/35 px-4 py-2.5 text-sm font-semibold text-white"
+                            >
+                                Cancel
                             </button>
                         </div>
-
-                        {/* Create New Collection Form */}
-                        {isCreatingCollection && (
-                            <div className="mb-4 p-4 rounded-xl border border-white/10 bg-[rgba(15,36,48,0.72)]">
-                                <input
-                                    type="text"
-                                    value={newCollectionName}
-                                    onChange={(e) => setNewCollectionName(e.target.value)}
-                                    placeholder="Collection name"
-                                    className="w-full px-4 py-2 bg-[rgba(6,13,22,0.72)] text-white placeholder-white/45 rounded-lg border border-white/12 focus:outline-none focus:ring-2 focus:ring-[#3d9b8f] mb-3"
-                                    autoFocus
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                            handleCreateCollection();
-                                        } else if (e.key === 'Escape') {
-                                            setIsCreatingCollection(false);
-                                            setNewCollectionName('');
-                                        }
-                                    }}
-                                />
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={handleCreateCollection}
-                                        disabled={!newCollectionName.trim() || isLoading}
-                                        className="flex-1 px-4 py-2 bg-[#3d9b8f] hover:bg-[#348a7f] text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                        Create
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setIsCreatingCollection(false);
-                                            setNewCollectionName('');
-                                        }}
-                                        className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white rounded-lg font-medium transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
+                    </div>
+                ) : (
+                    <>
+                        {isInDefaultCollection ? (
+                            <div className="mx-4 mb-3 flex items-center gap-2.5 rounded-[10px] border border-white/12 bg-[rgba(15,36,48,0.72)] px-3 py-2.5">
+                                <FiCheck className="text-[#00F2FF]" size={18} />
+                                <span className="text-sm font-bold text-white">Saved</span>
+                                <span className="text-sm font-medium text-[#D1E4FF]">to All Posts</span>
                             </div>
-                        )}
-
-                        {/* Collections List */}
+                        ) : null}
+                        <p className="px-4 text-[15px] font-bold text-white">Collections</p>
+                        <p className="mb-3.5 px-4 text-[13px] leading-[18px] text-[#94A3B8]">
+                            Tap a collection to add this post, or create a new one.
+                        </p>
                         {isLoading && collections.length === 0 ? (
-                            <div className="text-center py-8 text-white/55">Loading collections...</div>
-                        ) : customCollections.length === 0 ? (
-                            <div className="text-center py-8 text-white/55">
-                                No collections yet. Create one to get started!
-                            </div>
+                            <div className="py-8 text-center text-sm text-[#D1E4FF]">Loading collections...</div>
                         ) : (
-                            <div className="space-y-2">
-                                {customCollections.map(collection => {
-                                    const isInCollection = postCollections.includes(collection.id);
-                                    const isSavingToThis = isSaving === collection.id;
-
-                                    return (
-                                        <div
-                                            key={collection.id}
-                                            className="flex items-center gap-4 p-4 rounded-xl hover:bg-white/5 transition-colors"
-                                        >
-                                            <CollectionCoverThumb
-                                                collection={collection}
-                                                className="w-16 h-16 rounded-xl border border-white/10 flex-shrink-0"
-                                                iconClassName="w-7 h-7 text-white/45"
-                                            />
-                                            <div className="flex-1 min-w-0">
-                                                <div className="font-semibold text-white">{collection.name}</div>
-                                                <div className="text-sm text-white/55">
-                                                    {collection.isPrivate ? 'Private' : 'Public'}
-                                                </div>
-                                            </div>
-                                            <button
-                                                onClick={() => handleToggleCollection(collection.id)}
-                                                disabled={isSavingToThis}
-                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors flex-shrink-0 border ${isInCollection
-                                                    ? 'bg-[#3d9b8f] hover:bg-[#348a7f] border-[#3d9b8f]'
-                                                    : 'bg-white/10 hover:bg-white/15 border-white/10'
-                                                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                                aria-label={isInCollection ? 'Remove from collection' : 'Add to collection'}
-                                            >
-                                                {isSavingToThis ? (
-                                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                                ) : isInCollection ? (
-                                                    <FiCheck className="w-5 h-5 text-white" />
-                                                ) : (
-                                                    <FiPlus className="w-5 h-5 text-white" />
-                                                )}
-                                            </button>
+                            <div className="flex gap-3.5 overflow-x-auto px-4 pb-2">
+                                <button type="button" onClick={() => setIsCreatingCollection(true)} className="w-24 shrink-0 text-center">
+                                    <div className="mb-2 flex h-24 w-24 items-center justify-center rounded-xl border border-dashed border-white/12 bg-[rgba(15,36,48,0.72)]">
+                                        <span className="flex h-11 w-11 items-center justify-center rounded-full border border-white/12 bg-[rgba(6,13,22,0.72)] text-white">
+                                            <FiPlus size={28} />
+                                        </span>
+                                    </div>
+                                    <span className="line-clamp-2 text-xs font-medium text-white">New collection</span>
+                                </button>
+                                {defaultCollection ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleToggleCollection(defaultCollection.id)}
+                                        disabled={isSaving === defaultCollection.id}
+                                        className="w-24 shrink-0 text-center"
+                                    >
+                                        <div className="relative mb-2 flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl bg-[rgba(15,36,48,0.88)]">
+                                            {postThumb}
+                                            {isInDefaultCollection ? (
+                                                <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white">
+                                                    <FiCheck size={16} />
+                                                </span>
+                                            ) : null}
                                         </div>
+                                        <span className="line-clamp-2 text-xs font-medium text-white">All Posts</span>
+                                    </button>
+                                ) : null}
+                                {customCollections.map((collection) => {
+                                    const isInCollection = postCollections.includes(collection.id);
+                                    return (
+                                        <button
+                                            key={collection.id}
+                                            type="button"
+                                            onClick={() => handleToggleCollection(collection.id)}
+                                            disabled={isSaving === collection.id}
+                                            className="w-24 shrink-0 text-center"
+                                        >
+                                            <div className="relative mb-2 h-24 w-24 overflow-hidden rounded-xl">
+                                                <CollectionCoverThumb
+                                                    collection={collection}
+                                                    className="h-24 w-24 rounded-xl"
+                                                    iconClassName="h-7 w-7 text-[#D1E4FF]"
+                                                />
+                                                {isInCollection ? (
+                                                    <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white">
+                                                        <FiCheck size={16} />
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                            <span className="line-clamp-2 text-xs font-medium text-white">{collection.name}</span>
+                                        </button>
                                     );
                                 })}
                             </div>
                         )}
-                    </div>
-
-                    {/* Add New Collection Button (Bottom) */}
-                    <button
-                        onClick={() => setIsCreatingCollection(true)}
-                        className="w-full py-4 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 transition-colors flex items-center justify-center gap-2"
-                    >
-                        <FiPlus className="w-6 h-6 text-white" />
-                        <span className="text-white font-medium">Add New Collection</span>
-                    </button>
-                </div>
-                {showSavedToast && (
-                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 rounded-full bg-black/90 border border-white/15 px-4 py-2 flex items-center gap-3 shadow-xl">
-                        <span className="text-sm font-medium text-white">Saved</span>
                         <button
-                            onClick={() => {
-                                setShowSavedToast(false);
-                                const section = document.getElementById(`save-collections-${post.id}`);
-                                section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            }}
-                            className="text-sm font-semibold text-[#9fd4cb] hover:text-[#3d9b8f]"
+                            type="button"
+                            onClick={() => setIsCreatingCollection(true)}
+                            className="mx-4 mt-2 flex items-center gap-3 rounded-xl px-1 py-3 text-left"
                         >
-                            Save to collection
+                            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-[rgba(15,36,48,0.72)] text-white">
+                                <FiPlus size={20} />
+                            </span>
+                            <span className="flex-1 text-sm font-semibold text-white">New collection</span>
+                            <FiChevronRight className="text-[#D1E4FF]" size={18} />
                         </button>
-                    </div>
+                    </>
                 )}
-                </div>
             </div>
         </div>
     );
