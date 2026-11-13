@@ -76,7 +76,7 @@ class UploadController extends Controller
             'file' => 'required|file|max:' . self::MAX_UPLOAD_KB,
         ]);
 
-        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
+        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'webp', 'heic', 'heif', 'mp4', 'webm', 'mov', 'm4v', '3gp', '3gpp', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
         $file = $request->file('file');
         if ($file) {
             $extension = strtolower($file->getClientOriginalExtension());
@@ -183,7 +183,7 @@ class UploadController extends Controller
             'files.*' => 'required|file|max:' . self::MAX_UPLOAD_KB,
         ]);
 
-        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
+        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'webp', 'heic', 'heif', 'mp4', 'webm', 'mov', 'm4v', '3gp', '3gpp', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
         $files = $request->file('files');
         if ($files) {
             foreach ($files as $file) {

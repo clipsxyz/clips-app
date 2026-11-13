@@ -230,6 +230,12 @@ export function isDeletedPostId(id: string | number | null | undefined): boolean
   return id != null && deletedPostIds.has(String(id));
 }
 
+/** True when this browser still has a user-created copy of the post. */
+export function isLocallyCachedPost(id: string | number | null | undefined): boolean {
+  if (id == null || isDeletedPostId(id)) return false;
+  return getPostsFromStorage().some((p) => String(p.id) === String(id));
+}
+
 /** Drop a deleted post from every local mirror so a refresh cannot resurrect it. */
 function purgeLocalPost(postId: string): void {
   const id = String(postId);
@@ -1262,7 +1268,15 @@ export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
   const fromLocal = getFollowState(s.follows, p.userHandle);
   const fromApi = p.isFollowing === true;
-  const isFollowing = hasExplicitFollowState(s.follows, p.userHandle) ? fromLocal : fromApi;
+  const explicit = hasExplicitFollowState(s.follows, p.userHandle);
+  // A stored follow that the server no longer has keeps the "Suggested by Gazetteer"
+  // card hidden and the follow button stuck. A fresh post with isFollowing false wins.
+  let isFollowing = explicit ? fromLocal : fromApi;
+  if (explicit && fromLocal && p.isFollowing === false && p.userHandle) {
+    isFollowing = false;
+    setFollowStateKey(s.follows, p.userHandle, false);
+    saveFollowsToStorage(userId, s.follows);
+  }
   const idKey = String(p.id);
   const localLiked = Object.prototype.hasOwnProperty.call(s.likes, idKey)
     ? !!s.likes[idKey]
@@ -2047,27 +2061,54 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
       }
 
-      // Live mode: API posts only. Do not merge AsyncStorage/local seed (Sarah/Bob leak).
+      // Live mode: the server list is the feed. A copy kept in this browser must not
+      // put a post back after it was deleted on another device.
       let items = [...transformedItems];
 
-      // Optionally keep very recent locally created posts that look like Laravel UUIDs
-      // (optimistic create) — never mock seed handles/ids.
       const uuidRe =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const recentLocal = getPostsFromStorage().filter((p) => {
-        if (isDeletedPostId(p.id)) return false;
-        if (isMockPostId(p.id) || isDevMockFeedVideoPost(p)) return false;
+      const isFirstPage = cursor == null || cursor === 0 || cursor === '0' || cursor === '';
+      const storedLocal = getPostsFromStorage();
+      const serverIds = new Set(transformedItems.map((p) => String(p.id)));
+      const belongsOnTab = (p: Post) => (t === 'discover' ? true : postMatchesLocationTab(p, t));
+      const isUserPost = (p: Post) => {
+        if (isDeletedPostId(p.id) || isMockPostId(p.id) || isDevMockFeedVideoPost(p)) return false;
         if (!uuidRe.test(String(p.id))) return false;
         const h = String(p.userHandle || '').toLowerCase();
-        if (
-          h === 'sarah@artane' ||
-          h === 'bob@ireland' ||
-          h === 'ava@galway' ||
-          h === 'alice@cork'
-        ) {
-          return false;
+        return h !== 'sarah@artane' && h !== 'bob@ireland' && h !== 'ava@galway' && h !== 'alice@cork';
+      };
+
+      let survivingLocal = storedLocal;
+      if (isFirstPage) {
+        let oldestServer = 0;
+        for (const p of transformedItems) {
+          const createdAt = Number(p.createdAt) || 0;
+          if (createdAt > 0 && (oldestServer === 0 || createdAt < oldestServer)) oldestServer = createdAt;
         }
-        return t === 'discover' ? true : postMatchesLocationTab(p, t);
+        const serverFull = rawItems.length >= limit;
+        const dropIds = new Set<string>();
+        for (const p of storedLocal) {
+          if (!isUserPost(p) || !belongsOnTab(p) || serverIds.has(String(p.id))) continue;
+          const createdAt = Number(p.createdAt) || 0;
+          const slidOffFirstPage =
+            serverFull && createdAt > 0 && oldestServer > 0 && createdAt < oldestServer;
+          if (!slidOffFirstPage) dropIds.add(String(p.id));
+        }
+        if (dropIds.size > 0) {
+          posts = posts.filter((p) => !dropIds.has(String(p.id)));
+          survivingLocal = storedLocal.filter((p) => !dropIds.has(String(p.id)));
+          savePostsToStorage(survivingLocal);
+        }
+      }
+
+      // Keep a just-created local post only while it is still saved here and younger
+      // than two minutes. Anything the first page proved was gone has already been dropped.
+      const now = Date.now();
+      const recentLocal = survivingLocal.filter((p) => {
+        if (!isUserPost(p) || !belongsOnTab(p) || serverIds.has(String(p.id))) return false;
+        const createdAt = Number(p.createdAt) || 0;
+        const ageMs = now - createdAt;
+        return createdAt > 0 && ageMs >= 0 && ageMs < 120_000;
       });
       const apiIds = new Set(items.map((p) => String(p.id)));
       const dedupedLocal = recentLocal.filter((p) => !apiIds.has(String(p.id)));

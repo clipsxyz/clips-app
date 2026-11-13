@@ -76,12 +76,44 @@ function normalizeHandle(h: string): string {
   return String(h || '').trim().toLowerCase();
 }
 
+function cityTokens(raw: string): string[] {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .split(/[,/·|]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2);
+}
+
+function cityTokenMatches(token: string, other: string): boolean {
+  if (token === other) return true;
+  return (
+    other.startsWith(`${token} `) ||
+    other.endsWith(` ${token}`) ||
+    token.startsWith(`${other} `) ||
+    token.endsWith(` ${other}`)
+  );
+}
+
+/** Viewer city and author city name the same place (Lucan / Lucan, or Galway / Galway City). */
+function sameCity(viewerCity: string, authorCity: string): boolean {
+  const left = cityTokens(viewerCity);
+  const right = cityTokens(authorCity);
+  if (left.length === 0 || right.length === 0) return false;
+  return left.some((token) => right.some((other) => cityTokenMatches(token, other)));
+}
+
 function contextLabelFor(user: User | null | undefined, post: Post): string {
+  const viewerLocal = (user?.local || '').trim();
+  const authorLocal = (post.userLocal || '').trim();
   const regional = (user?.regional || post.userRegional || '').trim();
-  const local = (user?.local || post.userLocal || '').trim();
-  if (regional && local) return `Active near ${local} · ${regional}`;
+  if (viewerLocal && authorLocal && sameCity(viewerLocal, authorLocal)) {
+    if (regional) return `Active near ${viewerLocal} · ${regional}`;
+    return `Near ${viewerLocal}`;
+  }
+  if (authorLocal && regional) return `Active in ${authorLocal} · ${regional}`;
+  if (authorLocal) return `Active in ${authorLocal}`;
   if (regional) return `Trending in ${regional}`;
-  if (local) return `Near ${local}`;
   return 'Suggested for your feed';
 }
 
@@ -112,6 +144,7 @@ export function buildSuggestedFollowerFromPosts(
     byHandle.set(key, list);
   }
 
+  const viewerCity = (viewer.local || '').trim();
   let bestHandle = '';
   let bestPosts: Post[] = [];
   let bestScore = -1;
@@ -119,7 +152,10 @@ export function buildSuggestedFollowerFromPosts(
   for (const [handle, list] of byHandle) {
     const visual = list.filter((p) => postThumbVisual(p));
     if (visual.length < MIN_MEDIA_POSTS_FOR_SUGGESTED_FOLLOWER) continue;
-    const score = (visual || []).reduce((sum, p) => sum + (p.stats?.views ?? 0), 0) + visual.length * 10;
+    const views = visual.reduce((sum, p) => sum + (p.stats?.views ?? 0), 0);
+    const cityMatch = viewerCity.length > 0 && visual.some((p) => sameCity(viewerCity, p.userLocal || ''));
+    // Same city outranks view count, then views and clip count break the tie.
+    const score = (cityMatch ? 1_000_000 : 0) + views + visual.length * 10;
     if (score > bestScore) {
       bestScore = score;
       bestHandle = handle;

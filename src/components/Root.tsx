@@ -30,6 +30,7 @@ import CanvaVideoEditor from '../pages/CanvaVideoEditor';
 import TextOnlyPostPage from '../pages/TextOnlyPostPage';
 import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
 import GalleryPreviewPage from '../pages/GalleryPreviewPage';
+import StoryLinkCreatePage from '../pages/StoryLinkCreatePage';
 import TermsPage from '../pages/TermsPage';
 import ContentPreferencesPage from '../pages/ContentPreferencesPage';
 import PublicPostPage from '../pages/PublicPostPage';
@@ -77,6 +78,7 @@ export default function Root() {
                                 <Route path="create/filters" element={<InstantFiltersPage />} />
                                 <Route path="create/video-editor" element={<CanvaVideoEditor />} />
                                 <Route path="create/text-only" element={<TextOnlyPostPage />} />
+                                <Route path="create/story-link" element={<StoryLinkCreatePage />} />
                                 <Route path="create/text-only/details" element={<TextOnlyPostDetailsPage />} />
                                 <Route path="templates" element={<TemplatesPage />} />
                                 <Route path="template-editor" element={<TemplateEditorPage />} />

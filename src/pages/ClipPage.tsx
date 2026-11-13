@@ -495,6 +495,15 @@ export default function ClipPage() {
     if (passedAudience) {
       setStoryAudience(passedAudience);
     }
+
+    const passedMediaUrl = location.state?.mediaUrl as string | undefined;
+    const passedMediaType = location.state?.mediaType as 'image' | 'video' | undefined;
+    if (passedMediaUrl && (passedMediaType === 'image' || passedMediaType === 'video')) {
+      setSelectedMedia(passedMediaUrl);
+      setMediaType(passedMediaType);
+      setShowControls(true);
+      setShowTextEditor(false);
+    }
   }, [location.state]);
 
   const handleCameraClick = async () => {

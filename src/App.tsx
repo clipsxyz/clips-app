@@ -8,6 +8,7 @@ import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
 import ShareToStoriesFeedIcon from './components/ShareToStoriesFeedIcon';
 import FeedPostNewsTicker from './components/FeedPostNewsTicker';
+import FeedTextOnlyCard from './components/FeedTextOnlyCard';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
@@ -52,7 +53,7 @@ import { inboxBadgeFromEventPayload, inboxBadgeTotal, loadInboxUnreadParts } fro
 import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe } from './api/client';
 import { rewriteMediaUrlForClient } from './api/apiBaseUrl';
@@ -60,6 +61,7 @@ import { hasPendingFollowRequest } from './api/privacy';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { loadFeed, saveFeed, clearFeed } from './utils/feedCache';
+import { isTextOnlyPost } from './utils/effectiveTextPostStyleNative';
 import { MOCK_FEED_VIDEO_REMOTE_FALLBACK, resolveMockFeedVideoUrl } from './constants/mockFeedVideos';
 import { getStableUserId } from './utils/userId';
 import {
@@ -427,6 +429,7 @@ export default function App() {
           && !loc.pathname.startsWith('/create/text-only')
           && loc.pathname !== '/create/instant'
           && loc.pathname !== '/create/gallery-preview'
+          && loc.pathname !== '/create/story-link'
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <div
           className={
@@ -443,6 +446,7 @@ export default function App() {
           && loc.pathname !== '/create/gallery-preview'
           && loc.pathname !== '/create/text-only'
           && loc.pathname !== '/create/text-only/details'
+          && loc.pathname !== '/create/story-link'
           && loc.pathname !== '/payment'
           && loc.pathname !== '/clip'
           && loc.pathname !== '/create'
@@ -1874,21 +1878,20 @@ function PostHeader({
 
     return (
       <div
-        className="relative w-full px-4 pb-3"
+        className="relative w-full"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Top row: @handle + flag (left), menu (right). Place and time sit in the ticker under the card. */}
-        {/* z-40 so the quick-actions sheet (absolute below header) paints above the bubble row â€” a following sibling would otherwise cover it. */}
-        <div className="relative z-40">
-          <div className="flex items-start justify-between gap-3 pt-1">
-            <div className="min-w-0 flex-1 flex flex-col gap-1 pr-2">
-              {isReclippedPost && (
-                <div className={`text-xs flex items-center gap-1 ${reclipColorClass}`}>
-                  <FiRepeat className="w-3 h-3" />
-                  <span>{post.userHandle} reclipped</span>
-                </div>
-              )}
+        <div className="relative z-40 px-2.5 py-2">
+          {isReclippedPost && (
+            <div className={`mb-1 flex items-center gap-1 text-xs ${reclipColorClass}`}>
+              <FiRepeat className="w-3 h-3" />
+              <span>{post.userHandle} reclipped</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center">
+              {avatarBlock}
               <button
                 type="button"
                 onClick={(e) => {
@@ -1896,68 +1899,57 @@ function PostHeader({
                   e.preventDefault();
                   setProfileMenuOpen((open) => !open);
                 }}
-                className={`text-left w-full min-w-0 transition-opacity ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
+                className="ml-2.5 min-w-0 text-left transition-opacity hover:opacity-80"
               >
-                <span
-                  className={`text-xs font-semibold flex items-center gap-1 leading-tight ${textColorClass}`}
-                  style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
-                >
-                  <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
+                <span id={titleId} className={`flex items-center gap-1 text-sm font-semibold leading-[18px] ${textColorClass}`}>
+                  <span className="inline-block max-w-[min(52vw,14rem)] truncate align-bottom">
+                    {isReclippedPost ? post.originalUserHandle : post.userHandle}
+                  </span>
                   <VerifiedBadge
-                    accountType={
-                      isCurrentUser ? user?.accountType : post.userAccountType
-                    }
-                    size={12}
+                    accountType={isCurrentUser ? user?.accountType : post.userAccountType}
+                    size={14}
                   />
                 </span>
               </button>
-              {socialSourceLabel ? (
-                <span
-                  className={`inline-flex self-start text-[10px] font-semibold tracking-tight rounded-md px-1.5 py-0.5 mt-0.5 ${
-                    isOverlaid
-                      ? 'bg-white/15 text-white/95 border border-white/25'
-                      : 'bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 border border-gray-200/80 dark:border-white/15'
-                  }`}
-                >
-                  {socialSourceLabel}
-                </span>
-              ) : null}
             </div>
-            <div className="flex flex-col items-end shrink-0 gap-0.5 pt-0.5">
-              {onMenuClick ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    onMenuClick();
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onTouchStart={(e) => e.stopPropagation()}
-                  className={`p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all active:scale-[.98] z-50 relative ${
-                    isOverlaid
-                      ? 'text-white hover:opacity-70'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
-                  }`}
-                  aria-label="Post options"
-                  title="Post options"
-                >
-                  <FiList className="w-4 h-4" />
-                </button>
-              ) : null}
-            </div>
+            {onMenuClick ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onMenuClick();
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                className={`relative z-50 flex items-center justify-center rounded-full p-2 transition-all active:scale-[.98] ${
+                  isOverlaid
+                    ? 'text-white hover:opacity-70'
+                    : 'text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+                aria-label="Post options"
+                title="Post options"
+              >
+                <FiList className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
-
+          {socialSourceLabel ? (
+            <span
+              className={`mt-1 inline-flex self-start rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-tight ${
+                isOverlaid
+                  ? 'border border-white/25 bg-white/15 text-white/95'
+                  : 'border border-gray-200/80 bg-gray-100 text-gray-700 dark:border-white/15 dark:bg-white/10 dark:text-gray-200'
+              }`}
+            >
+              {socialSourceLabel}
+            </span>
+          ) : null}
           {profileQuickMenu}
         </div>
-
-        {/* Card + profile pic: bottom-right row, avatar beside card (aligned to bottom) */}
-        <div className="relative z-0 mt-2 flex w-full min-w-0 items-end justify-end gap-2">
-          <div className="min-w-0 max-w-[min(100%,30rem)] shrink">{children}</div>
-          <div className="shrink-0 self-end z-30 pointer-events-auto pb-px">{avatarBlock}</div>
-        </div>
+        <div className="relative z-0 w-full min-w-0">{children}</div>
         {textOnlyFooter != null ? (
-          <div className="mt-2 flex w-full min-w-0 justify-end pr-0.5">{textOnlyFooter}</div>
+          <div className="mt-1 flex w-full min-w-0 justify-start px-4">{textOnlyFooter}</div>
         ) : null}
       </div>
     );
@@ -5064,7 +5056,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
 
   // Check if post has media
   const hasMedia = !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
-  const isTextOnly = post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0);
+  const isTextOnly = isTextOnlyPost(post);
   const isTileBoostMode = engagementVariant === 'boost';
   const viewerIsAuthor =
     !!user?.handle &&
@@ -5097,16 +5089,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     }
   }, [user?.id, isQuickSaving, post.id, post, isSaved]);
 
-  const textOnlyFeedBylineRaw =
-    post.isReclipped &&
-    post.originalUserHandle &&
-    user?.handle &&
-    post.userHandle === user.handle &&
-    post.userReclipped === true
-      ? post.originalUserHandle
-      : post.userHandle;
-  const textOnlyFeedByline = formatTextOnlyFeedByline(textOnlyFeedBylineRaw || '', post.locationLabel);
-
   // If this is a text-only post with a templateId, derive style from TEXT_STORY_TEMPLATES
   const templateForText = post.templateId
     ? TEXT_STORY_TEMPLATES.find((t) => t.id === post.templateId)
@@ -5138,7 +5120,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       style={{ backgroundColor: '#000000' }}
     >
       {/* overflow-visible: PostHeader quick-actions (absolute) must not be clipped by the card */}
-      {/* Text-only: author chrome sits in a narrow column beside the bubble (see below). */}
       {!isTileBoostMode && <TagRow tags={Array.isArray(post.tags) ? post.tags : []} />}
       {!isTileBoostMode && post.isBoosted && (
         <div className="px-4 pt-2 pb-1.5 flex items-center gap-2">
@@ -5217,19 +5198,16 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
               ) : undefined
             }
           >
-            <TextCard
+            <FeedTextOnlyCard
               text={post.text || ''}
+              cardStyle={post.cardStyle}
+              stickers={post.stickers}
               onDoubleLike={onLike}
               onHeartAnimation={(clientX, clientY) => {
                 setTimeout(() => {
                   setHeartAnimation({ startX: clientX, startY: clientY });
                 }, 50);
               }}
-              textStyle={effectiveTextStyle}
-              stickers={post.stickers}
-              isFromViewer={viewerIsAuthor}
-              feedHeadlineByline={textOnlyFeedByline}
-              feedCardTitleId={titleId}
             />
           </PostHeader>
         )
@@ -6300,7 +6278,9 @@ function FeedPageWrapper() {
   const [feedPrefsVersion, setFeedPrefsVersion] = React.useState(0);
   const [ads, setAds] = React.useState<Ad[]>([]);
   const [cursor, setCursor] = React.useState<string | number | null>(0);
-  const isFirstPageCursor = cursor === 0 || cursor === '0' || cursor === '' || cursor === null;
+  // null means the feed has no further page. Treating it as page 1 reloaded the
+  // cached first page at the bottom and dropped every later card, including text-only posts.
+  const isFirstPageCursor = cursor === 0 || cursor === '0' || cursor === '';
   const [loading, setLoading] = React.useState(false);
   const [end, setEnd] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -6683,6 +6663,8 @@ function FeedPageWrapper() {
   // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
   const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
   const feedScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const feedEndSentinelRef = React.useRef<HTMLDivElement | null>(null);
+  const feedPagingRef = React.useRef(false);
   const [feedScrolling, setFeedScrolling] = React.useState(false);
   const feedScrollIdleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [feedTabVisible, setFeedTabVisible] = React.useState(
@@ -6695,10 +6677,12 @@ function FeedPageWrapper() {
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
+  const requestNextFeedPageRef = React.useRef<() => void>(() => {});
   const markFeedScrolling = React.useCallback(() => {
     setFeedScrolling(true);
     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
     feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 180);
+    requestNextFeedPageRef.current();
   }, []);
   const snapshotStories24FeedScrollForRail = React.useCallback(() => {
     try {
@@ -7136,9 +7120,10 @@ function FeedPageWrapper() {
   };
 
   async function loadMore(silent = false) {
-    if (loading || end) {
+    if (feedPagingRef.current || loading || end) {
       return;
     }
+    feedPagingRef.current = true;
     const cursorForRequest = cursor ?? 0;
     if (!silent) setLoading(true);
     setError(null);
@@ -7178,6 +7163,9 @@ function FeedPageWrapper() {
               if (!(ageMs >= 0 && ageMs < 120_000 && !dedupedChunk.some((x) => String(x.id) === String(p.id)))) {
                 return false;
               }
+              // A post only stays if this browser still has the copy it just created.
+              // The indexed feed cache is not that copy, so a delete on the phone drops it.
+              if (!isLocallyCachedPost(p.id)) return false;
               const tab = String(filterForRequest || currentFilterRef.current || '').trim();
               if (!tab || tab.toLowerCase() === 'discover') return true;
               return postMatchesLocationTab(p, tab);
@@ -7197,9 +7185,23 @@ function FeedPageWrapper() {
       console.error('loadMore error:', e);
       setError(e?.message ?? 'Failed to load posts.');
     } finally {
+      feedPagingRef.current = false;
       if (!silent) setLoading(false);
     }
   }
+
+  requestNextFeedPageRef.current = () => {
+    if (feedPagingRef.current || end || pages.length === 0) return;
+    const root = feedScrollRef.current;
+    if (!root) return;
+    const remain = root.scrollHeight - root.scrollTop - root.clientHeight;
+    if (remain > 640) return;
+    void loadMore(true);
+  };
+
+  React.useEffect(() => {
+    requestNextFeedPageRef.current();
+  }, [pages, end]);
 
   // Track most recent post ID for polling
   const latestPostIdRef = React.useRef<string | null>(null);
@@ -7306,6 +7308,23 @@ function FeedPageWrapper() {
 
             // Scroll to top smoothly to show new posts
             window.scrollTo({ top: 0, behavior: 'smooth' });
+          } else {
+            const freshIds = new Set(page.items.map((p) => String(p.id)));
+            setPages((prev) => {
+              const first = prev[0] ?? [];
+              const removedIds = first
+                .filter((p) => !freshIds.has(String(p.id)))
+                .map((p) => String(p.id));
+              if (removedIds.length === 0) return prev;
+              const removed = new Set(removedIds);
+              const rest = prev
+                .slice(1)
+                .map((group) => group.filter((p) => !removed.has(String(p.id)) && !freshIds.has(String(p.id))))
+                .filter((group) => group.length > 0);
+              const next = [page.items, ...rest];
+              saveFeed(userId, currentFilter, next).catch(() => {});
+              return next;
+            });
           }
         }
       } catch (e) {
@@ -9133,6 +9152,10 @@ function FeedPageWrapper() {
             </div>
           )}
         </div>
+      )}
+
+      {!end && pages.length > 0 && (
+        <div ref={feedEndSentinelRef} className="h-10" aria-hidden />
       )}
 
       {end && flat.length > 0 && (

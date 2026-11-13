@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { FiArrowLeft, FiCircle, FiX, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
+import { IoCameraOutline, IoImagesOutline, IoLinkOutline, IoVideocamOutline } from 'react-icons/io5';
 import { FaPeopleRobbery } from 'react-icons/fa6';
 import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
@@ -9,10 +10,25 @@ import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import CreateGroupModal from '../components/CreateGroupModal';
+import CommunityGroupOnboardingSheet from '../components/CommunityGroupOnboardingSheet';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet';
+import GazetteerMenuSheet from '../components/GazetteerMenuSheet';
 import CreateSourceAppsCarousel from '../components/CreateSourceAppsCarousel';
 import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 import { useAuth } from '../context/Auth';
+import Avatar from '../components/Avatar';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+
+function galleryFileKind(file: File): 'image' | 'video' | null {
+    const type = file.type.toLowerCase();
+    const name = file.name.toLowerCase();
+    if (type.startsWith('image/')) return 'image';
+    if (type.startsWith('video/')) return 'video';
+    if (/\.(jpe?g|png|gif|webp|heic|heif|bmp)$/.test(name)) return 'image';
+    if (/\.(mp4|mov|m4v|webm|3gp)$/.test(name)) return 'video';
+    return null;
+}
 
 export default function InstantCreatePage() {
     const { user } = useAuth();
@@ -47,39 +63,34 @@ export default function InstantCreatePage() {
     const [greenEnabled, setGreenEnabled] = React.useState(false);
     const [bgUrl, setBgUrl] = React.useState<string | null>(null);
     const cameraRollInputRef = React.useRef<HTMLInputElement | null>(null);
+    const uploadFilesInputRef = React.useRef<HTMLInputElement | null>(null);
+    const photoCaptureInputRef = React.useRef<HTMLInputElement | null>(null);
+    const videoCaptureInputRef = React.useRef<HTMLInputElement | null>(null);
+    const storyLibraryInputRef = React.useRef<HTMLInputElement | null>(null);
+    const storyPhotoInputRef = React.useRef<HTMLInputElement | null>(null);
+    const storyVideoInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [postMediaMenuOpen, setPostMediaMenuOpen] = React.useState(false);
+    const [storyMediaMenuOpen, setStoryMediaMenuOpen] = React.useState(false);
+    const [uploadExplainerOpen, setUploadExplainerOpen] = React.useState(false);
+
+    const openDeviceFileInput = (input: HTMLInputElement | null) => {
+        if (!input) return;
+        try {
+            if (typeof input.showPicker === 'function') {
+                void input.showPicker();
+                return;
+            }
+        } catch {
+            /* fall through to click() */
+        }
+        input.click();
+    };
 
     /** After Proceed, opens the same picker as Gallery on the orbit (photos/videos). */
-    const openGallerySourceExplainer = React.useCallback(async () => {
-        const result = await Swal.fire(
-            bottomSheet({
-                title: 'Upload from your gallery',
-                message:
-                    'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below.',
-                confirmButtonText: 'Proceed',
-                icon: 'none',
-                showGazetteer: true,
-            }),
-        );
-        if (!result.isConfirmed) return;
-
-        const openPicker = () => {
-            const input = cameraRollInputRef.current;
-            if (!input) return;
-            try {
-                if (typeof input.showPicker === 'function') {
-                    void input.showPicker();
-                    return;
-                }
-            } catch {
-                /* continue to click() */
-            }
-            input.click();
-        };
-
-        // After Swal tears down; double rAF helps some mobile browsers release the overlay before the native picker.
-        requestAnimationFrame(() => {
-            requestAnimationFrame(openPicker);
-        });
+    const openGallerySourceExplainer = React.useCallback((
+        _sourceKey?: 'tiktok' | 'instagram' | 'capcut' | 'edits',
+    ) => {
+        setUploadExplainerOpen(true);
     }, []);
 
     const bgInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -143,7 +154,18 @@ export default function InstantCreatePage() {
     type StoryPreviewAction = 'filters' | 'audience' | 'save' | 'next';
     const [showCreateModePicker, setShowCreateModePicker] = React.useState(true);
     const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
-    const pendingSocialUploadRef = React.useRef<null>(null);
+    const [communityOnboardingOpen, setCommunityOnboardingOpen] = React.useState(false);
+    const pendingSocialUploadRef = React.useRef<'youtube_shorts' | 'tiktok' | 'instagram_reels' | null>(null);
+    const fromSavedGalleryRef = React.useRef(false);
+
+    const confirmUploadExplainer = () => {
+        pendingSocialUploadRef.current = null;
+        fromSavedGalleryRef.current = true;
+        setUploadExplainerOpen(false);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => openDeviceFileInput(uploadFilesInputRef.current));
+        });
+    };
     const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS);
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
     const [centeredCreateMode, setCenteredCreateMode] = React.useState<CreateModeAction>('gallery');
@@ -156,6 +178,194 @@ export default function InstantCreatePage() {
     const [centeredStoryPreviewAction, setCenteredStoryPreviewAction] = React.useState<StoryPreviewAction>('next');
 
     const recordingLimitForDisplay = MAX_VIDEO_SECONDS;
+
+    const resetGalleryInputs = () => {
+        if (cameraRollInputRef.current) cameraRollInputRef.current.value = '';
+        if (uploadFilesInputRef.current) uploadFilesInputRef.current.value = '';
+        if (photoCaptureInputRef.current) photoCaptureInputRef.current.value = '';
+        if (videoCaptureInputRef.current) videoCaptureInputRef.current.value = '';
+    };
+
+    /** Photo library, camera photo, or recorded video — same preview as the app. */
+    const ingestGalleryFiles = async (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+
+        const maxItems = CAROUSEL_MAX_ITEMS;
+        const selectedFiles = Array.from(files).filter((file) => galleryFileKind(file) != null);
+
+        if (selectedFiles.length === 0) {
+            await Swal.fire(bottomSheet({
+                title: 'No Supported Files',
+                message: 'Please select images or videos from your gallery.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            }));
+            resetGalleryInputs();
+            return;
+        }
+
+        if (selectedFiles.length > maxItems) {
+            const tooMany = await Swal.fire(bottomSheet({
+                title: 'Too Many Items',
+                message: `You can select up to ${maxItems} items for a carousel.`,
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            }));
+            if (!tooMany.isConfirmed) {
+                resetGalleryInputs();
+                return;
+            }
+        }
+
+        const itemsToProcess = selectedFiles.slice(0, maxItems);
+        const galleryItems: { blob: Blob; mediaType: 'image' | 'video'; videoDuration: number }[] = [];
+
+        for (const file of itemsToProcess) {
+            const kind = galleryFileKind(file);
+            if (kind === 'image') {
+                galleryItems.push({
+                    blob: file,
+                    mediaType: 'image',
+                    videoDuration: 3,
+                });
+            } else if (kind === 'video') {
+                const url = URL.createObjectURL(file);
+                const tempVideo = document.createElement('video');
+                tempVideo.src = url;
+                tempVideo.preload = 'metadata';
+
+                const duration = await new Promise<number>((resolve) => {
+                    let resolved = false;
+                    const finalize = (dur: number) => {
+                        if (resolved) return;
+                        resolved = true;
+                        URL.revokeObjectURL(url);
+                        resolve(dur);
+                    };
+                    tempVideo.onloadedmetadata = () => {
+                        const dur = tempVideo.duration && isFinite(tempVideo.duration) ? tempVideo.duration : 5;
+                        finalize(Math.min(dur, MAX_VIDEO_SECONDS));
+                    };
+                    tempVideo.onerror = () => finalize(5);
+                    setTimeout(() => {
+                        if (!resolved) finalize(5);
+                    }, 5000);
+                });
+
+                galleryItems.push({
+                    blob: file,
+                    mediaType: 'video',
+                    videoDuration: duration,
+                });
+            }
+        }
+
+        if (galleryItems.length === 0) {
+            await Swal.fire(bottomSheet({
+                title: 'No Supported Files',
+                message: 'Unable to use the selected files. Please try different photos or videos.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            }));
+            resetGalleryInputs();
+            return;
+        }
+
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach((t) => t.stop());
+            streamRef.current = null;
+        }
+        if (videoRef.current) {
+            videoRef.current.pause();
+            videoRef.current.srcObject = null;
+        }
+
+        setGalleryPreviewMedia(galleryItems);
+        const firstItem = galleryItems[0];
+        const socialUploadTarget = pendingSocialUploadRef.current;
+        const fromSavedGallery = fromSavedGalleryRef.current;
+        pendingSocialUploadRef.current = null;
+        fromSavedGalleryRef.current = false;
+        navigate('/create/gallery-preview', {
+            state: {
+                mediaUrl: undefined,
+                mediaType: firstItem.mediaType,
+                videoDuration: firstItem.videoDuration,
+                socialUploadTarget: fromSavedGallery ? undefined : socialUploadTarget ?? undefined,
+                fromSavedGallery: fromSavedGallery || undefined,
+            },
+        });
+        resetGalleryInputs();
+    };
+
+    const resetStoryInputs = () => {
+        if (storyLibraryInputRef.current) storyLibraryInputRef.current.value = '';
+        if (storyPhotoInputRef.current) storyPhotoInputRef.current.value = '';
+        if (storyVideoInputRef.current) storyVideoInputRef.current.value = '';
+    };
+
+    /** One photo or video, then the 24h story composer. Stories do not open the feed preview. */
+    const ingestStoryFiles = async (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        const file = Array.from(files).find(
+            (item) => item.type.startsWith('image/') || item.type.startsWith('video/'),
+        );
+        if (!file) {
+            await Swal.fire(bottomSheet({
+                title: 'No Supported Files',
+                message: 'Please select images or videos from your gallery.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            }));
+            resetStoryInputs();
+            return;
+        }
+
+        const mediaType = file.type.startsWith('video/') ? 'video' : 'image';
+        const mediaUrl = URL.createObjectURL(file);
+        let videoDuration: number | undefined;
+        if (mediaType === 'video') {
+            const probeUrl = URL.createObjectURL(file);
+            videoDuration = await new Promise<number | undefined>((resolve) => {
+                const tempVideo = document.createElement('video');
+                tempVideo.preload = 'metadata';
+                tempVideo.src = probeUrl;
+                let settled = false;
+                const finish = (dur?: number) => {
+                    if (settled) return;
+                    settled = true;
+                    URL.revokeObjectURL(probeUrl);
+                    resolve(dur);
+                };
+                tempVideo.onloadedmetadata = () => {
+                    const dur = tempVideo.duration;
+                    finish(Number.isFinite(dur) && dur > 0 ? Math.max(0.1, Math.floor(dur * 10) / 10) : undefined);
+                };
+                tempVideo.onerror = () => finish(undefined);
+                setTimeout(() => finish(undefined), 5000);
+            });
+        }
+
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+        }
+        if (videoRef.current) {
+            videoRef.current.pause();
+            videoRef.current.srcObject = null;
+        }
+
+        navigate('/clip', {
+            state: {
+                storyMode: true,
+                storyAudience,
+                mediaUrl,
+                mediaType,
+                videoDuration,
+            },
+        });
+        resetStoryInputs();
+    };
     const TIMER_CIRCUMFERENCE = 2 * Math.PI * 20;
 
     const centerRailItem = React.useCallback((rail: HTMLDivElement | null, selector: string, smooth = true) => {
@@ -1429,7 +1639,15 @@ export default function InstantCreatePage() {
                         >
                             <FiArrowLeft className="w-4 h-4" />
                         </button>
-                        <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-sm font-semibold tracking-wide text-white">
+                        <span
+                            className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white"
+                            style={{
+                                fontFamily: '"Snell Roundhand", "Segoe Script", cursive',
+                                fontSize: 32,
+                                lineHeight: '40px',
+                                fontWeight: 400,
+                            }}
+                        >
                             Create
                         </span>
                         <div className="z-10 w-8 shrink-0" aria-hidden />
@@ -1570,10 +1788,11 @@ export default function InstantCreatePage() {
 
                         {showCreateModePicker && (
                             <div
-                                className="relative flex min-h-0 flex-1 flex-col bg-transparent"
+                                className="relative flex min-h-0 flex-1 flex-col"
                                 style={{
                                     perspective: '1400px',
                                     perspectiveOrigin: '50% 50%',
+                                    background: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)',
                                 }}
                             >
                                 <div
@@ -1604,19 +1823,14 @@ export default function InstantCreatePage() {
                                     }}
                                 >
                                     <div className="relative z-[20] h-full min-h-0 w-full">
-                                        <div className="absolute left-1/2 top-1/2 z-[19] h-[88px] w-[88px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white p-[1px] shadow-[0_0_30px_rgba(255,255,255,0.35)]">
+                                        <div className="absolute left-1/2 top-1/2 z-[19] flex h-[88px] w-[88px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white p-px shadow-[0_0_30px_rgba(255,255,255,0.35)]">
                                             <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-black">
-                                                {user?.avatarUrl ? (
-                                                    <img
-                                                        src={user.avatarUrl}
-                                                        alt={`${user.name || 'User'} profile`}
-                                                        className="h-full w-full object-cover"
-                                                    />
-                                                ) : (
-                                                    <span className="text-xs font-semibold text-white">
-                                                        {(user?.name?.trim()?.charAt(0) || 'U').toUpperCase()}
-                                                    </span>
-                                                )}
+                                                <Avatar
+                                                    src={rewriteMediaUrlForClient(String(user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || '')) || undefined}
+                                                    name={user?.name || user?.handle || 'User'}
+                                                    size={84}
+                                                    hideBorder
+                                                />
                                             </div>
                                         </div>
                                         {createModeItems.map((item, idx) => {
@@ -1624,14 +1838,12 @@ export default function InstantCreatePage() {
                                             const stepDeg = 360 / len;
                                             const orbitRotationDeg = -orbitIndex * stepDeg;
                                             const currentAngleDeg = (idx * stepDeg) + orbitRotationDeg;
-                                            const angleRad = (currentAngleDeg * Math.PI) / 180;
-                                            const radius = 118;
+                                            const radius = 128;
                                             const isCentered = centeredCreateMode === item.id;
-                                            const relative = ((idx - orbitIndex + len) % len);
-                                            const signed = relative > len / 2 ? relative - len : relative;
-                                            const distanceFactor = Math.min(Math.abs(signed), 2);
-                                            const scale = isCentered ? 1.34 : Math.max(0.8, 1 - distanceFactor * 0.17);
-                                            const opacity = isCentered ? 1 : Math.max(0.56, 1 - distanceFactor * 0.18);
+                                            const scale = isCentered ? 1.34 : 0.83;
+                                            const opacity = isCentered ? 1 : 0.72;
+                                            const iconScale = item.icon === 'community' ? 1.42 : item.icon === 'type' ? 1 : 1.08;
+                                            const iconPx = Math.round((isCentered ? 42 : 32) * iconScale);
                                             return (
                                                 <button
                                                     key={item.id}
@@ -1639,9 +1851,7 @@ export default function InstantCreatePage() {
                                                     data-create-mode={item.id}
                                                     title={item.title}
                                                     aria-label={item.title}
-                                                    className={`absolute left-1/2 top-1/2 z-[21] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-2xl py-1 outline-none will-change-transform transition-all duration-700 ease-out ${
-                                                        isCentered ? 'drop-shadow-[0_0_40px_rgba(255,255,255,0.55)]' : ''
-                                                    }`}
+                                                    className="absolute left-1/2 top-1/2 z-[21] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-2xl py-1 outline-none will-change-transform transition-all duration-700 ease-out"
                                                     style={{
                                                         transform: `translate(-50%, -50%) rotate(${currentAngleDeg}deg) translateY(-${radius}px)`,
                                                         opacity,
@@ -1655,30 +1865,17 @@ export default function InstantCreatePage() {
                                                             if (item.id === 'gallery') {
                                                                 setIsStoryMode(false);
                                                                 pendingSocialUploadRef.current = null;
-                                                                cameraRollInputRef.current?.click();
+                                                                setPostMediaMenuOpen(true);
                                                                 return;
                                                             }
                                                             if (item.id === 'community') {
-                                                                (async () => {
-                                                                    const res = await Swal.fire(bottomSheet({
-                                                                        title: 'Create a community',
-                                                                        message:
-                                                                            'Communities let members chat in one group space. Create a community, then invite people with the + button in the group chat.',
-                                                                        icon: 'info',
-                                                                        confirmButtonText: 'Continue',
-                                                                        cancelButtonText: 'Not now',
-                                                                        showCancelButton: true,
-                                                                    }));
-                                                                    if (res.isConfirmed) {
-                                                                        setCreateGroupOpen(true);
-                                                                    }
-                                                                })();
+                                                                setCommunityOnboardingOpen(true);
                                                                 return;
                                                             }
                                                             if (item.id === 'story') {
                                                                 pendingSocialUploadRef.current = null;
                                                                 setIsStoryMode(true);
-                                                                navigate('/clip', { state: { storyMode: true, storyAudience } });
+                                                                setStoryMediaMenuOpen(true);
                                                                 return;
                                                             }
                                                             if (item.id === 'text') {
@@ -1691,27 +1888,27 @@ export default function InstantCreatePage() {
                                                 >
                                                     <div
                                                         className="flex flex-col items-center gap-2 transition-transform duration-700 ease-out"
-                                                        style={{ transform: `rotate(${-currentAngleDeg}deg) scale(${scale})` }}
+                                                        style={{ transform: `rotate(${-currentAngleDeg}deg) scale(${scale}) translateY(${isCentered ? -12 : 0}px)` }}
                                                     >
                                                         <div
-                                                            className={`${isCentered ? 'h-[76px] w-[76px]' : 'h-[50px] w-[50px]'} rounded-2xl border transition-all duration-300 flex items-center justify-center shadow-lg ${
+                                                            className={`relative flex items-center justify-center rounded-xl border shadow-[0_4px_8px_rgba(0,0,0,0.35)] transition-all duration-300 ${
                                                                 isCentered
-                                                                    ? 'bg-gradient-to-br from-white to-gray-200 border-white/95 shadow-white/25 shadow-black/20'
-                                                                    : 'bg-white/[0.07] backdrop-blur-md border-white/15 shadow-black/60'
+                                                                    ? 'h-24 w-24 border-white/40 bg-[rgba(15,23,42,0.8)]'
+                                                                    : 'h-[68px] w-[68px] border-white/[0.12] bg-white/[0.07]'
                                                             }`}
                                                         >
                                                             {isCentered && (
-                                                                <span className="absolute -right-2 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-black text-sm font-bold shadow-lg border border-black/15">
+                                                                <span className="absolute -right-2 top-1/2 z-[2] flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-[rgba(15,23,42,0.95)] text-sm font-bold text-white">
                                                                     +
                                                                 </span>
                                                             )}
-                                                            {item.icon === 'community' && <FaPeopleRobbery className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
-                                                            {item.icon === 'type' && <FiType className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
-                                                            {item.icon === 'gallery' && <FiUpload className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
-                                                            {item.icon === 'story' && <FiCamera className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
+                                                            {item.icon === 'community' && <FaPeopleRobbery size={iconPx} color="#FFFFFF" />}
+                                                            {item.icon === 'type' && <FiType size={iconPx} color="#FFFFFF" />}
+                                                            {item.icon === 'gallery' && <FiUpload size={iconPx} color="#FFFFFF" />}
+                                                            {item.icon === 'story' && <FiCamera size={iconPx} color="#FFFFFF" />}
                                                         </div>
                                                         <span
-                                                            className={`max-w-[220px] text-center text-[13px] font-semibold leading-tight text-white ${isCentered ? 'opacity-100' : 'opacity-70'}`}
+                                                            className={`mt-2 max-w-[220px] text-center text-[13px] font-semibold leading-tight text-[#E2E8F0] ${isCentered ? 'opacity-100' : 'opacity-70'}`}
                                                         >
                                                             {item.title}
                                                         </span>
@@ -1726,24 +1923,92 @@ export default function InstantCreatePage() {
                                     style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.75rem)' }}
                                 >
                                     <CreateSourceAppsCarousel onExplainTap={openGallerySourceExplainer} />
-                                    <p className="text-[11px] leading-snug text-white/55">
+                                    <p className="text-[11px] leading-[15px] text-[#94A3B8]">
                                         Rotate to choose · top icon is active · tap to open
                                     </p>
                                 </div>
                             </div>
                         )}
+                        <GazetteerAlertSheet
+                            visible={uploadExplainerOpen}
+                            title="Upload from your gallery"
+                            message="If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below."
+                            confirmButtonText="Proceed"
+                            cancelButtonText="Not now"
+                            showCancelButton
+                            onConfirm={confirmUploadExplainer}
+                            onDismiss={() => setUploadExplainerOpen(false)}
+                        />
+                        <GazetteerMenuSheet
+                            visible={postMediaMenuOpen}
+                            title="Add to your post"
+                            subtitle="Photo or video"
+                            options={[
+                                {
+                                    label: 'Photo library',
+                                    icon: <IoImagesOutline size={20} color="#FFFFFF" />,
+                                    onPress: () => openDeviceFileInput(cameraRollInputRef.current),
+                                },
+                                {
+                                    label: 'Take photo',
+                                    icon: <IoCameraOutline size={20} color="#FFFFFF" />,
+                                    onPress: () => openDeviceFileInput(photoCaptureInputRef.current),
+                                },
+                                {
+                                    label: 'Record video',
+                                    icon: <IoVideocamOutline size={20} color="#FFFFFF" />,
+                                    onPress: () => openDeviceFileInput(videoCaptureInputRef.current),
+                                },
+                            ]}
+                            onDismiss={() => setPostMediaMenuOpen(false)}
+                        />
+                        <GazetteerMenuSheet
+                            visible={storyMediaMenuOpen}
+                            title="Add to your story"
+                            subtitle="Photo, video, or a link"
+                            options={[
+                                {
+                                    label: 'Photo library',
+                                    icon: <IoImagesOutline size={20} color="#FFFFFF" />,
+                                    onPress: () => openDeviceFileInput(storyLibraryInputRef.current),
+                                },
+                                {
+                                    label: 'Take photo',
+                                    icon: <IoCameraOutline size={20} color="#FFFFFF" />,
+                                    onPress: () => openDeviceFileInput(storyPhotoInputRef.current),
+                                },
+                                {
+                                    label: 'Record video',
+                                    icon: <IoVideocamOutline size={20} color="#FFFFFF" />,
+                                    onPress: () => openDeviceFileInput(storyVideoInputRef.current),
+                                },
+                                {
+                                    label: 'Paste a link',
+                                    icon: <IoLinkOutline size={20} color="#FFFFFF" />,
+                                    onPress: () => navigate('/create/story-link'),
+                                },
+                            ]}
+                            onDismiss={() => setStoryMediaMenuOpen(false)}
+                        />
+                        <CommunityGroupOnboardingSheet
+                            visible={communityOnboardingOpen}
+                            onDismiss={() => setCommunityOnboardingOpen(false)}
+                            onCreateGroup={() => {
+                                setCommunityOnboardingOpen(false);
+                                window.setTimeout(() => setCreateGroupOpen(true), 100);
+                            }}
+                        />
                         <CreateGroupModal
                             isOpen={createGroupOpen}
                             onClose={() => setCreateGroupOpen(false)}
                             onCreated={(g) => {
                                 setCreateGroupOpen(false);
-                                navigate(`/messages/group/${encodeURIComponent(g.id)}`);
-                                void Swal.fire(bottomSheet({
-                                    title: 'Community created',
-                                    message: `You are in "${g.name}". Use + in the header to invite members.`,
-                                    icon: 'success',
-                                    confirmButtonText: 'Open chat',
-                                }));
+                                navigate(`/messages/group/${encodeURIComponent(g.id)}`, {
+                                    state: {
+                                        communityCreated: true,
+                                        communityCreatedName: g.name,
+                                    },
+                                });
                             }}
                         />
                     </>
@@ -2565,6 +2830,18 @@ export default function InstantCreatePage() {
                 }}
             />
 
+            {/* Upload pill: saved files only. No capture attribute, and no image/video MIME,
+                so Android Chrome does not add Camera or Camcorder to this chooser. */}
+            <input
+                ref={uploadFilesInputRef}
+                type="file"
+                accept="application/octet-stream"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                    void ingestGalleryFiles(e.target.files);
+                }}
+            />
             {/* Hidden Camera Roll Input */}
             <input
                 ref={cameraRollInputRef}
@@ -2572,139 +2849,60 @@ export default function InstantCreatePage() {
                 accept="image/*,video/*"
                 multiple
                 className="hidden"
-                onChange={async (e) => {
-                    const files = e.target.files;
-                    if (!files || files.length === 0) {
-                        console.log('No files selected');
-                        return;
-                    }
-
-                    const MAX_ITEMS = CAROUSEL_MAX_ITEMS;
-                    const selectedFiles = Array.from(files).filter((file) =>
-                        file.type.startsWith('image/') || file.type.startsWith('video/')
-                    );
-
-                    if (selectedFiles.length === 0) {
-                        Swal.fire(bottomSheet({
-                            title: 'No Supported Files',
-                            message: 'Please select images or videos from your gallery.',
-                            icon: 'alert',
-                        }));
-                        if (cameraRollInputRef.current) {
-                            cameraRollInputRef.current.value = '';
-                        }
-                        return;
-                    }
-
-                    if (selectedFiles.length > MAX_ITEMS) {
-                        Swal.fire(bottomSheet({
-                            title: 'Too Many Items',
-                            message: `You can select up to ${MAX_ITEMS} items for a carousel.`,
-                            icon: 'alert',
-                        }));
-                    }
-
-                    const itemsToProcess = selectedFiles.slice(0, MAX_ITEMS);
-                    console.log('📁 Gallery files selected for carousel:', itemsToProcess.length, itemsToProcess.map(f => ({
-                        name: f.name,
-                        type: f.type,
-                        size: f.size,
-                    })));
-
-                    const galleryItems: { blob: Blob; mediaType: 'image' | 'video'; videoDuration: number }[] = [];
-
-                    for (const file of itemsToProcess) {
-                        if (file.type.startsWith('image/')) {
-                            galleryItems.push({
-                                blob: file,
-                                mediaType: 'image',
-                                videoDuration: 3,
-                            });
-                        } else if (file.type.startsWith('video/')) {
-                            const url = URL.createObjectURL(file);
-                            const tempVideo = document.createElement('video');
-                            tempVideo.src = url;
-                            tempVideo.preload = 'metadata';
-
-                            // Measure duration with timeout fallback
-                            const duration = await new Promise<number>((resolve) => {
-                                let resolved = false;
-
-                                const finalize = (dur: number) => {
-                                    if (resolved) return;
-                                    resolved = true;
-                                    URL.revokeObjectURL(url);
-                                    resolve(dur);
-                                };
-
-                                tempVideo.onloadedmetadata = () => {
-                                    const dur = tempVideo.duration && isFinite(tempVideo.duration) ? tempVideo.duration : 5;
-                                    // Cap stored duration for UI/limits; do not block import or show a scary alert (full file is kept; no trim step here).
-                                    finalize(Math.min(dur, MAX_VIDEO_SECONDS));
-                                };
-
-                                tempVideo.onerror = () => {
-                                    console.error('Error loading video:', file.name);
-                                    finalize(5);
-                                };
-
-                                setTimeout(() => {
-                                    if (!resolved) {
-                                        console.log('Video metadata timeout, using default duration for', file.name);
-                                        finalize(5);
-                                    }
-                                }, 5000);
-                            });
-
-                            galleryItems.push({
-                                blob: file,
-                                mediaType: 'video',
-                                videoDuration: duration,
-                            });
-                        }
-                    }
-
-                    if (galleryItems.length === 0) {
-                        Swal.fire(bottomSheet({
-                            title: 'No Supported Files',
-                            message: 'Unable to use the selected files. Please try different photos or videos.',
-                            icon: 'alert',
-                        }));
-                        if (cameraRollInputRef.current) {
-                            cameraRollInputRef.current.value = '';
-                        }
-                        return;
-                    }
-
-                    // Stop camera stream and clear live preview before navigating
-                    if (streamRef.current) {
-                        streamRef.current.getTracks().forEach(t => t.stop());
-                        streamRef.current = null;
-                    }
-                    if (videoRef.current) {
-                        videoRef.current.pause();
-                        videoRef.current.srcObject = null;
-                    }
-
-                    // Cache gallery items for GalleryPreviewPage and navigate once
-                    setGalleryPreviewMedia(galleryItems);
-
-                    const firstItem = galleryItems[0];
-                    const socialUploadTarget = pendingSocialUploadRef.current;
-                    pendingSocialUploadRef.current = null;
-                    navigate('/create/gallery-preview', {
-                        state: {
-                            mediaUrl: undefined,
-                            mediaType: firstItem.mediaType,
-                            videoDuration: firstItem.videoDuration,
-                            socialUploadTarget: socialUploadTarget ?? undefined,
-                        },
-                    });
-
-                    // Reset input so same files can be selected again
-                    if (cameraRollInputRef.current) {
-                        cameraRollInputRef.current.value = '';
-                    }
+                onChange={(e) => {
+                    void ingestGalleryFiles(e.target.files);
+                }}
+            />
+            <input
+                ref={photoCaptureInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                    void ingestGalleryFiles(e.target.files);
+                }}
+            />
+            <input
+                ref={videoCaptureInputRef}
+                type="file"
+                accept="video/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                    void ingestGalleryFiles(e.target.files);
+                }}
+            />
+            <input
+                ref={storyLibraryInputRef}
+                data-pick="story-library"
+                type="file"
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={(e) => {
+                    void ingestStoryFiles(e.target.files);
+                }}
+            />
+            <input
+                ref={storyPhotoInputRef}
+                data-pick="story-photo"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                    void ingestStoryFiles(e.target.files);
+                }}
+            />
+            <input
+                ref={storyVideoInputRef}
+                data-pick="story-video"
+                type="file"
+                accept="video/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                    void ingestStoryFiles(e.target.files);
                 }}
             />
 

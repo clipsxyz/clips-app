@@ -43,9 +43,13 @@ function extensionForMime(mime: string, fallback: 'jpg' | 'webm'): string {
   if (type.includes('webp')) return 'webp';
   if (type.includes('gif')) return 'gif';
   if (type.includes('jpeg') || type.includes('jpg')) return 'jpg';
+  if (type.includes('heic')) return 'heic';
+  if (type.includes('heif')) return 'heif';
   if (type.includes('mp4')) return 'mp4';
   if (type.includes('webm')) return 'webm';
   if (type.includes('quicktime')) return 'mov';
+  if (type.includes('3gpp') || type.includes('3gp')) return '3gp';
+  if (type.includes('m4v')) return 'm4v';
   return fallback;
 }
 

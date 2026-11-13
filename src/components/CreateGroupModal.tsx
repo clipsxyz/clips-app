@@ -1,12 +1,10 @@
 import React from 'react';
-import { FiX, FiUsers, FiImage } from 'react-icons/fi';
+import { FiX, FiUsers, FiImage, FiCamera, FiTrash2 } from 'react-icons/fi';
 import { createChatGroup } from '../api/chatGroups';
 import { uploadFile } from '../api/client';
-import { showToast } from '../utils/toast';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { useAuth } from '../context/Auth';
 import Avatar from './Avatar';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import { getAvatarForHandle } from '../api/users';
 
 export default function CreateGroupModal({
@@ -23,6 +21,7 @@ export default function CreateGroupModal({
   const [avatarPreviewUrl, setAvatarPreviewUrl] = React.useState<string | null>(null);
   const [avatarFile, setAvatarFile] = React.useState<File | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [formError, setFormError] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
@@ -30,6 +29,7 @@ export default function CreateGroupModal({
       setName('');
       setAvatarPreviewUrl(null);
       setAvatarFile(null);
+      setFormError(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [isOpen]);
@@ -39,14 +39,15 @@ export default function CreateGroupModal({
   const submit = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      showToast('Enter a group name');
+      setFormError('Enter a group name');
       return;
     }
     const creatorHandle = user?.handle?.trim();
     if (!isLaravelApiEnabled() && !creatorHandle) {
-      showToast('Sign in to create a group in offline mode');
+      setFormError('Sign in to create a group in offline mode');
       return;
     }
+    setFormError(null);
     setBusy(true);
     try {
       let avatarUrl: string | null = null;
@@ -66,7 +67,7 @@ export default function CreateGroupModal({
         onCreated?.(g);
         onClose();
       } else {
-        showToast(
+        setFormError(
           isLaravelApiEnabled()
             ? 'Could not create group (try signing in again)'
             : 'Could not create group',
@@ -74,114 +75,134 @@ export default function CreateGroupModal({
       }
     } catch (e: any) {
       console.error(e);
-      showToast(e?.message || 'Could not create group');
+      setFormError(e?.message || 'Could not create group');
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[295] flex items-end justify-center sm:items-center">
-      <div className="absolute inset-0 bg-black/85 backdrop-blur-[2px]" onClick={() => !busy && onClose()} />
-      <div className="relative w-full max-w-md mx-3 sm:mx-4 rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#060d16] shadow-2xl overflow-hidden mb-safe">
-        <DiscoverAmbientCanvas fixed={false} variant="passport" />
-        <div className="relative z-[2] flex items-center justify-between px-4 py-3 border-b border-white/10 gap-3">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
+    <div className="fixed inset-0 z-[295] flex items-end justify-center">
+      <button
+        type="button"
+        aria-label="Dismiss"
+        className="absolute inset-0 bg-black/72"
+        onClick={() => !busy && onClose()}
+      />
+      <div
+        className="relative z-[2] max-h-[88%] w-[min(400px,calc(100%-24px))] overflow-hidden rounded-t-3xl border border-b-0 border-white/[0.08]"
+        style={{
+          backgroundColor: '#03091B',
+          backgroundImage: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)',
+          paddingBottom: 'max(16px, env(safe-area-inset-bottom))',
+        }}
+      >
+        <div className="max-h-[88vh] overflow-y-auto px-4 pt-1">
+          <div className="flex justify-center pb-2">
+            <div className="h-1 w-10 rounded-full bg-white/[0.28]" />
+          </div>
+          <div className="mb-2 flex items-center gap-2.5 border-b border-white/[0.12] pb-3">
             <Avatar
               src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
               name={user?.name || user?.handle || 'You'}
-              size="sm"
-              className="flex-shrink-0 border border-white/20"
+              size={36}
             />
-            <div className="flex items-center gap-2 text-white font-semibold min-w-0">
-              <FiUsers className="w-5 h-5 text-white shrink-0" />
-              <span className="truncate">New group</span>
+            <div className="flex min-w-0 flex-1 items-center gap-2 text-white">
+              <FiUsers className="h-5 w-5 shrink-0" />
+              <span className="truncate text-[17px] font-semibold">New group</span>
             </div>
+            <button
+              type="button"
+              className="shrink-0 p-1 text-white disabled:opacity-50"
+              onClick={() => !busy && onClose()}
+              aria-label="Close"
+              disabled={busy}
+            >
+              <FiX className="h-6 w-6" />
+            </button>
           </div>
-          <button type="button" className="p-2 rounded-full hover:bg-white/10 text-white/80 shrink-0" onClick={() => !busy && onClose()} aria-label="Close">
-            <FiX className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="relative z-[2] p-4 space-y-3">
-          <p className="text-xs text-white/50 leading-relaxed">
-            Next you&apos;ll open the group chat. Invite people with the <strong className="text-white/70">+</strong> button there, or
-            open someone&apos;s profile → <strong className="text-white/70">Invite to group</strong>.
+          <p className="mb-3 text-xs leading-[18px] text-[#94A3B8]">
+            Next you&apos;ll open the group chat. Invite people with the + button there, or open someone&apos;s profile → Invite to group.
           </p>
-          <label className="block text-xs font-medium text-white/60 uppercase tracking-wide">Group name</label>
+          <label className="mb-1.5 mt-2 block text-[11px] font-bold uppercase text-[#E2E8F0]">Group name</label>
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (formError) setFormError(null);
+            }}
             placeholder="e.g. Dublin photographers"
             maxLength={120}
-            className="w-full rounded-xl border border-white/15 bg-white/[0.05] px-3 py-2.5 text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/40"
+            className="w-full rounded-xl border border-white/15 bg-white/[0.05] px-3 py-3 text-white placeholder:text-[#94A3B8] focus:outline-none"
             disabled={busy}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void submit();
             }}
           />
-          <div className="space-y-2">
-            <label className="block text-xs font-medium text-white/60 uppercase tracking-wide">Group photo (optional)</label>
-            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3">
-              <div className="w-16 h-16 flex-shrink-0 overflow-hidden rounded-2xl border border-white/15 bg-white/[0.04] flex items-center justify-center">
-                {avatarPreviewUrl ? (
-                  <img src={avatarPreviewUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
-                ) : (
-                  <FiImage className="w-6 h-6 text-white/55" aria-hidden />
-                )}
-              </div>
-              <div className="flex flex-1 flex-col gap-2 min-w-0">
+          {formError ? <p className="mt-2 text-[13px] text-[#F87171]">{formError}</p> : null}
+          <label className="mb-1.5 mt-2 block text-[11px] font-bold uppercase text-[#E2E8F0]">Group photo (optional)</label>
+          <div className="mt-2 flex items-center gap-3.5 rounded-xl border border-white/[0.12] bg-white/[0.05] p-3">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-white/[0.04]">
+              {avatarPreviewUrl ? (
+                <img src={avatarPreviewUrl} alt="Group avatar preview" className="h-full w-full object-cover" />
+              ) : (
+                <FiImage className="h-[22px] w-[22px] text-white/55" aria-hidden />
+              )}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => fileInputRef.current?.click()}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.06] px-3 py-[9px] text-xs font-semibold text-white disabled:opacity-50"
+              >
+                <FiCamera className="h-[15px] w-[15px]" />
+                {avatarPreviewUrl ? 'Change photo' : 'Choose photo'}
+              </button>
+              {avatarPreviewUrl ? (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-50"
+                  onClick={() => {
+                    setAvatarPreviewUrl(null);
+                    setAvatarFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.06] px-3 py-[9px] text-xs font-semibold text-white/80 disabled:opacity-50"
                 >
-                  {avatarPreviewUrl ? 'Change photo' : 'Choose photo'}
+                  <FiTrash2 className="h-[15px] w-[15px]" />
+                  Remove
                 </button>
-                {avatarPreviewUrl ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setAvatarPreviewUrl(null);
-                      setAvatarFile(null);
-                      if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
-                    className="w-full rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50"
-                  >
-                    Remove
-                  </button>
-                ) : null}
-              </div>
+              ) : null}
             </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => {
-                  const result = typeof reader.result === 'string' ? reader.result : null;
-                  if (!result) {
-                    showToast('Could not read image file');
-                    return;
-                  }
-                  setAvatarFile(file);
-                  setAvatarPreviewUrl(result);
-                };
-                reader.onerror = () => showToast('Could not read image file');
-                reader.readAsDataURL(file);
-              }}
-            />
           </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = typeof reader.result === 'string' ? reader.result : null;
+                if (!result) {
+                  setFormError('Could not read image file');
+                  return;
+                }
+                setAvatarFile(file);
+                setAvatarPreviewUrl(result);
+              };
+              reader.onerror = () => setFormError('Could not read image file');
+              reader.readAsDataURL(file);
+            }}
+          />
           <button
             type="button"
             disabled={busy}
             onClick={() => void submit()}
-            className="w-full py-3 rounded-xl bg-white hover:bg-white/90 disabled:opacity-50 text-black font-semibold text-sm"
+            className="mb-2 mt-5 w-full rounded-xl bg-white py-3.5 text-[15px] font-bold text-black disabled:opacity-60"
           >
             {busy ? 'Creating…' : 'Create group'}
           </button>

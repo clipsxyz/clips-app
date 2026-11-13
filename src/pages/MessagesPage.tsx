@@ -31,6 +31,7 @@ import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, user
 import { getPostById, getFollowedUsers, getState, toggleLike, incrementShares } from '../api/posts';
 import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
 import ScenesModal from '../components/ScenesModal';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 import type { Post } from '../types';
@@ -548,6 +549,19 @@ export default function MessagesPage() {
     // Store sharePostId from location.state (only used if we don't direct-send)
     const [pendingSharePostId, setPendingSharePostId] = React.useState<string | null>(null);
     const sharedPostSentRef = React.useRef(false);
+    const communityCreatedHandledRef = React.useRef(false);
+    const [communityCreatedAlert, setCommunityCreatedAlert] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        const state = location.state as { communityCreated?: boolean; communityCreatedName?: string } | null;
+        if (!state?.communityCreated || communityCreatedHandledRef.current) return;
+        communityCreatedHandledRef.current = true;
+        const name =
+            (typeof state.communityCreatedName === 'string' && state.communityCreatedName.trim()) ||
+            'your community';
+        setCommunityCreatedAlert(name);
+        navigate(location.pathname, { replace: true, state: {} });
+    }, [location.pathname, location.state, navigate]);
 
     // Direct share to DM (Instagram/TikTok style): send the post immediately when opening the conversation
     React.useEffect(() => {
@@ -4509,6 +4523,16 @@ export default function MessagesPage() {
                     onReclip={async () => {}}
                 />
             )}
+            <GazetteerAlertSheet
+                visible={communityCreatedAlert != null}
+                title="Community created"
+                message={`You are in "${communityCreatedAlert || 'your community'}". Use + in the header to invite members.`}
+                icon="success"
+                showIcon
+                confirmButtonText="Open chat"
+                onConfirm={() => setCommunityCreatedAlert(null)}
+                onDismiss={() => setCommunityCreatedAlert(null)}
+            />
         </div>
     );
 }

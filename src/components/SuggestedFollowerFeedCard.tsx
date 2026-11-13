@@ -1,16 +1,20 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiInfo, FiPlay } from 'react-icons/fi';
-import { GiGreekTemple } from 'react-icons/gi';
+import { IoBusinessOutline, IoInformationCircleOutline, IoPlay } from 'react-icons/io5';
 import Avatar from './Avatar';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import { getAvatarForHandle } from '../api/users';
 import { resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
 import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
 
-const STRIP_VIDEO_LOOP_SEC = 3;
+const STRIP_VIDEO_LOOP_SEC = 1;
 const VIDEO_SRC_RE = /\.(mp4|webm|mov|m4v|ogg)(\?|#|$)/i;
+const PASSPORT_GRADIENT = 'linear-gradient(to bottom, #000000 0%, #23104F 100%)';
+
+function formatViews(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
 
 function PreviewVideo({
   src,
@@ -57,7 +61,7 @@ type Props = {
   onNotInterested: () => void;
 };
 
-/** Suggested follow card — View Profile passport night-atlas canvas. */
+/** Suggested follow card — same passport gradient and chrome as the app. */
 export default function SuggestedFollowerFeedCard({
   suggestion,
   onFollow,
@@ -68,6 +72,7 @@ export default function SuggestedFollowerFeedCard({
   const [followBusy, setFollowBusy] = React.useState(false);
   const [infoOpen, setInfoOpen] = React.useState(false);
   const avatar = suggestion.avatarUrl || getAvatarForHandle(suggestion.userHandle);
+  const previewCount = suggestion.previews.length;
 
   const openProfile = () => navigate(`/user/${suggestion.userHandle}`);
 
@@ -82,103 +87,106 @@ export default function SuggestedFollowerFeedCard({
 
   return (
     <article
-      className="relative mx-2.5 mb-3 overflow-hidden rounded-2xl border border-white/10 bg-[#060d16] shadow-lg"
+      className="relative mx-2.5 mb-3 min-h-[300px] overflow-hidden rounded-2xl border border-white/15 bg-black"
       aria-label="Suggested account to follow"
     >
-      <DiscoverAmbientCanvas fixed={false} variant="passport" />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: PASSPORT_GRADIENT }}
+        aria-hidden
+      />
 
-      <div className="relative z-[2] min-h-[280px]">
-      <button
-        type="button"
-        onClick={() => setInfoOpen((v) => !v)}
-        className="absolute left-3 top-3 z-10 rounded-full p-1.5 text-white/55 hover:bg-white/10 hover:text-white"
-        aria-label="Why am I seeing this?"
-      >
-        <FiInfo className="h-4 w-4" />
-      </button>
+      <div className="relative z-[2] min-h-[300px] px-4 pb-4 pt-2">
+        <button
+          type="button"
+          onClick={() => setInfoOpen((v) => !v)}
+          className="absolute left-2 top-2 z-10 p-1.5 text-[rgba(232,238,242,0.62)]"
+          aria-label="Info"
+        >
+          <IoInformationCircleOutline className="h-5 w-5" />
+        </button>
 
-      {infoOpen ? (
-        <div className="absolute left-3 right-3 top-12 z-20 rounded-xl border border-white/10 bg-[rgba(15,36,48,0.94)] px-3 py-2 text-[11px] text-white/75 leading-snug shadow-xl backdrop-blur-md">
-          Gazetteer only suggests people who have posted in your area. Clips play muted in the feed, like other posts.
-        </div>
-      ) : null}
+        {infoOpen ? (
+          <div className="mb-2 mt-9 rounded-xl border border-white/10 bg-black/55 px-2.5 py-2.5 text-[11px] leading-4 text-[rgba(232,238,242,0.78)]">
+            Gazetteer only suggests people who have posted in your area. Clips play muted in the feed, like other
+            posts.
+          </div>
+        ) : null}
 
-      <div className="flex flex-col items-center px-4 pt-10 pb-3">
-        <button type="button" onClick={openProfile} className="flex flex-col items-center">
-          <Avatar src={avatar} name={suggestion.displayName} size="xl" className="ring-2 ring-[#3d9b8f]/40" />
-          <p className="mt-3 text-base font-semibold text-white">{suggestion.userHandle}</p>
-          <p className="mt-1 text-xs text-white/55 text-center">{suggestion.contextLabel}</p>
-          <p className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#3d9b8f]">
-            <GiGreekTemple className="h-3 w-3" aria-hidden />
+        <button type="button" onClick={openProfile} className="mx-auto mt-8 mb-3 flex flex-col items-center">
+          <Avatar src={avatar} name={suggestion.displayName} size="xl" hideBorder />
+          <p className="mt-2.5 text-base font-semibold text-white">{suggestion.userHandle}</p>
+          <p className="mt-1 text-center text-xs text-[rgba(232,238,242,0.62)]">{suggestion.contextLabel}</p>
+          <p className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-white/70">
+            <IoBusinessOutline className="h-3 w-3 text-white" aria-hidden />
             Suggested by Gazetteer
           </p>
         </button>
-      </div>
 
-      <div className="flex gap-2 px-4 pb-4">
-        {suggestion.previews.map((preview) => {
-          const videoSrc =
-            preview.isVideo && preview.mediaUrl
-              ? resolveMockFeedVideoUrl(preview.mediaUrl)
-              : preview.isVideo && VIDEO_SRC_RE.test(preview.thumbnailUrl)
-                ? resolveMockFeedVideoUrl(preview.thumbnailUrl)
+        <div className={`mb-3.5 flex gap-2 ${previewCount === 1 ? 'justify-center' : ''}`}>
+          {suggestion.previews.map((preview) => {
+            const videoSrc =
+              preview.isVideo && preview.mediaUrl
+                ? resolveMockFeedVideoUrl(preview.mediaUrl)
+                : preview.isVideo && VIDEO_SRC_RE.test(preview.thumbnailUrl)
+                  ? resolveMockFeedVideoUrl(preview.thumbnailUrl)
+                  : undefined;
+            const stillSrc =
+              preview.thumbnailUrl && !VIDEO_SRC_RE.test(preview.thumbnailUrl)
+                ? preview.thumbnailUrl
                 : undefined;
-          const stillSrc =
-            preview.thumbnailUrl && !VIDEO_SRC_RE.test(preview.thumbnailUrl)
-              ? preview.thumbnailUrl
-              : undefined;
-          return (
-          <button
-            key={preview.postId}
-            type="button"
-            onClick={openProfile}
-            className="relative flex-1 overflow-hidden rounded-lg border border-white/10 bg-black/30 aspect-[3/4] min-w-0 backdrop-blur-sm"
-          >
-            {videoSrc ? (
-              <PreviewVideo
-                src={videoSrc}
-                poster={stillSrc}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <img src={stillSrc || preview.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-            )}
-            <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/50 px-1.5 py-0.5">
-              <FiPlay className="h-2.5 w-2.5 text-white" aria-hidden />
-              <span className="text-[10px] font-semibold text-white">
-                {preview.views >= 1000 ? `${(preview.views / 1000).toFixed(1)}k` : preview.views}
-              </span>
-            </div>
-            {preview.gazetteerMusic ? (
-              <div
-                className="absolute top-1.5 right-1.5 rounded bg-[#3d9b8f]/90 px-1 py-0.5 text-[9px] font-semibold text-white"
-                title="Licensed background audio"
+            return (
+              <button
+                key={preview.postId}
+                type="button"
+                onClick={openProfile}
+                className={`relative aspect-[3/4] overflow-hidden rounded-lg border border-white/10 bg-black/30 ${
+                  previewCount === 1 ? 'w-[140px] max-w-full' : 'min-w-0 flex-1'
+                }`}
               >
-                ♪ Gazetteer
-              </div>
-            ) : null}
-          </button>
-          );
-        })}
-      </div>
+                {videoSrc ? (
+                  <PreviewVideo src={videoSrc} poster={stillSrc} className="h-full w-full object-cover" />
+                ) : stillSrc ? (
+                  <img src={stillSrc} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="block h-full w-full bg-[#121212]" />
+                )}
+                <span className="absolute bottom-1.5 left-1.5 flex items-center gap-[3px] rounded bg-black/45 px-1.5 py-0.5">
+                  <IoPlay className="h-2.5 w-2.5 text-white" aria-hidden />
+                  <span className="text-[10px] font-semibold text-white">{formatViews(preview.views)}</span>
+                </span>
+                {preview.gazetteerMusic ? (
+                  <span
+                    className="absolute right-1.5 top-1.5 rounded px-1 py-0.5 text-[8px] font-bold text-white"
+                    style={{ backgroundColor: 'rgba(35, 16, 79, 0.92)' }}
+                    title="Licensed background audio"
+                  >
+                    ♪ Gazetteer
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
 
-      <div className="flex gap-2 px-4 pb-4">
-        <button
-          type="button"
-          onClick={onNotInterested}
-          className="flex-1 rounded-full border border-white/15 bg-[rgba(15,36,48,0.72)] py-2.5 text-sm font-semibold text-gray-200 backdrop-blur-md hover:bg-white/10"
-        >
-          Not interested
-        </button>
-        <button
-          type="button"
-          disabled={followBusy}
-          onClick={onFollowClick}
-          className="flex-1 rounded-full border border-white/10 bg-[#3d9b8f]/25 py-2.5 text-sm font-semibold text-white backdrop-blur-sm hover:bg-[#3d9b8f]/35 disabled:opacity-60"
-        >
-          {followBusy ? 'Saving…' : 'Follow'}
-        </button>
-      </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onNotInterested}
+            className="flex-1 rounded-full border border-white/15 bg-black/45 py-[11px] text-sm font-semibold text-[#E5E7EB]"
+          >
+            Not interested
+          </button>
+          <button
+            type="button"
+            disabled={followBusy}
+            onClick={onFollowClick}
+            className="relative flex-1 overflow-hidden rounded-full border border-white/10 py-[11px] text-sm font-semibold text-white disabled:opacity-60"
+            style={{ background: PASSPORT_GRADIENT }}
+          >
+            Follow
+          </button>
+        </div>
       </div>
     </article>
   );

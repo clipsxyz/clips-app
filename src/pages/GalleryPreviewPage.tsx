@@ -92,9 +92,12 @@ export default function GalleryPreviewPage() {
         draftMediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
         /** Set when uploading from Create → Shorts / TikTok / Reels picker */
         socialUploadTarget?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
+        /** Upload pill: a clip already saved on the phone. The file does not say which app it came from. */
+        fromSavedGallery?: boolean;
     } | null) || {};
 
     const socialUploadTarget = state.socialUploadTarget;
+    const fromSavedGallery = state.fromSavedGallery === true;
 
     const isFromDraft = !!(state.fromDraft && state.draftMediaUrl);
     const moduleSeed = useMemo(() => readModuleCacheSeed(), []);
@@ -632,7 +635,6 @@ export default function GalleryPreviewPage() {
         try {
             let persistentMediaUrl = mediaUrl;
             let videoPosterUrl: string | undefined;
-            const isVideo = mediaType === 'video';
             let mediaItemsForPost: Array<{ url: string; type: 'image' | 'video'; duration?: number }> | undefined;
 
             // Preserve all carousel items when posting to newsfeed.
@@ -659,7 +661,7 @@ export default function GalleryPreviewPage() {
                 const prepared = await prepareMediaForPost({
                     mediaUrl,
                     mediaType,
-                    useBackendUpload: isVideo ? useBackend : false,
+                    useBackendUpload: useBackend,
                     appOrigin: window.location.origin,
                 });
                 persistentMediaUrl = prepared.mediaUrl;
@@ -721,7 +723,7 @@ export default function GalleryPreviewPage() {
             console.error(err);
             showToast(err?.message || 'Failed to create post. Please try again.');
             if (overlay) {
-                overlay.error('Could not post. Please try again.');
+                overlay.error(err?.message || 'Could not post. Please try again.');
             }
         } finally {
             setIsUploading(false);
@@ -818,27 +820,10 @@ export default function GalleryPreviewPage() {
                         </button>
                     </div>
                 </div>
-                {socialUploadTarget && (
+                {(fromSavedGallery || socialUploadTarget) && (
                     <div className="absolute top-[4.25rem] left-0 right-0 z-10 px-4 flex justify-center pointer-events-none">
                         <p className="text-center text-[11px] leading-snug text-white/90 bg-black/55 backdrop-blur-md rounded-full px-3 py-2 max-w-sm border border-white/15 shadow-lg">
-                            {socialUploadTarget === 'youtube_shorts' && (
-                                <>
-                                    You&rsquo;re uploading to Gazetteer &mdash; <strong className="font-semibold text-white">location</strong> is what surfaces your post to people nearby.
-                                    When you&rsquo;re ready, share this clip to <strong className="font-semibold text-white">YouTube Shorts</strong> from your device the same way.
-                                </>
-                            )}
-                            {socialUploadTarget === 'tiktok' && (
-                                <>
-                                    You&rsquo;re uploading to Gazetteer &mdash; <strong className="font-semibold text-white">location</strong> is what surfaces your post to people nearby.
-                                    When you&rsquo;re ready, share this clip to <strong className="font-semibold text-white">TikTok</strong> from your device the same way.
-                                </>
-                            )}
-                            {socialUploadTarget === 'instagram_reels' && (
-                                <>
-                                    You&rsquo;re uploading to Gazetteer &mdash; <strong className="font-semibold text-white">location</strong> is what surfaces your post to people nearby.
-                                    When you&rsquo;re ready, share this clip to <strong className="font-semibold text-white">Instagram</strong> from your device the same way.
-                                </>
-                            )}
+                            You&rsquo;re uploading to Gazetteer &mdash; <strong className="font-semibold text-white">location</strong> is what surfaces your post to people nearby.
                         </p>
                     </div>
                 )}

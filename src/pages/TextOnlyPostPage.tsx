@@ -6,17 +6,25 @@ import { saveDraft } from '../api/drafts';
 import { unifiedSearch } from '../api/search';
 import { showToast } from '../utils/toast';
 import Avatar from '../components/Avatar';
+import VerifiedBadge from '../components/VerifiedBadge';
+import ComposerLinkPreview from '../components/ComposerLinkPreview';
 import Swal from 'sweetalert2';
 import { bottomSheet, saveDraftConfirmSheet } from '../utils/swalBottomSheet';
 import { FiX, FiSearch, FiLayers } from 'react-icons/fi';
 import { MdOutlineShareLocation } from 'react-icons/md';
-import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_ONLY_CANVAS_BG, TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_CARD_STYLE_OPTIONS, TEXT_CARD_STYLES, textCardStyleBackground, type TextCardStyleId } from '../utils/textCardStyles';
+import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 
 export default function TextOnlyPostPage() {
     const { user } = useAuth();
+    const composerAvatarSrc = rewriteMediaUrlForClient(
+        String(user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || ''),
+    ) || undefined;
     const navigate = useNavigate();
     const location = useLocation();
     const textInputRef = useRef<HTMLTextAreaElement>(null);
@@ -33,6 +41,7 @@ export default function TextOnlyPostPage() {
     const [tagSearchUsers, setTagSearchUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
     const [tagSearchLoading, setTagSearchLoading] = useState(false);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(locationState?.templateId || null);
+    const [textCardStyle, setTextCardStyle] = useState<TextCardStyleId>('gradient-sunset');
     const [showTemplatePicker, setShowTemplatePicker] = useState(false);
     const [showTemplateCue, setShowTemplateCue] = useState(false);
     const [showTemplateBurst, setShowTemplateBurst] = useState(false);
@@ -204,9 +213,12 @@ export default function TextOnlyPostPage() {
 
         // Show TikTok-style mini overlay while posting, then land on feed with the new post injected.
         // (Do not navigate before createPost finishes — that races postCreated clearing an empty cursor=0 feed.)
+        const cardSpec = TEXT_CARD_STYLES[textCardStyle];
         const overlay = showUploadOverlay({
             initialMessage: 'Posting to Gazetteer…',
-            background: activeTemplate ? activeTemplate.background : '#000000',
+            background: isClip
+                ? (activeTemplate ? activeTemplate.background : '#000000')
+                : textCardStyleBackground(textCardStyle),
             label: activeTemplate ? activeTemplate.name?.charAt(0).toUpperCase() || 'Aa' : 'Aa',
         });
 
@@ -215,13 +227,19 @@ export default function TextOnlyPostPage() {
             const selectedTemplate: TextStoryTemplate | undefined =
                 selectedTemplateId ? TEXT_STORY_TEMPLATES.find((t) => t.id === selectedTemplateId) : undefined;
 
-            const textStyle: { color: string; size: 'small' | 'medium' | 'large'; background: string } = selectedTemplate
-                ? {
-                    color: selectedTemplate.textColor,
-                    size: selectedTemplate.textSize,
-                    background: selectedTemplate.background,
-                }
-                : { color: '#ffffff', size: 'medium', background: '#000000' };
+            const textStyle: { color: string; size: 'small' | 'medium' | 'large'; background: string } = isClip
+                ? (selectedTemplate
+                    ? {
+                        color: selectedTemplate.textColor,
+                        size: selectedTemplate.textSize,
+                        background: selectedTemplate.background,
+                    }
+                    : { color: '#ffffff', size: 'medium', background: '#000000' })
+                : {
+                    color: cardSpec.textColor,
+                    size: 'medium',
+                    background: textCardStyleBackground(textCardStyle),
+                };
 
             const newPost = await createPost(
                 user.id,
@@ -248,7 +266,16 @@ export default function TextOnlyPostPage() {
                 undefined, // editTimeline
                 undefined, // reserved optional slot
                 venueText.trim() || undefined, // venue
-                landmarkText.trim() || undefined // landmark
+                landmarkText.trim() || undefined, // landmark
+                undefined, // socialFormat
+                undefined, // videoFrameMode
+                undefined, // videoPosterUrl
+                undefined, // placeId
+                undefined, // latitude
+                undefined, // longitude
+                undefined, // mediaWidth
+                undefined, // mediaHeight
+                isClip ? undefined : textCardStyle,
             );
 
             window.dispatchEvent(new CustomEvent('localPostCreated', {
@@ -276,9 +303,9 @@ export default function TextOnlyPostPage() {
     const canPost = text.trim().length > 0;
 
     return (
-        <div className="min-h-screen bg-black flex flex-col pt-14" style={{ pointerEvents: 'auto' }}>
-            {/* Header: Cancel + Template picker (left) | Location + Drafts + Post (right) */}
-            <div className="fixed top-0 left-0 right-0 z-30 bg-black/95 backdrop-blur border-b border-white/10">
+        <div className="min-h-screen flex flex-col pt-14" style={{ pointerEvents: 'auto', backgroundColor: TEXT_ONLY_CANVAS_BG }}>
+            {/* Header: Cancel | Location + Drafts + Post. Template picker stays on the clip flow. */}
+            <div className="fixed top-0 left-0 right-0 z-30 border-b border-white/10" style={{ backgroundColor: TEXT_ONLY_CANVAS_BG }}>
                 <div className="flex items-center justify-between px-4 h-14">
                     <div className="flex items-center gap-3">
                         <button
@@ -288,6 +315,7 @@ export default function TextOnlyPostPage() {
                         >
                             Cancel
                         </button>
+                        {isClip ? (
                         <div className="relative">
                             {showTemplateCue && (
                                 <span className={`contribute-badge-pop absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white/80 bg-gradient-to-r from-[#f6e27a] via-[#d4af37] to-[#d8dde3] text-[#111827] text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(212,175,55,0.42)] ${showTemplateBurst ? 'contribute-badge-burst' : ''}`}>
@@ -302,6 +330,7 @@ export default function TextOnlyPostPage() {
                                 <FiLayers className="w-5 h-5" />
                             </button>
                         </div>
+                        ) : null}
                     </div>
                     <div className="flex items-center gap-3">
                         <button
@@ -329,12 +358,12 @@ export default function TextOnlyPostPage() {
                 </div>
             </div>
 
-            {/* Profile picture + text input with template preview (postcard style) */}
-            <div className="flex-1 px-4 pt-4 pb-6 overflow-y-auto">
-                <div className="flex gap-3 flex-start">
+            <div className="flex-1 overflow-y-auto pb-6">
+                {isClip ? (
+                <div className="flex gap-3 px-4 pt-4">
                     <div className="flex-shrink-0 pt-1">
                         <Avatar
-                            src={user?.avatarUrl}
+                            src={composerAvatarSrc}
                             name={user?.name || 'User'}
                             size="md"
                         />
@@ -360,18 +389,101 @@ export default function TextOnlyPostPage() {
                                     width: '100%',
                                     overflow: 'hidden',
                                     color: activeTemplate ? activeTemplate.textColor : '#ffffff',
-                                    fontFamily: activeTemplate?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif',
+                                    fontFamily: activeTemplate?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
                                     border: 'none',
                                     outline: 'none',
                                     boxShadow: 'none',
                                 }}
                             />
                         </div>
-                        <div className="flex justify-end mt-1">
-                            <span className={`text-xs ${text.length > TEXT_POST_BODY_MAX_LENGTH - 50 ? (text.length >= TEXT_POST_BODY_MAX_LENGTH ? 'text-red-400' : 'text-amber-400') : 'text-gray-500'}`}>
-                                {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
-                            </span>
-                        </div>
+                    </div>
+                </div>
+                ) : (
+                <div
+                    className="flex w-full flex-col items-center px-7 pb-8 pt-7"
+                    style={{
+                        minHeight: 280,
+                        background: textCardStyleBackground(textCardStyle),
+                        borderTop: textCardStyle === 'minimal-charcoal' ? '1px solid rgba(255,255,255,0.14)' : undefined,
+                        borderBottom: textCardStyle === 'minimal-charcoal' ? '1px solid rgba(255,255,255,0.14)' : undefined,
+                    }}
+                >
+                    <div className="mb-[18px] flex items-center justify-center gap-3.5">
+                        {TEXT_CARD_STYLE_OPTIONS.map((option) => {
+                            const selected = textCardStyle === option.id;
+                            const ring = option.textColor === '#FFFFFF' ? '#FFFFFF' : '#1A1206';
+                            return (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    onClick={() => setTextCardStyle(option.id)}
+                                    aria-label={`${option.label} card style`}
+                                    aria-pressed={selected}
+                                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 p-[3px]"
+                                    style={{ borderColor: selected ? ring : 'transparent' }}
+                                >
+                                    <span
+                                        className="block h-full w-full rounded-full"
+                                        style={{
+                                            background: option.colors.length >= 2
+                                                ? `linear-gradient(135deg, ${option.colors[0]} 0%, ${option.colors[1]} 100%)`
+                                                : option.colors[0],
+                                            border: option.colors.length < 2
+                                                ? '1px solid rgba(255,255,255,0.28)'
+                                                : option.textColor !== '#FFFFFF'
+                                                    ? '1px solid rgba(26,18,6,0.35)'
+                                                    : undefined,
+                                        }}
+                                    />
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <div className="rounded-full border-2 border-white bg-white p-0.5">
+                        <Avatar
+                            src={composerAvatarSrc}
+                            name={user?.name || user?.handle || 'User'}
+                            size={88}
+                            hideBorder
+                        />
+                    </div>
+                    <div className="mt-4 mb-3 flex max-w-full items-center justify-center gap-1.5 px-2">
+                        <span
+                            className="max-w-[80%] truncate text-[17px] font-bold"
+                            style={{ color: TEXT_CARD_STYLES[textCardStyle].textColor }}
+                        >
+                            {(user?.handle || user?.name || 'You').replace(/^@+/, '')}
+                        </span>
+                        <VerifiedBadge accountType={resolveVerifiedAccountType(user?.accountType)} size={16} />
+                    </div>
+                    <div className="w-full rounded-xl border border-white px-3 py-2.5">
+                        <textarea
+                            ref={textInputRef}
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                            placeholder="What's up?"
+                            maxLength={TEXT_POST_BODY_MAX_LENGTH}
+                            className="w-full resize-none border-none bg-transparent text-center text-[16px] font-normal leading-[1.38] outline-none placeholder:text-[#9CA3AF] focus:outline-none focus:ring-0"
+                            rows={3}
+                            autoFocus
+                            style={{
+                                pointerEvents: 'auto',
+                                minHeight: 88,
+                                color: TEXT_CARD_STYLES[textCardStyle].textColor,
+                                border: 'none',
+                                outline: 'none',
+                                boxShadow: 'none',
+                            }}
+                        />
+                    </div>
+                </div>
+                )}
+                <div className="px-4 pt-2">
+                    {!isClip ? <ComposerLinkPreview text={text} /> : null}
+                    <div className="mt-1 flex justify-end">
+                        <span className={`text-xs ${text.length > TEXT_POST_BODY_MAX_LENGTH - 50 ? (text.length >= TEXT_POST_BODY_MAX_LENGTH ? 'text-red-400' : 'text-amber-400') : 'text-gray-500'}`}>
+                            {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
+                        </span>
                     </div>
                 </div>
             </div>
