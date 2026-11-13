@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
 import CreateGroupModal from '../components/CreateGroupModal';
-import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiMap, FiThumbsUp, FiEdit3, FiLink2, FiUsers, FiSettings, FiFileText, FiLayers, FiType, FiTrash2, FiImage, FiGrid, FiEye, FiPlay, FiShield, FiBell } from 'react-icons/fi';
+import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiMap, FiHeart, FiFlag, FiThumbsUp, FiEdit3, FiLink2, FiUsers, FiSettings, FiFileText, FiLayers, FiType, FiTrash2, FiImage, FiGrid, FiEye, FiPlay, FiShield, FiBell } from 'react-icons/fi';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
@@ -193,6 +193,7 @@ export default function ProfilePage() {
     podcast: user?.socialLinks?.podcast || '',
   });
   const [countryFlag, setCountryFlag] = React.useState(user?.countryFlag || '');
+  const [interestsDraft, setInterestsDraft] = React.useState((user?.interests ?? []).join(', '));
   const [collections, setCollections] = React.useState<Collection[]>([]);
   const [collectionsOpen, setCollectionsOpen] = React.useState(false);
   const [editHubOpen, setEditHubOpen] = React.useState(false);
@@ -643,6 +644,15 @@ export default function ProfilePage() {
     setDisplayName(user?.name || '');
   }, [user?.name]);
 
+  React.useEffect(() => {
+    if (selectedCard === 'interests') {
+      setInterestsDraft((user?.interests ?? []).join(', '));
+    }
+    if (selectedCard === 'flag') {
+      setCountryFlag(user?.countryFlag || '');
+    }
+  }, [selectedCard, user?.interests, user?.countryFlag]);
+
   const [profilePosts, setProfilePosts] = React.useState<Post[]>([]);
 
   React.useEffect(() => {
@@ -785,6 +795,36 @@ export default function ProfilePage() {
     }
   };
 
+  const saveInterestsCard = async () => {
+    if (!user) return;
+    const interests = interestsDraft.split(',').map((item) => item.trim()).filter(Boolean);
+    setSavingCard(true);
+    try {
+      const ok = await persistLaravelProfile({ interests });
+      if (!ok) login({ ...user, interests: interests.length ? interests : undefined });
+    } catch {
+      login({ ...user, interests: interests.length ? interests : undefined });
+    } finally {
+      setSavingCard(false);
+      setSelectedCard(null);
+    }
+  };
+
+  const saveFlagCard = async () => {
+    if (!user) return;
+    const nextFlag = countryFlag.trim();
+    setSavingCard(true);
+    try {
+      const ok = await persistLaravelProfile({ country_flag: nextFlag || null });
+      if (!ok) login({ ...user, countryFlag: nextFlag || undefined });
+    } catch {
+      login({ ...user, countryFlag: nextFlag || undefined });
+    } finally {
+      setSavingCard(false);
+      setSelectedCard(null);
+    }
+  };
+
   React.useEffect(() => {
     if (user?.socialLinks) {
       setSocialLinks({
@@ -819,6 +859,14 @@ export default function ProfilePage() {
       const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
       const next: User = { ...user };
       for (const [key, val] of Object.entries(fromApi)) {
+        if (key === 'interests' && Array.isArray(val)) {
+          next.interests = val.length > 0 ? val.filter((item) => typeof item === 'string') : undefined;
+          continue;
+        }
+        if (key === 'countryFlag') {
+          next.countryFlag = typeof val === 'string' && val.trim() ? val.trim() : undefined;
+          continue;
+        }
         if (val === undefined || val === null) continue;
         if (key === 'placesTraveled' && Array.isArray(val)) {
           next.placesTraveled = val.length > 0 ? val : undefined;
@@ -2125,6 +2173,8 @@ export default function ProfilePage() {
                   { label: 'Social Links', icon: <FiLink2 className="h-[18px] w-[18px]" />, onClick: () => setSelectedCard('social') },
                   { label: 'Location', icon: <FiMapPin className="h-[18px] w-[18px]" />, onClick: () => setSelectedCard('location') },
                   { label: 'Places', icon: <FiMap className="h-[18px] w-[18px]" />, onClick: () => setSelectedCard('places') },
+                  { label: 'Interests', icon: <FiHeart className="h-[18px] w-[18px]" />, onClick: () => setSelectedCard('interests') },
+                  { label: 'Country Flag', icon: <FiFlag className="h-[18px] w-[18px]" />, onClick: () => setSelectedCard('flag') },
                 ].map((row) => (
                   <button
                     key={row.label}
@@ -2644,11 +2694,8 @@ export default function ProfilePage() {
                       </label>
                       <input
                         type="text"
-                        value={user.interests?.join(', ') || ''}
-                        onChange={(e) => {
-                          const interests = e.target.value.split(',').map(i => i.trim()).filter(i => i);
-                          login({ ...user, interests });
-                        }}
+                        value={interestsDraft}
+                        onChange={(e) => setInterestsDraft(e.target.value)}
                         placeholder="e.g., Technology, Travel, Food"
                         className="w-full rounded-xl border border-white/[0.12] bg-white/[0.06] px-3 py-3 text-[15px] text-white placeholder:text-[#6B7280] focus:outline-none"
                       />
@@ -2656,13 +2703,13 @@ export default function ProfilePage() {
                         Separate multiple interests with commas
                       </p>
                     </div>
-                    {user.interests && user.interests.length > 0 && (
+                    {interestsDraft.split(',').map((item) => item.trim()).filter(Boolean).length > 0 && (
                       <div>
                         <label className="mb-1.5 block text-[13px] font-semibold text-[#D1D5DB]">
                           Current Interests
                         </label>
                         <div className="flex flex-wrap gap-2">
-                          {user.interests.map((interest, index) => (
+                          {interestsDraft.split(',').map((item) => item.trim()).filter(Boolean).map((interest, index) => (
                             <span
                               key={index}
                               className="px-3 py-1.5 bg-gradient-to-r from-brand-500 to-brand-600 text-white text-sm font-medium rounded-full"
@@ -2674,10 +2721,12 @@ export default function ProfilePage() {
                       </div>
                     )}
                     <button
-                      onClick={() => setSelectedCard(null)}
+                      type="button"
+                      onClick={() => void saveInterestsCard()}
+                      disabled={savingCard}
                       className="mt-4 w-full rounded-full bg-white py-3.5 text-[15px] font-bold text-[#111827] disabled:opacity-45"
                     >
-                      Save Interests
+                      {savingCard ? 'Saving...' : 'Save Interests'}
                     </button>
                   </div>
                 )}
@@ -2694,11 +2743,8 @@ export default function ProfilePage() {
                           <button
                             key={f}
                             type="button"
-                            onClick={() => {
-                              setCountryFlag(f);
-                              login({ ...user, countryFlag: f });
-                            }}
-                            className={`h-12 rounded-md flex items-center justify-center hover:bg-gray-100 transition-colors ${countryFlag === f ? 'ring-2 ring-brand-500 bg-brand-50' : ''} px-1`}
+                            onClick={() => setCountryFlag(f)}
+                            className={`flex h-12 items-center justify-center rounded-md px-1 ${countryFlag === f ? 'bg-[rgba(244,114,182,0.12)] ring-2 ring-[#f472b6]' : 'bg-white/[0.04]'}`}
                             aria-label={`Select flag ${f}`}
                           >
                             <Flag value={f} size={24} />
@@ -2722,13 +2768,12 @@ export default function ProfilePage() {
                       </p>
                     </div>
                     <button
-                      onClick={() => {
-                        login({ ...user, countryFlag });
-                        setSelectedCard(null);
-                      }}
+                      type="button"
+                      onClick={() => void saveFlagCard()}
+                      disabled={savingCard}
                       className="mt-4 w-full rounded-full bg-white py-3.5 text-[15px] font-bold text-[#111827] disabled:opacity-45"
                     >
-                      Save Flag
+                      {savingCard ? 'Saving...' : 'Save Flag'}
                     </button>
                   </div>
                 )}

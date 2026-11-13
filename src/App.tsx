@@ -55,7 +55,7 @@ import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
-import { updatePost, checkFollowsMe } from './api/client';
+import { updatePost, checkFollowsMe, updateAuthProfile } from './api/client';
 import { rewriteMediaUrlForClient } from './api/apiBaseUrl';
 import { hasPendingFollowRequest } from './api/privacy';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
@@ -7992,6 +7992,7 @@ function FeedPageWrapper() {
     (next: string[]) => {
       if (!user) return;
       login({ ...user, interests: next });
+      void updateAuthProfile({ interests: next }).catch(() => undefined);
       try {
         localStorage.removeItem(INTERESTS_ONBOARDING_DISMISSED_KEY);
       } catch {

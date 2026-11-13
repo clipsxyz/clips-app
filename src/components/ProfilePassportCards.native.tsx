@@ -327,6 +327,14 @@ export default function ProfilePassportCards({
                 const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
                 const next: User = { ...user };
                 for (const [key, val] of Object.entries(fromApi)) {
+                    if (key === 'interests' && Array.isArray(val)) {
+                        next.interests = val.length > 0 ? val.filter((item) => typeof item === 'string') : undefined;
+                        continue;
+                    }
+                    if (key === 'countryFlag') {
+                        next.countryFlag = typeof val === 'string' && val.trim() ? val.trim() : undefined;
+                        continue;
+                    }
                     if (val === undefined || val === null) continue;
                     if (key === 'placesTraveled' && Array.isArray(val)) {
                         next.placesTraveled = val.length > 0 ? val : undefined;
@@ -676,20 +684,37 @@ export default function ProfilePassportCards({
         }
     };
 
-    const saveInterests = () => {
+    const saveInterests = async () => {
         if (!user) return;
         const interests = interestsDraft
             .split(',')
             .map((i) => i.trim())
             .filter(Boolean);
-        login({ ...user, interests: interests.length ? interests : undefined });
-        setSelectedCard(null);
+        setSaving(true);
+        try {
+            const ok = await persistLaravelProfile({ interests });
+            if (!ok) login({ ...user, interests: interests.length ? interests : undefined });
+        } catch {
+            login({ ...user, interests: interests.length ? interests : undefined });
+        } finally {
+            setSaving(false);
+            setSelectedCard(null);
+        }
     };
 
-    const saveFlag = () => {
+    const saveFlag = async () => {
         if (!user) return;
-        login({ ...user, countryFlag: countryFlag.trim() || undefined });
-        setSelectedCard(null);
+        const nextFlag = countryFlag.trim();
+        setSaving(true);
+        try {
+            const ok = await persistLaravelProfile({ country_flag: nextFlag || null });
+            if (!ok) login({ ...user, countryFlag: nextFlag || undefined });
+        } catch {
+            login({ ...user, countryFlag: nextFlag || undefined });
+        } finally {
+            setSaving(false);
+            setSelectedCard(null);
+        }
     };
 
     const renderSheetBody = () => {
@@ -1061,10 +1086,7 @@ export default function ProfilePassportCards({
                             <TouchableOpacity
                                 key={f}
                                 style={[styles.flagCell, countryFlag === f && styles.flagCellActive]}
-                                onPress={() => {
-                                    setCountryFlag(f);
-                                    if (user) login({ ...user, countryFlag: f });
-                                }}
+                                onPress={() => setCountryFlag(f)}
                             >
                                 <Flag value={f} size={24} />
                             </TouchableOpacity>

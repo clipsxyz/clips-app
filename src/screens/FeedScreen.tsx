@@ -262,7 +262,7 @@ import SavePostModal from '../components/SavePostModal.native';
 import QRCodeModal from '../components/QRCodeModal.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedUserModal.native';
-import { updatePost as apiUpdatePost } from '../api/client';
+import { updatePost as apiUpdatePost, updateAuthProfile } from '../api/client';
 import {
     getCollectionsForPost,
     savePostToDefaultCollection,
@@ -4276,6 +4276,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         (next: string[]) => {
             if (!user) return;
             login({ ...user, interests: next });
+            void updateAuthProfile({ interests: next }).catch(() => undefined);
             void AsyncStorage.removeItem(INTERESTS_ONBOARDING_DISMISSED_KEY);
         },
         [login, user],

@@ -671,6 +671,17 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         bio: apiUser.bio as string | undefined,
         placesTraveled: Array.isArray(pt) ? (pt as string[]).filter((s) => typeof s === 'string') : undefined,
         favouritePlaces: Array.isArray(fp) ? (fp as string[]).filter((s) => typeof s === 'string') : undefined,
+        interests: Array.isArray(apiUser.interests)
+            ? (apiUser.interests as unknown[]).filter((s) => typeof s === 'string')
+            : apiUser.interests === null
+              ? []
+              : undefined,
+        countryFlag:
+            typeof (apiUser.country_flag ?? apiUser.countryFlag) === 'string'
+                ? String(apiUser.country_flag ?? apiUser.countryFlag)
+                : (apiUser.country_flag === null || apiUser.countryFlag === null)
+                  ? ''
+                  : undefined,
         avatarUrl: (apiUser.avatar_url ?? apiUser.avatarUrl) as string | undefined,
         profileBackgroundUrl: (apiUser.profile_background_url ?? apiUser.profileBackgroundUrl) as string | undefined,
         socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
@@ -711,6 +722,8 @@ export async function updateAuthProfile(data: {
     bio?: string | null;
     places_traveled?: string[];
     favourite_places?: string[];
+    interests?: string[];
+    country_flag?: string | null;
     location_local?: string | null;
     location_regional?: string | null;
     location_national?: string | null;

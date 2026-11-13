@@ -2078,6 +2078,22 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Icon name="map-outline" size={ox(18)} color="#FFFFFF" />
                                 <Text style={styles.editSheetOptionText}>Places</Text>
                             </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => setOpenPassportCardRequest('interests')}
+                            >
+                                <Icon name="heart-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Interests</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => setOpenPassportCardRequest('flag')}
+                            >
+                                <Icon name="flag-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Country Flag</Text>
+                            </TouchableOpacity>
                             <ProfilePassportCards
                                 navigation={navigation}
                                 isPrivate={isPrivate}
