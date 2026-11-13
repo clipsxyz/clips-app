@@ -1,104 +1,63 @@
 import React from 'react';
-import { FiSearch, FiMapPin, FiUsers, FiPlayCircle, FiChevronLeft, FiX } from 'react-icons/fi';
-import { GiRiver, GiSuspensionBridge, GiTorch } from 'react-icons/gi';
-import { MdOutlinePark } from 'react-icons/md';
-import { LuClock, LuLandmark } from 'react-icons/lu';
-import { TbTower, TbBuilding } from 'react-icons/tb';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { fetchPostsByUser } from '../api/posts';
-import { unifiedSearch, type SearchSections } from '../api/search';
-import { searchLocations, type LocationSuggestion } from '../api/locations';
-import type { Post } from '../types';
+import {
+    IoArrowBack,
+    IoBookmark,
+    IoBookmarkOutline,
+    IoBusiness,
+    IoBusinessOutline,
+    IoCloseCircle,
+    IoFlag,
+    IoFlagOutline,
+    IoLocation,
+    IoLocationOutline,
+    IoNavigateOutline,
+    IoPeopleOutline,
+    IoSearch,
+} from 'react-icons/io5';
 import { useAuth } from '../context/Auth';
-import { toggleFollow } from '../api/client';
+import { unifiedSearch, type SearchSections } from '../api/search';
+import { searchLocations, searchLocalGazetteer, type LocationSuggestion } from '../api/locations';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+import { hasPendingFollowRequest } from '../api/privacy';
+import { followOrRequest } from '../utils/followOrRequest';
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
-import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+import Avatar from '../components/Avatar';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet';
+import type { Post } from '../types';
 
-const MOCK_TOP_LOCATIONS = [
-    { name: 'New York', type: 'City', country: 'USA' },
-    { name: 'Los Angeles', type: 'City', country: 'USA' },
-    { name: 'London', type: 'City', country: 'UK' },
-    { name: 'Paris', type: 'City', country: 'France' },
-    { name: 'Berlin', type: 'City', country: 'Germany' },
-    { name: 'Tokyo', type: 'City', country: 'Japan' },
-    { name: 'Seoul', type: 'City', country: 'South Korea' },
-    { name: 'Sydney', type: 'City', country: 'Australia' },
-    { name: 'Dublin', type: 'City', country: 'Ireland' },
-    { name: 'Dubai', type: 'City', country: 'UAE' },
-];
-
-const MOCK_TOP_LANDMARKS = [
-    { name: 'Phoenix Park', type: 'Park', country: 'Ireland', city: 'Dublin' },
-    { name: 'River Liffey', type: 'River', country: 'Ireland', city: 'Dublin' },
-    { name: 'Eiffel Tower', type: 'Monument', country: 'France', city: 'Paris' },
-    { name: 'Big Ben', type: 'Landmark', country: 'UK', city: 'London' },
-    { name: 'Statue of Liberty', type: 'Monument', country: 'USA', city: 'New York' },
-    { name: 'Golden Gate Bridge', type: 'Bridge', country: 'USA', city: 'San Francisco' },
-];
-
-/** Distinct icon per landmark name (popular grid + typed search). Order: specific → generic. */
-function LandmarkIconForName(name: string, className = 'w-3 h-3') {
-    const n = name.trim().toLowerCase();
-    if (n.includes('eiffel')) {
-        return <TbTower className={`${className} text-rose-300`} aria-hidden />;
-    }
-    if (n.includes('phoenix')) {
-        return <MdOutlinePark className={`${className} text-emerald-300`} aria-hidden />;
-    }
-    if (n.includes('liffey')) {
-        return <GiRiver className={`${className} text-sky-300`} aria-hidden />;
-    }
-    if (n.includes('big ben') || (n.includes('westminster') && n.includes('clock'))) {
-        return <LuClock className={`${className} text-amber-200`} aria-hidden />;
-    }
-    if (n.includes('liberty') || n.includes('statue of liberty')) {
-        return <GiTorch className={`${className} text-cyan-300`} aria-hidden />;
-    }
-    if (n.includes('golden gate')) {
-        return <GiSuspensionBridge className={`${className} text-orange-300`} aria-hidden />;
-    }
-    if (n.includes('bridge')) {
-        return <GiSuspensionBridge className={`${className} text-orange-300`} aria-hidden />;
-    }
-    if (n.includes('river')) {
-        return <GiRiver className={`${className} text-sky-300`} aria-hidden />;
-    }
-    if (n.includes('tower')) {
-        return <TbTower className={`${className} text-violet-300`} aria-hidden />;
-    }
-    if (n.includes('park')) {
-        return <MdOutlinePark className={`${className} text-emerald-300`} aria-hidden />;
-    }
-    return <LuLandmark className={`${className} text-amber-300`} aria-hidden />;
-}
-
-const MOCK_TOP_VENUES = [
-    { name: 'Madison Square Garden', type: 'Arena', country: 'USA', city: 'New York' },
-    { name: 'Wembley Stadium', type: 'Stadium', country: 'UK', city: 'London' },
-    { name: 'Camp Nou', type: 'Stadium', country: 'Spain', city: 'Barcelona' },
-    { name: 'Allianz Arena', type: 'Stadium', country: 'Germany', city: 'Munich' },
-    { name: 'Accor Arena', type: 'Arena', country: 'France', city: 'Paris' },
-    { name: 'Staples Center', type: 'Arena', country: 'USA', city: 'Los Angeles' },
-    { name: 'Sydney Opera House', type: 'Venue', country: 'Australia', city: 'Sydney' },
-    { name: 'Croke Park', type: 'Stadium', country: 'Ireland', city: 'Dublin' },
-];
-
-const MOCK_USERS_BY_COUNTRY = [
-    { handle: 'Sarah@Artane', display_name: 'Sarah from Artane', country: 'Ireland' },
-    { handle: 'NewsDublin@City', display_name: 'Dublin City Updates', country: 'Ireland' },
-    { handle: 'RioLocal@Brazil', display_name: 'Rio Local Stories', country: 'Brazil' },
-    { handle: 'SaoPauloNow', display_name: 'São Paulo Now', country: 'Brazil' },
-];
+type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
+type SearchRefinement = 'all' | 'local' | 'regional';
+type RecentSearchItem = { q: string; mode: SearchMode; ts: number };
 
 const RECENT_SEARCHES_KEY = 'searchRecentQueriesV1';
 const SAVED_SEARCHES_KEY = 'searchSavedQueriesV1';
 const MAX_RECENT_SEARCHES = 8;
 
-type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
-type SearchRefinement = 'all' | 'local' | 'regional';
-type RecentSearchItem = { q: string; mode: SearchMode; ts: number };
+const QUICK_PICK_CITIES = [
+    'Paris', 'London', 'Rome', 'Madrid', 'Berlin',
+    'Amsterdam', 'Lisbon', 'Vienna', 'Prague',
+    'Dublin', 'Cork', 'Galway', 'Belfast',
+    'New York', 'Los Angeles', 'Chicago',
+];
+
+const POPULAR_VENUES = [
+    'Madison Square Garden', 'Wembley Stadium', 'Camp Nou', 'Allianz Arena',
+    'Accor Arena', 'Staples Center', 'Sydney Opera House', 'Croke Park',
+];
+const POPULAR_LANDMARKS = [
+    'Phoenix Park', 'River Liffey', 'Eiffel Tower', 'Big Ben',
+    'Statue of Liberty', 'Golden Gate Bridge',
+];
+
+const MODE_CHIPS: Array<{ id: SearchMode; label: string; icon: React.ReactNode; activeIcon: React.ReactNode }> = [
+    { id: 'locations', label: 'Location', icon: <IoLocationOutline size={14} />, activeIcon: <IoLocationOutline size={14} /> },
+    { id: 'venues', label: 'Venue', icon: <IoBusinessOutline size={14} />, activeIcon: <IoBusinessOutline size={14} /> },
+    { id: 'landmarks', label: 'Landmark', icon: <IoFlagOutline size={14} />, activeIcon: <IoFlagOutline size={14} /> },
+    { id: 'nearby', label: 'Near me', icon: <IoNavigateOutline size={14} />, activeIcon: <IoNavigateOutline size={14} /> },
+    { id: 'users', label: 'Users', icon: <IoPeopleOutline size={14} />, activeIcon: <IoPeopleOutline size={14} /> },
+];
 
 function readSearchList(key: string): RecentSearchItem[] {
     try {
@@ -116,62 +75,57 @@ function writeSearchList(key: string, items: RecentSearchItem[]) {
     try {
         localStorage.setItem(key, JSON.stringify(items));
     } catch {
-        // ignore storage errors
+        /* ignore */
     }
 }
 
+function avatarSrc(url?: string | null) {
+    const raw = typeof url === 'string' ? url.trim() : '';
+    return raw ? rewriteMediaUrlForClient(raw) : undefined;
+}
+
+function postThumb(post: Post): string {
+    const poster = post.videoPosterUrl || post.thumbnailUrl;
+    if (poster) return poster;
+    if (post.mediaType === 'video') return '';
+    return post.mediaUrl || '';
+}
+
+/** Web twin of SearchScreen. */
 export default function SearchPage() {
     const nav = useNavigate();
     const { user } = useAuth();
     const [searchQuery, setSearchQuery] = React.useState('');
     const [sections, setSections] = React.useState<SearchSections>({});
-    const [sectionCursors, setSectionCursors] = React.useState<{
-        users: number | string | null;
-        locations: number | string | null;
-        posts: number | string | null;
-    }>({ users: 0, locations: 0, posts: 0 });
-    const [sectionHasMore, setSectionHasMore] = React.useState<{ users: boolean; locations: boolean; posts: boolean }>({
-        users: false,
-        locations: false,
-        posts: false,
-    });
-    const [sectionLoadingMore, setSectionLoadingMore] = React.useState<{ users: boolean; locations: boolean; posts: boolean }>({
-        users: false,
-        locations: false,
-        posts: false,
-    });
-    const [preloadPosts, setPreloadPosts] = React.useState<Post[] | null>(null);
-    const [showSearchMode, setShowSearchMode] = React.useState(false);
-    const [isFocused, setIsFocused] = React.useState(false);
-    const [suggestedUsers, setSuggestedUsers] = React.useState<Array<{ handle: string; display_name?: string }>>([]);
-    const [followBusyHandle, setFollowBusyHandle] = React.useState<string | null>(null);
-    const [localFollowState, setLocalFollowState] = React.useState<Record<string, boolean>>({});
+    const [loading, setLoading] = React.useState(false);
+    const [searchMode, setSearchMode] = React.useState<SearchMode>('locations');
+    const [refinement, setRefinement] = React.useState<SearchRefinement>('all');
+    const [sectionLoadingMore, setSectionLoadingMore] = React.useState({ users: false, locations: false, posts: false });
     const [recentSearches, setRecentSearches] = React.useState<RecentSearchItem[]>(() => readSearchList(RECENT_SEARCHES_KEY));
     const [savedSearches, setSavedSearches] = React.useState<RecentSearchItem[]>(() => readSearchList(SAVED_SEARCHES_KEY));
-    const [refinement, setRefinement] = React.useState<SearchRefinement>('all');
+    const [followBusyHandle, setFollowBusyHandle] = React.useState<string | null>(null);
+    const [localFollowState, setLocalFollowState] = React.useState<Record<string, boolean>>({});
+    const [localRequestState, setLocalRequestState] = React.useState<Record<string, boolean>>({});
+    const [suggestedUsers, setSuggestedUsers] = React.useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
     const [placeSuggestions, setPlaceSuggestions] = React.useState<LocationSuggestion[]>([]);
     const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = React.useState(false);
     const [scopePicker, setScopePicker] = React.useState<LocationSuggestion | null>(null);
-    const [visibleViewport, setVisibleViewport] = React.useState(() => ({
-        top: 0,
-        height: typeof window !== 'undefined' ? window.innerHeight : 800,
-    }));
-    const searchInputRef = React.useRef<HTMLInputElement>(null);
-
-    // High-level search mode chips: location / venue / users / posts / near me
-    const [searchMode, setSearchMode] = React.useState<SearchMode>('locations');
-    const isPlaceSearchMode = searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks';
+    const [alertSheet, setAlertSheet] = React.useState<{ title: string; message: string } | null>(null);
 
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
         venues: 'Search by venue',
         landmarks: 'Search by landmark',
-        nearby: 'Search near me',
-        users: 'Search by users',
-        posts: 'Search by posts',
+        users: 'Search users',
+        posts: 'Search posts',
+        nearby: 'Search nearby users',
     };
 
-    // Google Places autocomplete (same API as Discover)
+    const isPlaceSearchMode = searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks';
+    const query = searchQuery.trim();
+    const hasQuery = query.length > 0;
+    const isCurrentQuerySaved = savedSearches.some((x) => x.q.toLowerCase() === query.toLowerCase() && x.mode === searchMode);
+
     React.useEffect(() => {
         const q = searchQuery.trim();
         if (!isPlaceSearchMode || q.length < 2) {
@@ -179,108 +133,236 @@ export default function SearchPage() {
             setPlaceSuggestionsLoading(false);
             return;
         }
+        const modeForApi = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+        setPlaceSuggestions(searchLocalGazetteer(q, 8, modeForApi));
         const ctrl = new AbortController();
-        const modeForApi =
-            searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
-        const id = setTimeout(async () => {
-            try {
-                setPlaceSuggestionsLoading(true);
-                const res = await searchLocations(q, 8, modeForApi, ctrl.signal);
-                if (!ctrl.signal.aborted) setPlaceSuggestions(res);
-            } catch (e) {
-                if (!ctrl.signal.aborted && (e as Error)?.name !== 'AbortError') setPlaceSuggestions([]);
-            } finally {
-                if (!ctrl.signal.aborted) setPlaceSuggestionsLoading(false);
-            }
-        }, 200);
+        const id = window.setTimeout(() => {
+            setPlaceSuggestionsLoading(true);
+            searchLocations(q, 8, modeForApi, ctrl.signal)
+                .then((res) => {
+                    if (!ctrl.signal.aborted) setPlaceSuggestions(res);
+                })
+                .catch((err) => {
+                    if (!ctrl.signal.aborted && (err as Error)?.name !== 'AbortError') {
+                        setPlaceSuggestions(searchLocalGazetteer(q, 8, modeForApi));
+                    }
+                })
+                .finally(() => {
+                    if (!ctrl.signal.aborted) setPlaceSuggestionsLoading(false);
+                });
+        }, 120);
         return () => {
-            clearTimeout(id);
             ctrl.abort();
+            window.clearTimeout(id);
         };
     }, [searchQuery, searchMode, isPlaceSearchMode]);
 
     React.useEffect(() => {
-        if (!scopePicker) return;
-        searchInputRef.current?.blur();
-    }, [scopePicker]);
-
-    React.useEffect(() => {
-        const vv = window.visualViewport;
-        if (!vv) return;
-
-        const syncViewport = () => {
-            setVisibleViewport({ top: vv.offsetTop, height: vv.height });
-        };
-
-        syncViewport();
-        vv.addEventListener('resize', syncViewport);
-        vv.addEventListener('scroll', syncViewport);
-        window.addEventListener('resize', syncViewport);
-
-        return () => {
-            vv.removeEventListener('resize', syncViewport);
-            vv.removeEventListener('scroll', syncViewport);
-            window.removeEventListener('resize', syncViewport);
-        };
-    }, []);
-
-    // Debounced unified search – manual search only returns results
-    // for the active high-level tab (locations / venues / users / posts / nearby).
-    React.useEffect(() => {
         const q = searchQuery.trim();
-        const id = setTimeout(() => {
-            if (!q) {
-                setSections({});
-                setSectionCursors({ users: 0, locations: 0, posts: 0 });
-                setSectionHasMore({ users: false, locations: false, posts: false });
-                return;
-            }
-
-            let types: string;
-            switch (searchMode) {
-                case 'locations':
-                case 'venues':
-                case 'landmarks':
-                    // Use blended result sources so a "Top" section can rank across entities.
-                    types = 'users,locations,posts';
-                    break;
-                case 'nearby':
-                case 'users':
-                    types = 'users';
-                    break;
-                case 'posts':
-                    types = 'posts';
-                    break;
-                default:
-                    types = 'users,locations,posts';
-            }
-
+        if (!q) {
+            setSections({});
+            setLoading(false);
+            return;
+        }
+        setLoading(true);
+        const id = window.setTimeout(() => {
+            let types = 'users,locations,posts';
+            if (searchMode === 'users' || searchMode === 'nearby') types = 'users';
+            if (searchMode === 'posts') types = 'posts';
+            if (searchMode === 'venues' || searchMode === 'landmarks') types = 'locations';
             unifiedSearch({ q, types, usersLimit: 10, locationsLimit: 10, postsLimit: 12 })
-                .then(r => {
-                    setSections(r.sections);
-                    setSectionCursors({
-                        users: r.sections?.users?.nextCursor ?? null,
-                        locations: r.sections?.locations?.nextCursor ?? null,
-                        posts: r.sections?.posts?.nextCursor ?? null,
-                    });
-                    setSectionHasMore({
-                        users: !!r.sections?.users?.hasMore || r.sections?.users?.nextCursor != null,
-                        locations: !!r.sections?.locations?.hasMore || r.sections?.locations?.nextCursor != null,
-                        posts: !!r.sections?.posts?.hasMore || r.sections?.posts?.nextCursor != null,
-                    });
+                .then((r) => {
+                    setSections(r.sections || {});
+                    setLoading(false);
                 })
-                .catch(() => setSections({}));
+                .catch(() => {
+                    setSections({});
+                    setLoading(false);
+                });
         }, 250);
-        return () => clearTimeout(id);
+        return () => window.clearTimeout(id);
     }, [searchQuery, searchMode]);
 
-    const loadMoreSection = React.useCallback(async (section: 'users' | 'locations' | 'posts') => {
+    React.useEffect(() => {
+        const q = (user?.local || '').trim() || 'Dublin';
+        unifiedSearch({ q, types: 'users', usersLimit: 8 })
+            .then((r) => {
+                const items = Array.isArray(r.sections?.users?.items) ? r.sections.users.items : [];
+                setSuggestedUsers(items);
+                if (user?.handle) {
+                    const nextRequests: Record<string, boolean> = {};
+                    for (const item of items) {
+                        if (item?.handle && hasPendingFollowRequest(user.handle, item.handle)) {
+                            nextRequests[item.handle] = true;
+                        }
+                    }
+                    if (Object.keys(nextRequests).length > 0) {
+                        setLocalRequestState((prev) => ({ ...prev, ...nextRequests }));
+                    }
+                }
+            })
+            .catch(() => setSuggestedUsers([]));
+    }, [user?.local, user?.handle]);
+
+    React.useEffect(() => {
+        if (searchMode === 'nearby') {
+            const target = user?.local;
+            if (target && target.trim().length > 0) setSearchQuery(target);
+        }
+    }, [searchMode, user?.local]);
+
+    const addRecentSearch = React.useCallback((q: string, mode: SearchMode) => {
+        const nextQuery = q.trim();
+        if (!nextQuery) return;
+        setRecentSearches((prev) => {
+            const next = [
+                { q: nextQuery, mode, ts: Date.now() },
+                ...prev.filter((x) => !(x.q.toLowerCase() === nextQuery.toLowerCase() && x.mode === mode)),
+            ].slice(0, MAX_RECENT_SEARCHES);
+            writeSearchList(RECENT_SEARCHES_KEY, next);
+            return next;
+        });
+    }, []);
+
+    const toggleSaveSearch = React.useCallback((q: string, mode: SearchMode) => {
+        const nextQuery = q.trim();
+        if (!nextQuery) return;
+        setSavedSearches((prev) => {
+            const exists = prev.some((x) => x.q.toLowerCase() === nextQuery.toLowerCase() && x.mode === mode);
+            const next = exists
+                ? prev.filter((x) => !(x.q.toLowerCase() === nextQuery.toLowerCase() && x.mode === mode))
+                : [{ q: nextQuery, mode, ts: Date.now() }, ...prev].slice(0, MAX_RECENT_SEARCHES);
+            writeSearchList(SAVED_SEARCHES_KEY, next);
+            return next;
+        });
+    }, []);
+
+    const filteredLocations = React.useMemo(() => {
+        const items = Array.isArray(sections.locations?.items) ? sections.locations.items : [];
+        if (refinement === 'all') return items;
+        const local = (user?.local || '').toLowerCase();
+        const regional = (user?.regional || '').toLowerCase();
+        return items.filter((loc: any) => {
+            const hay = `${loc?.name || ''} ${loc?.country || ''} ${loc?.type || ''}`.toLowerCase();
+            if (refinement === 'local') return !!local && hay.includes(local);
+            if (refinement === 'regional') return !!regional && hay.includes(regional);
+            return true;
+        });
+    }, [sections.locations?.items, refinement, user?.local, user?.regional]);
+
+    const filteredUsers = React.useMemo(() => {
+        const items = Array.isArray(sections.users?.items) ? sections.users.items : [];
+        if (refinement === 'all') return items;
+        const local = (user?.local || '').toLowerCase();
+        const regional = (user?.regional || '').toLowerCase();
+        return items.filter((u: any) => {
+            const hay = [u?.handle, u?.display_name, u?.local, u?.regional, u?.national, u?.location, u?.city, u?.country]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+            if (refinement === 'local') return !!local && hay.includes(local);
+            if (refinement === 'regional') return !!regional && hay.includes(regional);
+            return true;
+        });
+    }, [sections.users?.items, refinement, user?.local, user?.regional]);
+
+    const filteredPosts: Post[] = Array.isArray(sections.posts?.items) ? sections.posts.items : [];
+
+    function openFeedSelection(selection: PlaceFeedSelection, kind: 'location' | 'venue' | 'landmark' = 'location') {
+        addRecentSearch(selection.label, searchMode);
+        try {
+            sessionStorage.setItem('pendingLocation', selection.filter);
+            sessionStorage.setItem('pendingLocationLabel', selection.label);
+            sessionStorage.setItem('pendingLocationScope', selection.scope);
+            sessionStorage.setItem('pendingFilterType', kind);
+            if (selection.placeId) sessionStorage.setItem('pendingLocationPlaceId', selection.placeId);
+            else sessionStorage.removeItem('pendingLocationPlaceId');
+            window.dispatchEvent(
+                new CustomEvent('locationChange', {
+                    detail: {
+                        location: selection.filter,
+                        locationLabel: selection.label,
+                        locationScope: selection.scope,
+                        filterType: kind,
+                        placeId: selection.placeId ?? null,
+                    },
+                }),
+            );
+        } catch {
+            /* ignore */
+        }
+        const params = new URLSearchParams({
+            location: selection.filter,
+            label: selection.label,
+            scope: selection.scope,
+        });
+        if (kind === 'venue') params.set('type', 'venue');
+        else if (kind === 'landmark') params.set('type', 'landmark');
+        if (selection.placeId) params.set('place_id', selection.placeId);
+        nav(`/feed?${params.toString()}`);
+    }
+
+    function goToLocation(loc: string, kind: 'location' | 'venue' | 'landmark' = 'location') {
+        const suggestion: LocationSuggestion = {
+            name: loc,
+            type: kind,
+            country: loc,
+            national: loc,
+            local: loc,
+            regional: loc,
+        };
+        if (kind === 'location' && getPlaceFeedPickerOptions(suggestion)) {
+            setScopePicker(suggestion);
+            return;
+        }
+        openFeedSelection(resolvePlaceFeedSelection(suggestion), kind);
+    }
+
+    function onPlaceSuggestionPress(suggestion: LocationSuggestion) {
+        const kind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+        const typed: LocationSuggestion = kind === 'venue' || kind === 'landmark' ? { ...suggestion, type: kind } : suggestion;
+        if (kind !== 'location') {
+            openFeedSelection(resolvePlaceFeedSelection(typed), kind);
+            return;
+        }
+        if (getPlaceFeedPickerOptions(typed)) {
+            setScopePicker(typed);
+            return;
+        }
+        openFeedSelection(resolvePlaceFeedSelection(typed), 'location');
+    }
+
+    function goToUser(handle: string) {
+        addRecentSearch(handle, searchMode);
+        nav('/user/' + encodeURIComponent(handle));
+    }
+
+    function goToPost(postId: string) {
+        nav('/post/' + encodeURIComponent(postId));
+    }
+
+    function handleSubmitSearch() {
         const q = searchQuery.trim();
         if (!q) return;
-        if (!sectionHasMore[section] || sectionLoadingMore[section]) return;
-        const cursor = sectionCursors[section];
-        if (cursor == null) return;
+        if (searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks') {
+            const kind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+            if (placeSuggestions.length > 0) {
+                onPlaceSuggestionPress(placeSuggestions[0]);
+                return;
+            }
+            goToLocation(q, kind);
+            return;
+        }
+        if (searchMode === 'users' || searchMode === 'nearby') {
+            goToUser(q);
+        }
+    }
 
+    async function loadMoreSection(section: 'users' | 'locations' | 'posts') {
+        const q = searchQuery.trim();
+        if (!q || sectionLoadingMore[section]) return;
+        const cursor = sections[section]?.nextCursor;
+        if (cursor == null) return;
         setSectionLoadingMore((prev) => ({ ...prev, [section]: true }));
         try {
             const params: any = {
@@ -296,7 +378,6 @@ export default function SearchPage() {
             const r = await unifiedSearch(params);
             const incoming = r.sections?.[section];
             const incomingItems = Array.isArray(incoming?.items) ? incoming.items : [];
-
             setSections((prev) => {
                 const prevItems = Array.isArray(prev?.[section]?.items) ? prev[section]!.items : [];
                 const merged = [...prevItems];
@@ -317,1082 +398,521 @@ export default function SearchPage() {
                     },
                 };
             });
-
-            setSectionCursors((prev) => ({ ...prev, [section]: incoming?.nextCursor ?? null }));
-            setSectionHasMore((prev) => ({
-                ...prev,
-                [section]: !!incoming?.hasMore || incoming?.nextCursor != null,
-            }));
         } finally {
             setSectionLoadingMore((prev) => ({ ...prev, [section]: false }));
         }
-    }, [searchQuery, sectionCursors, sectionHasMore, sectionLoadingMore]);
+    }
 
-    // Preload a user's posts on first open (Sarah@Artane for now)
-    React.useEffect(() => {
-        fetchPostsByUser('Sarah@Artane', 30).then(setPreloadPosts).catch(() => setPreloadPosts([]));
-    }, []);
-
-    // When "Near me" is selected, automatically search for users in the user's local area
-    React.useEffect(() => {
-        if (searchMode === 'nearby' && user?.local) {
-            setShowSearchMode(true);
-            setSearchQuery(user.local);
+    async function onToggleFollowSuggested(handle: string) {
+        if (!user?.id || !user?.handle) {
+            setAlertSheet({ title: 'Sign in required', message: 'Log in to follow people.' });
+            return;
         }
-    }, [searchMode, user?.local]);
-
-    const addRecentSearch = React.useCallback((q: string, mode: SearchMode) => {
-        const query = q.trim();
-        if (!query) return;
-        setRecentSearches((prev) => {
-            const next = [{ q: query, mode, ts: Date.now() }, ...prev.filter((x) => !(x.q.toLowerCase() === query.toLowerCase() && x.mode === mode))]
-                .slice(0, MAX_RECENT_SEARCHES);
-            writeSearchList(RECENT_SEARCHES_KEY, next);
-            return next;
-        });
-    }, []);
-
-    const toggleSaveSearch = React.useCallback((q: string, mode: SearchMode) => {
-        const query = q.trim();
-        if (!query) return;
-        setSavedSearches((prev) => {
-            const exists = prev.some((x) => x.q.toLowerCase() === query.toLowerCase() && x.mode === mode);
-            const next = exists
-                ? prev.filter((x) => !(x.q.toLowerCase() === query.toLowerCase() && x.mode === mode))
-                : [{ q: query, mode, ts: Date.now() }, ...prev].slice(0, MAX_RECENT_SEARCHES);
-            writeSearchList(SAVED_SEARCHES_KEY, next);
-            return next;
-        });
-    }, []);
-
-    const applyFeedSelection = React.useCallback(
-        (selection: PlaceFeedSelection) => {
-            addRecentSearch(selection.label, searchMode);
-            const filterType = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
-            try {
-                sessionStorage.setItem('pendingLocation', selection.filter);
-                sessionStorage.setItem('pendingLocationLabel', selection.label);
-                sessionStorage.setItem('pendingLocationScope', selection.scope);
-                sessionStorage.setItem('pendingFilterType', filterType);
-                window.dispatchEvent(
-                    new CustomEvent('locationChange', {
-                        detail: {
-                            location: selection.filter,
-                            locationLabel: selection.label,
-                            locationScope: selection.scope,
-                            filterType,
-                        },
-                    })
-                );
-            } catch {
-                /* ignore */
+        setFollowBusyHandle(handle);
+        try {
+            const wasFollowing = localFollowState[handle] === true;
+            const wasRequested = localRequestState[handle] === true || Boolean(user.handle && hasPendingFollowRequest(user.handle, handle));
+            const nextFollowing = wasFollowing ? false : wasRequested ? false : true;
+            const result = await followOrRequest({
+                userId: String(user.id),
+                targetHandle: handle,
+                viewerHandle: user.handle,
+                nextFollowing,
+            });
+            setLocalFollowState((prev) => ({ ...prev, [handle]: result.following }));
+            setLocalRequestState((prev) => ({ ...prev, [handle]: result.requested }));
+            if (result.requested && !wasRequested) {
+                setAlertSheet({
+                    title: 'Follow Request Sent',
+                    message: `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
+                });
             }
-            const params = new URLSearchParams({
-                location: selection.filter,
-                label: selection.label,
-                scope: selection.scope,
-            });
-            if (filterType === 'venue') params.set('type', 'venue');
-            else if (filterType === 'landmark') params.set('type', 'landmark');
-            nav(`/feed?${params.toString()}`);
-        },
-        [searchMode, nav]
-    );
+        } catch {
+            setAlertSheet({ title: 'Action failed', message: 'Could not update follow status right now.' });
+        } finally {
+            setFollowBusyHandle(null);
+        }
+    }
 
-    const onPlaceSuggestionSelected = React.useCallback(
-        (suggestion: LocationSuggestion) => {
-            const kind =
-                searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
-            const typed: LocationSuggestion =
-                kind === 'venue' || kind === 'landmark' ? { ...suggestion, type: kind } : suggestion;
-            if (kind === 'location' && getPlaceFeedPickerOptions(typed)) {
-                setScopePicker(typed);
-                return;
-            }
-            applyFeedSelection(resolvePlaceFeedSelection(typed));
-        },
-        [applyFeedSelection, searchMode]
-    );
+    function onModeChipPress(id: SearchMode) {
+        if (id === 'nearby') {
+            const local = user?.local || 'Local';
+            openFeedSelection({ filter: local, scope: 'local', label: local, fullName: local }, 'location');
+            return;
+        }
+        setSearchMode(id);
+    }
 
-    const goToLocation = (loc: string) => {
-        applyFeedSelection(
-            resolvePlaceFeedSelection({
-                name: loc,
-                type: 'location',
-                country: loc,
-                national: loc,
-                local: loc,
-                regional: loc,
-            })
-        );
-    };
-
-    const goToVenue = (venue: string) => {
-        applyFeedSelection(
-            resolvePlaceFeedSelection({
-                name: venue,
-                type: 'venue',
-                country: venue,
-                national: venue,
-                local: venue,
-                regional: venue,
-            })
-        );
-    };
-
-    const goToLandmark = (name: string) => {
-        applyFeedSelection(
-            resolvePlaceFeedSelection({
-                name,
-                type: 'landmark',
-                country: name,
-                national: name,
-                local: name,
-                regional: name,
-            })
-        );
-    };
-
-    const submitPlaceSearch = React.useCallback(
-        (raw: string) => {
-            const q = raw.trim();
-            if (!q) return;
-            if (placeSuggestions.length > 0) {
-                onPlaceSuggestionSelected(placeSuggestions[0]);
-                return;
-            }
-            const type = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
-            applyFeedSelection(
-                resolvePlaceFeedSelection({ name: q, type, country: q, national: q, local: q, regional: q })
-            );
-        },
-        [placeSuggestions, onPlaceSuggestionSelected, applyFeedSelection, searchMode]
-    );
-
-    const goToUser = (handle: string) => {
-        addRecentSearch(handle, searchMode);
-        nav('/user/' + encodeURIComponent(handle));
-    };
-
-    const query = searchQuery.trim();
-    const isSearching = showSearchMode && !!query;
-    const isCurrentQuerySaved = savedSearches.some((x) => x.q.toLowerCase() === query.toLowerCase() && x.mode === searchMode);
-
-    const filteredLocations = React.useMemo(() => {
-        const items = sections.locations?.items || [];
-        if (refinement === 'all') return items;
-        const local = (user?.local || '').toLowerCase();
-        const regional = (user?.regional || '').toLowerCase();
-        return items.filter((loc: any) => {
-            const hay = `${loc?.name || ''} ${loc?.country || ''} ${loc?.type || ''}`.toLowerCase();
-            if (refinement === 'local') return !!local && hay.includes(local);
-            if (refinement === 'regional') return !!regional && hay.includes(regional);
-            return true;
-        });
-    }, [sections.locations?.items, refinement, user?.local, user?.regional]);
-
-    const filteredUsers = React.useMemo(() => {
-        const items = sections.users?.items || [];
-        if (refinement === 'all') return items;
-        const local = (user?.local || '').toLowerCase();
-        const regional = (user?.regional || '').toLowerCase();
-        return items.filter((u: any) => {
-            // unifiedSearch user payloads can vary; check multiple candidate fields.
-            const hay = [
-                u?.handle,
-                u?.display_name,
-                u?.local,
-                u?.regional,
-                u?.national,
-                u?.location_label,
-                u?.location,
-                u?.city,
-                u?.country,
-                u?.bio,
-            ]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase();
-            if (refinement === 'local') return !!local && hay.includes(local);
-            if (refinement === 'regional') return !!regional && hay.includes(regional);
-            return true;
-        });
-    }, [sections.users?.items, refinement, user?.local, user?.regional]);
-
-    const topResults = React.useMemo(() => {
-        if (!isSearching) return [];
-        const rows: Array<{ id: string; kind: 'location' | 'venue' | 'landmark' | 'user' | 'post'; title: string; subtitle: string; onClick: () => void }> = [];
-        const addRow = (row: { id: string; kind: 'location' | 'venue' | 'landmark' | 'user' | 'post'; title: string; subtitle: string; onClick: () => void }) => {
-            if (!rows.some((r) => r.id === row.id)) rows.push(row);
-        };
-        (filteredLocations || []).slice(0, 4).forEach((loc: any) => {
-            const kind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
-            addRow({
-                id: `${kind}-${loc.name}-${loc.country || ''}`,
-                kind,
-                title: loc.name,
-                subtitle: `${loc.type || 'Place'}${loc.country ? ` • ${loc.country}` : ''}`,
-                onClick: () => (kind === 'venue' ? goToVenue(loc.name) : kind === 'landmark' ? goToLandmark(loc.name) : goToLocation(loc.name)),
-            });
-        });
-        (filteredUsers || []).slice(0, 3).forEach((u: any) => {
-            addRow({
-                id: `user-${u.handle}`,
-                kind: 'user',
-                title: u.handle,
-                subtitle: u.display_name || 'User',
-                onClick: () => goToUser(u.handle),
-            });
-        });
-        (sections.posts?.items || []).slice(0, 2).forEach((p: any) => {
-            addRow({
-                id: `post-${p.id}`,
-                kind: 'post',
-                title: p.text_content || p.caption || 'Post',
-                subtitle: p.location_label || 'Post result',
-                onClick: () => nav('/feed'),
-            });
-        });
-        return rows.slice(0, 8);
-    }, [isSearching, filteredLocations, filteredUsers, sections.posts?.items, searchMode, nav]);
-
-    const scopePickerOverlayStyle: React.CSSProperties = {
-        top: visibleViewport.top,
-        left: 0,
-        right: 0,
-        height: visibleViewport.height,
-        bottom: 'auto',
-    };
+    const placeKind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+    const placeIcon = placeKind === 'venue' ? IoBusiness : placeKind === 'landmark' ? IoFlag : IoLocation;
+    const PlaceIcon = placeIcon;
 
     return (
-        <div className="min-h-full bg-black">
-            <div className="mx-auto w-full max-w-md px-4 pb-6 space-y-3">
-
-            {/* Header */}
-            <div className="flex items-center gap-2 pt-3 mb-1">
-                <button
-                    onClick={() => nav(-1)}
-                    className="p-2 rounded-full hover:bg-gray-900/80 transition-colors"
-                    aria-label="Back"
-                >
-                    <FiChevronLeft className="w-5 h-5 text-gray-200" />
-                </button>
-                <h1 className="text-base font-semibold text-white tracking-tight">Search</h1>
-            </div>
-
-            {/* Search Bar */}
-            <div className="relative">
-                <div
-                    className={
-                        'transition-colors ' +
-                        (isFocused ? 'p-[1.3px] rounded-[20px] bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500' : '')
-                    }
-                >
-                    <div className="relative rounded-[20px] bg-[#101010] border border-[#272727]">
-                        <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                            ref={searchInputRef}
-                            type="text"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            onFocus={() => { setShowSearchMode(true); setIsFocused(true); }}
-                            onBlur={() => setIsFocused(false)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    const q = searchQuery.trim();
-                                    if (!q) return;
-                                    if (isPlaceSearchMode) {
-                                        submitPlaceSearch(q);
-                                    }
-                                }
-                            }}
-                            placeholder=""
-                            className="w-full pl-10 pr-9 py-2.5 rounded-[20px] bg-transparent text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-0 focus:border-transparent text-sm leading-tight"
-                        />
-                        {searchQuery && (
-                            <button
-                                type="button"
-                                onClick={() => setSearchQuery('')}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-800 text-gray-400"
-                                aria-label="Clear search"
-                            >
-                                <FiX className="w-4 h-4" />
-                            </button>
-                        )}
-                    </div>
+        <div className="min-h-full bg-black text-white">
+            <div className="sticky top-0 z-20 bg-black px-4 pb-2.5 pt-2">
+                <div className="mb-2.5 flex items-center gap-2">
+                    <button type="button" onClick={() => nav(-1)} className="-ml-1 p-1" aria-label="Go back">
+                        <IoArrowBack size={22} color="#fff" />
+                    </button>
+                    <h1 className="text-[17px] font-bold tracking-[-0.2px] text-white">Search</h1>
                 </div>
-                {(!searchQuery) && (
-                    <div className="pointer-events-none absolute left-10 right-4 top-1/2 -translate-y-1/2 select-none z-10 flex">
-                        {(() => {
-                            const text = modePlaceholder[searchMode];
-                            const prefix = 'Search for ';
-                            const hasPrefix = text.startsWith(prefix);
-                            const rest = hasPrefix ? text.slice(prefix.length) : text;
-                            return (
-                                <>
-                                    {hasPrefix && (
-                                        <span className="text-sm font-medium text-gray-500 mr-1">
-                                            {prefix.trimEnd()}
-                                        </span>
-                                    )}
-                                    {rest && (
-                                        <span className="text-sm font-semibold text-white">
-                                            {rest}
-                                        </span>
-                                    )}
-                                </>
-                            );
-                        })()}
-                    </div>
-                )}
-                {isPlaceSearchMode && query.length >= 2 && (
-                    <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-2xl border border-[#272727] bg-[#101010] shadow-xl">
-                        <ul className="divide-y divide-white/5">
-                            {placeSuggestionsLoading && placeSuggestions.length === 0 && (
-                                <li className="px-4 py-3 text-sm text-gray-400">Searching…</li>
-                            )}
-                            {!placeSuggestionsLoading && placeSuggestions.length === 0 && (
-                                <li className="px-4 py-3 text-sm text-gray-400">No places found. Try another spelling.</li>
-                            )}
-                            {placeSuggestions.slice(0, 8).map((s, idx) => (
-                                <li key={`${s.type}-${s.name}-${idx}`}>
-                                    <button
-                                        type="button"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => onPlaceSuggestionSelected(s)}
-                                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/5"
-                                    >
-                                        <FiMapPin className="h-4 w-4 shrink-0 text-violet-400" />
-                                        <div className="flex min-w-0 flex-col">
-                                            <span className="truncate text-sm text-gray-100">{s.display_name || s.name.split(',')[0]}</span>
-                                            <span className="truncate text-[11px] text-gray-500">
-                                                {s.type === 'venue' ? 'Venue' : s.type === 'landmark' ? 'Landmark' : 'Location'}
-                                                {s.country ? ` · ${s.country}` : ` · ${s.name}`}
-                                            </span>
-                                        </div>
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-            </div>
-
-            {/* Mode chips */}
-            <div className="flex gap-2 overflow-x-auto pt-1 pb-1.5 scrollbar-hide">
-                {([
-                    { id: 'locations' as const, label: 'Location', Icon: FiMapPin },
-                    { id: 'venues' as const, label: 'Venue', Icon: TbBuilding },
-                    { id: 'landmarks' as const, label: 'Landmark', Icon: LuLandmark },
-                    { id: 'nearby' as const, label: 'Near me', Icon: FiMapPin },
-                    { id: 'users' as const, label: 'Users', Icon: FiUsers },
-                ]).map((chip) => {
-                    const active = searchMode === chip.id;
-                    const ChipIcon = chip.Icon;
-                    return (
-                        <button
-                            key={chip.id}
-                            onClick={() => {
-                                if (chip.id === 'nearby') {
-                                    const local = user?.local || 'Local';
-                                    try {
-                                        sessionStorage.setItem('pendingFilterType', 'location');
-                                        sessionStorage.setItem('pendingLocation', local);
-                                        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: local, filterType: 'location' } }));
-                                    } catch { }
-                                    nav(`/feed?location=${encodeURIComponent(local)}`);
-                                    return;
-                                }
-                                setSearchMode(chip.id);
-                                // For Locations, keep the preloaded grid visible until the user starts typing
-                                if (chip.id === 'locations' || chip.id === 'landmarks') {
-                                    setShowSearchMode(false);
-                                }
-                            }}
-                            className={`inline-flex min-h-[36px] items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium whitespace-nowrap border transition-colors ${
-                                active
-                                    ? 'bg-white text-gray-900 border-white'
-                                    : 'bg-[#0d0d0f] text-gray-300 border-[#2a2a2a] hover:border-gray-500 hover:bg-[#141418]'
-                            }`}
-                        >
-                            <ChipIcon className="w-3.5 h-3.5" />
-                            {chip.label}
+                <div className="flex items-center gap-2 rounded-[20px] border border-white/15 bg-white/[0.07] px-3.5 py-[11px]">
+                    <IoSearch size={18} className="shrink-0 text-white/60" />
+                    <input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSubmitSearch();
+                        }}
+                        placeholder={modePlaceholder[searchMode]}
+                        aria-label={modePlaceholder[searchMode]}
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        className="min-w-0 flex-1 bg-transparent text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none"
+                    />
+                    {searchQuery ? (
+                        <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear search">
+                            <IoCloseCircle size={18} color="#6B7280" />
                         </button>
-                    );
-                })}
-            </div>
-
-            {/* Outer card */}
-            <div className="mt-1 rounded-3xl bg-[#050505] border border-[#181818] shadow-[0_18px_60px_rgba(0,0,0,0.85)] overflow-hidden">
-
-            {/* Empty query states: saved + recent searches */}
-            {!query && (
-                <div className="px-3 pt-3 pb-2 border-b border-[#181818] space-y-3">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">Saved searches</span>
-                        {savedSearches.length > 0 && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setSavedSearches([]);
-                                    writeSearchList(SAVED_SEARCHES_KEY, []);
-                                }}
-                                className="text-[11px] text-gray-500 hover:text-gray-300"
-                            >
-                                Clear
-                            </button>
-                        )}
-                    </div>
-                    {savedSearches.length === 0 ? (
-                        <div className="text-xs text-gray-500">No saved searches yet.</div>
-                    ) : (
-                        <div className="flex flex-wrap gap-2">
-                            {savedSearches.map((s) => (
-                                <button
-                                    key={`saved-${s.mode}-${s.q}`}
-                                    type="button"
-                                    onClick={() => {
-                                        setSearchMode(s.mode);
-                                        setShowSearchMode(true);
-                                        setSearchQuery(s.q);
-                                    }}
-                                    className="rounded-full border border-white/15 bg-black/60 px-3.5 py-2 text-xs text-gray-100 hover:border-white/35 min-h-[36px]"
-                                >
-                                    {s.q}
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                    <div className="flex items-center justify-between pt-1">
-                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">Recent searches</span>
-                        {recentSearches.length > 0 && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setRecentSearches([]);
-                                    writeSearchList(RECENT_SEARCHES_KEY, []);
-                                }}
-                                className="text-[11px] text-gray-500 hover:text-gray-300"
-                            >
-                                Clear
-                            </button>
-                        )}
-                    </div>
-                    {recentSearches.length === 0 ? (
-                        <div className="text-xs text-gray-500">Start searching to build recents.</div>
-                    ) : (
-                        <div className="flex flex-wrap gap-2">
-                            {recentSearches.map((s) => (
-                                <button
-                                    key={`recent-${s.mode}-${s.q}-${s.ts}`}
-                                    type="button"
-                                    onClick={() => {
-                                        setSearchMode(s.mode);
-                                        setShowSearchMode(true);
-                                        setSearchQuery(s.q);
-                                    }}
-                                    className="rounded-full border border-[#2a2a2a] bg-[#101010] px-3.5 py-2 text-xs text-gray-300 hover:border-gray-500 min-h-[36px]"
-                                >
-                                    {s.q}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                    ) : null}
                 </div>
-            )}
 
-            {/* Popular landmarks when Landmark mode is active */}
-            {searchMode === 'landmarks' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#050505]">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
-                            Popular landmarks
-                        </span>
-                        <span className="text-[11px] text-gray-500">
-                            Tap to open landmark feed
-                        </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                        {MOCK_TOP_LANDMARKS.map((L) => {
-                            return (
+                {isPlaceSearchMode && query.length >= 2 ? (
+                    <div className="mt-2.5 max-h-[260px] overflow-y-auto rounded-2xl border border-[#272727] bg-[#101010]">
+                        {placeSuggestionsLoading && placeSuggestions.length === 0 ? (
+                            <p className="px-3.5 py-3 text-[13px] text-[#9CA3AF]">Searching…</p>
+                        ) : null}
+                        {!placeSuggestionsLoading && placeSuggestions.length === 0 ? (
+                            <p className="px-3.5 py-3 text-[13px] text-[#9CA3AF]">No places found. Try another spelling.</p>
+                        ) : null}
+                        {placeSuggestions.slice(0, 8).map((s, idx) => (
                             <button
-                                key={L.name}
+                                key={`${s.type}-${s.name}-${idx}`}
                                 type="button"
-                                onClick={() => goToLandmark(L.name)}
-                                className="group relative overflow-hidden rounded-2xl bg-black border border-white/25 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => onPlaceSuggestionPress(s)}
+                                className="flex w-full items-center gap-2.5 border-b border-white/[0.08] px-3.5 py-3 text-left last:border-b-0"
                             >
-                                <div className="relative flex flex-col gap-1">
-                                    <div className="inline-flex items-center gap-1.5">
-                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black border border-white/35">
-                                            {LandmarkIconForName(L.name)}
-                                        </span>
-                                        <span className="truncate font-medium">{L.name}</span>
-                                    </div>
-                                    <span className="text-[10px] text-gray-500 group-hover:text-gray-200 transition-colors truncate">
-                                        {L.type}{L.city ? ` • ${L.city}` : ''}{L.country ? ` • ${L.country}` : ''}
+                                <PlaceIcon size={18} color="#A78BFA" className="shrink-0" />
+                                <span className="min-w-0 flex-1">
+                                    <span className="block text-sm font-semibold text-[#F9FAFB]">{s.display_name || s.name}</span>
+                                    <span className="mt-0.5 block text-[11px] text-[#9CA3AF]">
+                                        {placeKind === 'venue' ? 'Venue' : placeKind === 'landmark' ? 'Landmark' : 'Location'}
+                                        {s.country ? ` · ${s.country}` : ''}
                                     </span>
-                                </div>
+                                </span>
                             </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-
-            {/* Popular venues when Venue mode is active */}
-            {searchMode === 'venues' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#050505]">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
-                            Popular venues
-                        </span>
-                        <span className="text-[11px] text-gray-500">
-                            Tap a venue to open venue feed
-                        </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                        {MOCK_TOP_VENUES.map((v) => {
-                            return (
-                            <button
-                                key={v.name}
-                                type="button"
-                                onClick={() => goToVenue(v.name)}
-                                className="group relative overflow-hidden rounded-2xl bg-black border border-white/25 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
-                            >
-                                <div className="relative flex flex-col gap-1">
-                                    <div className="inline-flex items-center gap-1.5">
-                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black border border-white/35">
-                                            <TbBuilding className="w-3 h-3 text-white" aria-hidden />
-                                        </span>
-                                        <span className="truncate font-medium">{v.name}</span>
-                                    </div>
-                                    <span className="text-[10px] text-gray-500 group-hover:text-gray-200 transition-colors truncate">
-                                        {v.type}{v.city ? ` • ${v.city}` : ''}{v.country ? ` • ${v.country}` : ''}
-                                    </span>
-                                </div>
-                            </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-
-            {/* Popular locations (always visible on Locations mode) */}
-            {searchMode === 'locations' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-gradient-to-r from-[#050510] via-[#050507] to-[#050510]">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
-                            Quick picks
-                        </span>
-                        <span className="text-[11px] text-gray-500">
-                            Tap to jump feed
-                        </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                        {[
-                            'Paris', 'London', 'Rome', 'Madrid', 'Berlin',
-                            'Amsterdam', 'Lisbon', 'Vienna', 'Prague',
-                            'Dublin', 'Cork', 'Galway', 'Belfast',
-                            'New York', 'Los Angeles', 'Chicago',
-                        ].map((city, index) => {
-                            const iconColors = [
-                                'text-sky-400',
-                                'text-pink-400',
-                                'text-emerald-400',
-                                'text-amber-400',
-                                'text-purple-400',
-                                'text-red-400',
-                            ];
-                            const iconClass = iconColors[index % iconColors.length];
-                            return (
-                                <button
-                                    key={city}
-                                    type="button"
-                                    onClick={() => goToLocation(city)}
-                                    className="rounded-2xl bg-black/60 border border-white/10 px-2.5 py-2 text-[11px] text-gray-100 shadow-sm hover:bg-black/80 transition-colors"
-                                >
-                                    <div className="flex flex-col gap-1 items-start">
-                                        <div className="inline-flex items-center gap-1.5">
-                                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/5 border border-white/15">
-                                                <FiMapPin className={`w-3 h-3 ${iconClass}`} />
-                                            </span>
-                                            <span className="truncate font-medium">{city}</span>
-                                        </div>
-                                        <span className="text-[10px] text-gray-500">
-                                            Live news near here
-                                        </span>
-                                    </div>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-
-            {/* Prefixed users (country-based). No nested Locations/Users/Posts tabs. */}
-            {searchMode === 'users' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3">
-                    {(() => {
-                        const countryKey = (searchQuery.trim() || user?.national || '').toLowerCase();
-                        const prefixedUsers = MOCK_USERS_BY_COUNTRY.filter(
-                            (u) => u.country.toLowerCase() === countryKey && u.handle !== user?.handle
-                        );
-
-                        const titleCountry = countryKey ? countryKey.charAt(0).toUpperCase() + countryKey.slice(1) : 'your country';
-
-                        if (!countryKey) {
-                            return (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    Set your national country in registration/profile to see suggestions.
-                                </div>
-                            );
-                        }
-
-                        if (!prefixedUsers.length) {
-                            return (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    No stories in {titleCountry} yet
-                                </div>
-                            );
-                        }
-
-                        return (
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
-                                        Suggested to follow
-                                    </span>
-                                    <span className="text-[11px] text-gray-500">{titleCountry}</span>
-                                </div>
-                                <div className="flex flex-col gap-2">
-                                    {prefixedUsers.map((u) => {
-                                        const isFollowing = !!localFollowState[u.handle];
-                                        const busy = followBusyHandle === u.handle;
-                                        return (
-                                            <div
-                                                key={u.handle}
-                                                className="flex items-center justify-between rounded-2xl bg-[#050509] border border-white/10 px-3 py-2.5 text-xs text-gray-100"
-                                            >
-                                                <button
-                                                    type="button"
-                                                    onClick={() => goToUser(u.handle)}
-                                                    className="flex items-center gap-2 text-left"
-                                                >
-                                                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-800 border border-white/10">
-                                                        <FiUsers className="w-4 h-4 text-gray-200" />
-                                                    </span>
-                                                    <span className="flex flex-col">
-                                                        <span className="font-medium">{u.display_name || u.handle}</span>
-                                                        <span className="text-[11px] text-gray-400">@{u.handle}</span>
-                                                    </span>
-                                                </button>
-
-                                                <button
-                                                    type="button"
-                                                    disabled={busy}
-                                                    onClick={async () => {
-                                                        if (busy) return;
-                                                        setFollowBusyHandle(u.handle);
-                                                        try {
-                                                            await toggleFollow(u.handle);
-                                                            setLocalFollowState((prev) => ({
-                                                                ...prev,
-                                                                [u.handle]: !prev[u.handle],
-                                                            }));
-                                                        } finally {
-                                                            setFollowBusyHandle(null);
-                                                        }
-                                                    }}
-                                                    className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-colors ${
-                                                        isFollowing
-                                                            ? 'bg-white text-gray-900 border-white'
-                                                            : 'bg-transparent text-white border-white/60 hover:bg-white/10'
-                                                    } ${busy ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                                >
-                                                    {isFollowing ? 'Following' : 'Follow'}
-                                                </button>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        );
-                    })()}
-                </div>
-            )}
-
-            {/* Preloaded user grid (hidden when searching). Do NOT show on Location/Venue/Users modes for this page. */}
-            {searchMode === 'posts' && !showSearchMode && (!searchQuery.trim()) && preloadPosts && (
-                <div className="px-1">
-                    <div className="grid grid-cols-3 gap-1">
-                        {preloadPosts.map((post) => (
-                            <div key={post.id} className="aspect-square relative group bg-gray-900">
-                                {post.mediaUrl ? (
-                                    post.mediaType === 'video' ? (
-                                        <video
-                                            src={post.mediaUrl}
-                                            className="w-full h-full object-cover"
-                                            muted
-                                            playsInline
-                                            preload="metadata"
-                                        />
-                                    ) : (
-                                        <img src={post.mediaUrl} alt="" className="w-full h-full object-cover" />
-                                    )
-                                ) : (
-                                    <div className="w-full h-full relative flex items-center justify-center p-3" style={{ background: '#0f172a' }}>
-                                        <p className="text-white text-xs font-semibold text-center line-clamp-6">
-                                            {post.text || 'No preview'}
-                                        </p>
-                                    </div>
-                                )}
-                                {post.locationLabel && (
-                                    <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/70 rounded flex items-center gap-1">
-                                        <FiMapPin className="w-3 h-3 text-white" />
-                                        <span className="text-[10px] text-white font-medium">{post.locationLabel}</span>
-                                    </div>
-                                )}
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-opacity" />
-                            </div>
                         ))}
                     </div>
-                </div>
-            )}
+                ) : null}
 
-            {/* Manual search results – top blended + mode-specific sections */}
-            {isSearching && (
-                <div className="space-y-4 px-3 pt-3 pb-2">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">Top results</span>
-                        <button
-                            type="button"
-                            onClick={() => toggleSaveSearch(query, searchMode)}
-                            className="text-[11px] text-gray-400 hover:text-white"
-                        >
-                            {isCurrentQuerySaved ? 'Saved' : 'Save search'}
-                        </button>
-                    </div>
-
-                    <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                        {([
-                            { id: 'all' as const, label: 'All' },
-                            { id: 'local' as const, label: user?.local ? `In ${user.local}` : 'In local' },
-                            { id: 'regional' as const, label: user?.regional ? `In ${user.regional}` : 'In regional' },
-                        ]).map((chip) => (
+                <div className="mt-2.5 flex gap-2 overflow-x-auto py-0.5 [scrollbar-width:none]">
+                    {MODE_CHIPS.map((chip) => {
+                        const active = searchMode === chip.id;
+                        return (
                             <button
                                 key={chip.id}
                                 type="button"
-                                onClick={() => setRefinement(chip.id)}
-                                className={`px-3.5 py-2 rounded-full text-[11px] font-medium border whitespace-nowrap min-h-[36px] ${
-                                    refinement === chip.id
-                                        ? 'bg-white text-gray-900 border-white'
-                                        : 'bg-[#101010] text-gray-300 border-[#2a2a2a] hover:border-gray-500'
+                                onClick={() => onModeChipPress(chip.id)}
+                                className={`flex shrink-0 items-center gap-1.5 rounded-2xl border px-3.5 py-[9px] text-xs font-semibold ${
+                                    active
+                                        ? 'border-white bg-white/[0.22] text-white'
+                                        : 'border-white/15 bg-white/[0.06] text-[#E5E7EB]'
                                 }`}
                             >
+                                {active ? chip.activeIcon : chip.icon}
                                 {chip.label}
                             </button>
-                        ))}
-                    </div>
+                        );
+                    })}
+                </div>
 
-                    {topResults.length > 0 ? (
-                        <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                            {topResults.map((item) => (
+                {hasQuery && (searchMode === 'users' || searchMode === 'posts') ? (
+                    <div className="mt-2.5 flex items-center gap-2">
+                        {([
+                            { id: 'all', label: 'All' },
+                            { id: 'local', label: 'Local' },
+                            { id: 'regional', label: 'Regional' },
+                        ] as const).map((r) => {
+                            const active = refinement === r.id;
+                            return (
                                 <button
-                                    key={item.id}
-                                    onClick={item.onClick}
-                                    className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
+                                    key={r.id}
+                                    type="button"
+                                    onClick={() => setRefinement(r.id)}
+                                    className={`rounded-full border px-2.5 py-[5px] text-[11px] font-bold ${
+                                        active
+                                            ? 'border-[#F8D26A] bg-[#3F2B07] text-[#F8D26A]'
+                                            : 'border-[#2a2a2a] bg-[#0d0d0f] text-[#D1D5DB]'
+                                    }`}
                                 >
-                                    <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
-                                        {item.kind === 'user' ? <FiUsers className="text-white/90" /> :
-                                            item.kind === 'post' ? <FiPlayCircle className="text-white/90" /> :
-                                                item.kind === 'venue' ? <TbBuilding className="text-white/90" /> :
-                                                    item.kind === 'landmark' ? <LuLandmark className="text-white/90" /> :
-                                                        <FiMapPin className="text-white/90" />}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="font-medium text-gray-100 truncate">{item.title}</div>
-                                        <div className="text-xs text-gray-500 truncate">{item.subtitle}</div>
-                                    </div>
+                                    {r.label}
+                                </button>
+                            );
+                        })}
+                        <button
+                            type="button"
+                            onClick={() => toggleSaveSearch(searchQuery, searchMode)}
+                            className="ml-auto p-1"
+                            aria-label={isCurrentQuerySaved ? 'Remove saved search' : 'Save search'}
+                        >
+                            {isCurrentQuerySaved ? <IoBookmark size={16} color="#F8D26A" /> : <IoBookmarkOutline size={16} color="#F8D26A" />}
+                        </button>
+                    </div>
+                ) : null}
+            </div>
+
+            {loading ? (
+                <div className="flex flex-1 items-center justify-center py-16">
+                    <span className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" aria-label="Loading" />
+                </div>
+            ) : hasQuery ? (
+                <div>
+                    {searchMode === 'users' || searchMode === 'nearby' ? (
+                        <div>
+                            {filteredUsers.map((u: any) => (
+                                <button
+                                    key={u.handle}
+                                    type="button"
+                                    onClick={() => goToUser(u.handle)}
+                                    className="flex w-full items-center gap-3 border-b border-[#1F2937] px-4 py-3 text-left"
+                                >
+                                    <Avatar
+                                        src={avatarSrc(u.avatar_url || u.avatarUrl)}
+                                        name={(u.handle || 'User').split('@')[0]}
+                                        size={40}
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block text-[15px] font-semibold text-white">{u.handle}</span>
+                                        <span className="mt-0.5 block text-[13px] text-[#9CA3AF]">{u.display_name || 'User'}</span>
+                                    </span>
                                 </button>
                             ))}
+                            {sections.users?.nextCursor != null ? (
+                                <button
+                                    type="button"
+                                    onClick={() => void loadMoreSection('users')}
+                                    className="m-3 w-[calc(100%-24px)] rounded-[10px] border border-[#2a2a2a] bg-[#0d0d0f] py-2.5 text-[13px] font-bold text-[#E5E7EB]"
+                                >
+                                    {sectionLoadingMore.users ? 'Loading…' : 'Load more users'}
+                                </button>
+                            ) : null}
                         </div>
-                    ) : (
-                        <div className="rounded-xl border border-dashed border-gray-700 px-3 py-4 text-sm text-gray-400">
-                            No top results for "{query}".
-                            <div className="mt-2 flex flex-wrap gap-2">
-                                <button type="button" onClick={() => setSearchMode('locations')} className="px-2.5 py-1 rounded-full border border-gray-600 text-xs hover:border-gray-400">Try Location</button>
-                                <button type="button" onClick={() => setSearchMode('venues')} className="px-2.5 py-1 rounded-full border border-gray-600 text-xs hover:border-gray-400">Try Venue</button>
-                                <button type="button" onClick={() => setSearchMode('users')} className="px-2.5 py-1 rounded-full border border-gray-600 text-xs hover:border-gray-400">Try Users</button>
+                    ) : null}
+
+                    {searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks' ? (
+                        <div>
+                            {filteredLocations.map((loc: any) => {
+                                const kind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+                                const kindLabel = kind === 'venue' ? 'Venue' : kind === 'landmark' ? 'Landmark' : 'Location';
+                                const RowIcon = kind === 'venue' ? IoBusiness : kind === 'landmark' ? IoFlag : IoLocation;
+                                return (
+                                    <button
+                                        key={`${loc.name}-${loc.country || ''}`}
+                                        type="button"
+                                        onClick={() => goToLocation(loc.name, kind)}
+                                        className="flex w-full items-center gap-3 border-b border-[#1F2937] px-4 py-3 text-left"
+                                    >
+                                        <RowIcon size={20} color="#A78BFA" className="shrink-0" />
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block text-[15px] font-semibold text-white">{loc.name}</span>
+                                            <span className="mt-0.5 block text-[13px] text-[#9CA3AF]">
+                                                {kindLabel}
+                                                {loc.type ? ` • ${loc.type}` : ''}
+                                                {loc.country ? ` • ${loc.country}` : ''}
+                                            </span>
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                            {sections.locations?.nextCursor != null ? (
+                                <button
+                                    type="button"
+                                    onClick={() => void loadMoreSection('locations')}
+                                    className="m-3 w-[calc(100%-24px)] rounded-[10px] border border-[#2a2a2a] bg-[#0d0d0f] py-2.5 text-[13px] font-bold text-[#E5E7EB]"
+                                >
+                                    {sectionLoadingMore.locations ? 'Loading…' : 'Load more places'}
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    {searchMode === 'posts' ? (
+                        <div className="flex flex-wrap p-px">
+                            {filteredPosts.map((post) => {
+                                const thumb = postThumb(post);
+                                return (
+                                    <button
+                                        key={post.id}
+                                        type="button"
+                                        onClick={() => goToPost(String(post.id))}
+                                        className="aspect-square w-1/3 p-px"
+                                    >
+                                        {thumb ? (
+                                            <img src={rewriteMediaUrlForClient(thumb)} alt="" className="h-full w-full object-cover" />
+                                        ) : (
+                                            <span className="flex h-full w-full items-center bg-[#111] p-2 text-left text-[11px] text-[#9CA3AF]">
+                                                {(post.text || post.caption || 'Post').slice(0, 80)}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                            {sections.posts?.nextCursor != null ? (
+                                <button
+                                    type="button"
+                                    onClick={() => void loadMoreSection('posts')}
+                                    className="mt-2 w-full rounded-[10px] border border-[#2a2a2a] bg-[#0d0d0f] py-2.5 text-[13px] font-bold text-[#E5E7EB]"
+                                >
+                                    {sectionLoadingMore.posts ? 'Loading…' : 'Load more posts'}
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    {filteredUsers.length === 0 && filteredLocations.length === 0 && filteredPosts.length === 0 ? (
+                        <p className="mt-10 px-4 text-center text-base text-[#6B7280]">No results found</p>
+                    ) : null}
+                </div>
+            ) : (
+                <div className="flex flex-col gap-3.5 px-4 pb-7">
+                    <div className="rounded-3xl border border-[#181818] bg-[#050505] px-3 pb-3.5 pt-3">
+                        <div className="mb-2 flex items-center justify-between">
+                            <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[#9CA3AF]">Saved searches</p>
+                            {savedSearches.length > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSavedSearches([]);
+                                        writeSearchList(SAVED_SEARCHES_KEY, []);
+                                    }}
+                                    className="text-[11px] font-semibold text-[#6B7280]"
+                                >
+                                    Clear
+                                </button>
+                            ) : null}
+                        </div>
+                        {savedSearches.length === 0 ? (
+                            <p className="text-xs text-[#6B7280]">No saved searches yet.</p>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                {savedSearches.map((item) => (
+                                    <button
+                                        key={`saved-${item.mode}-${item.q}-${item.ts}`}
+                                        type="button"
+                                        onClick={() => {
+                                            setSearchMode(item.mode);
+                                            setSearchQuery(item.q);
+                                        }}
+                                        className="max-w-full rounded-full border border-white/15 bg-black/60 px-3.5 py-2 text-xs font-medium text-[#F3F4F6]"
+                                    >
+                                        {item.q}
+                                    </button>
+                                ))}
                             </div>
+                        )}
+                        <div className="my-3.5 h-px bg-[#181818]" />
+                        <div className="mb-2 flex items-center justify-between">
+                            <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[#9CA3AF]">Recent searches</p>
+                            {recentSearches.length > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setRecentSearches([]);
+                                        writeSearchList(RECENT_SEARCHES_KEY, []);
+                                    }}
+                                    className="text-[11px] font-semibold text-[#6B7280]"
+                                >
+                                    Clear
+                                </button>
+                            ) : null}
                         </div>
-                    )}
+                        {recentSearches.length === 0 ? (
+                            <p className="text-xs text-[#6B7280]">Start searching to build recents.</p>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                {recentSearches.map((item) => (
+                                    <button
+                                        key={`recent-${item.mode}-${item.q}-${item.ts}`}
+                                        type="button"
+                                        onClick={() => {
+                                            setSearchMode(item.mode);
+                                            setSearchQuery(item.q);
+                                        }}
+                                        className="max-w-full rounded-full border border-[#2a2a2a] bg-[#101010] px-3.5 py-2 text-xs font-medium text-[#F3F4F6]"
+                                    >
+                                        {item.q}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
-                    {/* Locations results when in Location tab */}
-                    {searchMode === 'locations' && (
-                        <div>
-                            {!(filteredLocations?.length) ? (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">No matching locations</div>
+                    {searchMode === 'locations' ? (
+                        <>
+                            <div className="flex items-center justify-between px-0.5">
+                                <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[#9CA3AF]">Quick picks</p>
+                                <p className="text-[11px] text-[#6B7280]">Tap to jump feed.</p>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                                {QUICK_PICK_CITIES.map((name) => (
+                                    <button
+                                        key={name}
+                                        type="button"
+                                        onClick={() => goToLocation(name, 'location')}
+                                        className="rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-2.5 text-left"
+                                    >
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.05]">
+                                                <IoLocation size={12} color="#10B981" />
+                                            </span>
+                                            <span className="truncate text-xs font-semibold text-white">{name}</span>
+                                        </span>
+                                        <span className="mt-1.5 block text-[10px] text-[#6B7280]">Live news near here</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </>
+                    ) : null}
+
+                    {searchMode === 'venues' ? (
+                        <>
+                            <div className="flex items-center justify-between px-0.5">
+                                <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[#9CA3AF]">Popular venues</p>
+                                <p className="text-[11px] text-[#6B7280]">Tap to open venue feed</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                {POPULAR_VENUES.map((name) => (
+                                    <button
+                                        key={name}
+                                        type="button"
+                                        onClick={() => goToLocation(name, 'venue')}
+                                        className="rounded-2xl border border-white/25 bg-black px-3 py-2.5 text-left"
+                                    >
+                                        <span className="flex items-center gap-1.5">
+                                            <IoBusinessOutline size={14} className="shrink-0 text-white" />
+                                            <span className="truncate text-xs font-semibold text-white">{name}</span>
+                                        </span>
+                                        <span className="mt-1.5 block text-[10px] text-[#6B7280]">Popular venue</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </>
+                    ) : null}
+
+                    {searchMode === 'landmarks' ? (
+                        <>
+                            <div className="flex items-center justify-between px-0.5">
+                                <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[#9CA3AF]">Popular landmarks</p>
+                                <p className="text-[11px] text-[#6B7280]">Tap to open landmark feed</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                {POPULAR_LANDMARKS.map((name) => (
+                                    <button
+                                        key={name}
+                                        type="button"
+                                        onClick={() => goToLocation(name, 'landmark')}
+                                        className="rounded-2xl border border-white/25 bg-black px-3 py-2.5 text-left"
+                                    >
+                                        <span className="flex items-center gap-1.5">
+                                            <IoFlagOutline size={14} className="shrink-0 text-white" />
+                                            <span className="truncate text-xs font-semibold text-white">{name}</span>
+                                        </span>
+                                        <span className="mt-1.5 block text-[10px] text-[#6B7280]">Popular landmark</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </>
+                    ) : null}
+
+                    {searchMode === 'users' ? (
+                        <div className="flex flex-col gap-2.5 rounded-3xl border border-[#181818] bg-[#050505] p-3">
+                            <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[#9CA3AF]">Suggested users</p>
+                            {suggestedUsers.length === 0 ? (
+                                <p className="text-xs text-[#6B7280]">No suggestions yet.</p>
                             ) : (
-                                <div className="space-y-2">
-                                    <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                                        {filteredLocations.map((loc: any) => (
-                                            <button
-                                                key={`${loc.name}-${loc.country || ''}`}
-                                                onClick={() => goToLocation(loc.name)}
-                                                className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
-                                            >
-                                                <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
-                                                    <FiMapPin className="text-white/90" />
-                                                </div>
-                                                <div>
-                                                    <div className="font-medium text-gray-100">{loc.name}</div>
-                                                    <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                    {sectionHasMore.locations && (
+                                suggestedUsers.map((u) => (
+                                    <div key={u.handle} className="flex items-center justify-between gap-2">
+                                        <button type="button" onClick={() => goToUser(u.handle)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                                            <Avatar src={avatarSrc(u.avatar_url)} name={(u.handle || 'User').split('@')[0]} size={36} />
+                                            <span className="min-w-0">
+                                                <span className="block truncate text-[15px] font-semibold text-white">{u.handle}</span>
+                                                <span className="mt-0.5 block truncate text-[13px] text-[#9CA3AF]">{u.display_name || 'User'}</span>
+                                            </span>
+                                        </button>
                                         <button
                                             type="button"
-                                            onClick={() => loadMoreSection('locations')}
-                                            disabled={sectionLoadingMore.locations}
-                                            className="w-full min-h-[40px] rounded-lg border border-white/20 bg-white/[0.04] text-sm text-gray-200 disabled:opacity-60"
+                                            disabled={followBusyHandle === u.handle}
+                                            onClick={() => void onToggleFollowSuggested(u.handle)}
+                                            className={`min-w-[86px] rounded-full px-3 py-[7px] text-xs font-bold text-white ${
+                                                localFollowState[u.handle] || localRequestState[u.handle] ? 'bg-[#374151]' : 'bg-[#2563EB]'
+                                            }`}
                                         >
-                                            {sectionLoadingMore.locations ? 'Loading...' : 'Load more locations'}
+                                            {followBusyHandle === u.handle
+                                                ? '…'
+                                                : localFollowState[u.handle]
+                                                  ? 'Following'
+                                                  : localRequestState[u.handle]
+                                                    ? 'Requested'
+                                                    : 'Follow'}
                                         </button>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Venue tab: treat manual search as locations-only */}
-                    {searchMode === 'venues' && (
-                        <div>
-                            {!(filteredLocations?.length) ? (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">No matching venues</div>
-                            ) : (
-                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                                    {filteredLocations.map((loc: any) => (
-                                        <button
-                                            key={`${loc.name}-${loc.country || ''}`}
-                                            onClick={() => goToVenue(loc.name)}
-                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
-                                        >
-                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
-                                                <TbBuilding className="w-4 h-4 text-white/90" aria-hidden />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-gray-100">{loc.name}</div>
-                                                <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Landmark tab: location API hints; open landmark feed with per-row icon */}
-                    {searchMode === 'landmarks' && (
-                        <div>
-                            {!(filteredLocations?.length) ? (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">No matching landmarks</div>
-                            ) : (
-                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                                    {filteredLocations.map((loc: any) => (
-                                        <button
-                                            key={`landmark-${loc.name}-${loc.country || ''}`}
-                                            onClick={() => goToLandmark(loc.name)}
-                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
-                                        >
-                                            <div className="h-8 w-8 rounded-full bg-amber-500/15 border border-amber-400/30 flex items-center justify-center">
-                                                {LandmarkIconForName(loc.name, 'w-4 h-4')}
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-gray-100">{loc.name}</div>
-                                                <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Users results when in Users tab */}
-                    {searchMode === 'users' && (
-                        <div>
-                            {!(filteredUsers?.length) ? (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">No users found</div>
-                            ) : (
-                                <div className="space-y-2">
-                                    <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                                        {filteredUsers.map((u: any) => (
-                                            <button
-                                                key={u.handle}
-                                                onClick={() => goToUser(u.handle)}
-                                                className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
-                                            >
-                                                <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
-                                                    <FiUsers className="text-white/90" />
-                                                </div>
-                                                <div>
-                                                    <div className="font-medium text-gray-100">{u.handle}</div>
-                                                    {u.display_name && <div className="text-xs text-gray-500">{u.display_name}</div>}
-                                                </div>
-                                            </button>
-                                        ))}
                                     </div>
-                                    {sectionHasMore.users && (
-                                        <button
-                                            type="button"
-                                            onClick={() => loadMoreSection('users')}
-                                            disabled={sectionLoadingMore.users}
-                                            className="w-full min-h-[40px] rounded-lg border border-white/20 bg-white/[0.04] text-sm text-gray-200 disabled:opacity-60"
-                                        >
-                                            {sectionLoadingMore.users ? 'Loading...' : 'Load more users'}
-                                        </button>
-                                    )}
-                                </div>
+                                ))
                             )}
                         </div>
-                    )}
-
-                    {/* Nearby tab reuses users-search but with local empty-state text */}
-                    {searchMode === 'nearby' && (
-                        <div>
-                            {!(filteredUsers?.length) ? (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    {`No stories in ${user?.local || 'your area'} yet`}
-                                </div>
-                            ) : (
-                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                                    {filteredUsers.map((u: any) => (
-                                        <button
-                                            key={u.handle}
-                                            onClick={() => goToUser(u.handle)}
-                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
-                                        >
-                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
-                                                <FiUsers className="text-white/90" />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-gray-100">{u.handle}</div>
-                                                {u.display_name && <div className="text-xs text-gray-500">{u.display_name}</div>}
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Posts results when in Posts tab */}
-                    {searchMode === 'posts' && (
-                        <div>
-                            {!(sections.posts?.items?.length) ? (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">No posts found</div>
-                            ) : (
-                                <div className="space-y-2">
-                                    <div className="grid grid-cols-3 gap-1">
-                                        {sections.posts!.items!.map((p: any) => (
-                                            <div key={p.id} className="aspect-square relative bg-gray-900">
-                                                {p.media_url ? (
-                                                    p.media_type === 'video' ? (
-                                                        <>
-                                                            <video src={p.media_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                                                            <div className="absolute inset-0 flex items-center justify-center">
-                                                                <div className="w-10 h-10 bg-black/60 rounded-full flex items-center justify-center">
-                                                                    <FiPlayCircle className="w-5 h-5 text-white" />
-                                                                </div>
-                                                            </div>
-                                                        </>
-                                                    ) : (
-                                                        <img src={p.media_url} alt="" className="w-full h-full object-cover" />
-                                                    )
-                                                ) : (
-                                                    <div className="w-full h-full relative flex items-center justify-center p-3" style={{ background: '#0f172a' }}>
-                                                        <p className="text-white text-xs font-semibold text-center line-clamp-6">{p.text_content || 'No preview'}</p>
-                                                    </div>
-                                                )}
-                                                {p.location_label && (
-                                                    <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/70 rounded flex items-center gap-1">
-                                                        <FiMapPin className="w-3 h-3 text-white" />
-                                                        <span className="text-[10px] text-white font-medium">{p.location_label}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                    {sectionHasMore.posts && (
-                                        <button
-                                            type="button"
-                                            onClick={() => loadMoreSection('posts')}
-                                            disabled={sectionLoadingMore.posts}
-                                            className="w-full min-h-[40px] rounded-lg border border-white/20 bg-white/[0.04] text-sm text-gray-200 disabled:opacity-60"
-                                        >
-                                            {sectionLoadingMore.posts ? 'Loading...' : 'Load more posts'}
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
+                    ) : null}
                 </div>
             )}
 
-            {/* Popular Tags removed per request */}
-            </div>
-        </div>
-
-            {scopePicker && (
-                <motion.div
-                    layout
-                    className="fixed z-[60] flex items-center justify-center overflow-y-auto bg-black/70 p-4"
-                    style={scopePickerOverlayStyle}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="search-scope-picker-title"
-                    onClick={() => setScopePicker(null)}
-                >
+            {scopePicker ? (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="search-scope-title">
+                    <button type="button" aria-label="Close" className="absolute inset-0 bg-black/72" onClick={() => setScopePicker(null)} />
                     <div
-                        className="relative my-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#060d16] p-5 shadow-2xl"
-                        onClick={(e) => e.stopPropagation()}
+                        className="relative w-full max-w-[400px] overflow-hidden rounded-2xl border border-white/10"
+                        style={{
+                            backgroundColor: '#03091B',
+                            backgroundImage: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)',
+                        }}
                     >
-                        <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                        <div className="relative z-10">
-                        <h2 id="search-scope-picker-title" className="text-lg font-semibold text-white">Which feed?</h2>
-                        <p className="mt-1 text-sm text-white/60">{scopePicker.name}</p>
-                        <p className="mt-2 text-xs text-white/45">
-                            Country is the whole nation. City is the metro area. Local area is the nearest neighbourhood when available.
-                        </p>
-                        <div className="mt-4 flex flex-col gap-2">
-                            {parsedPlaceFeedFromSuggestion(scopePicker).options.map((opt) => (
-                                <button
-                                    key={opt.scope}
-                                    type="button"
-                                    onClick={() => {
-                                        applyFeedSelection(resolvePlaceFeedSelection(scopePicker, opt.scope));
-                                        setScopePicker(null);
-                                    }}
-                                    className="rounded-xl border border-white/10 bg-[rgba(15,36,48,0.55)] px-4 py-3 text-left text-sm font-medium text-gray-100 hover:bg-white/10"
-                                >
-                                    {opt.label}
-                                </button>
-                            ))}
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => setScopePicker(null)}
-                            className="mt-3 w-full rounded-xl py-2.5 text-sm text-[#3d9b8f] hover:text-[#9fd4cb]"
-                        >
-                            Cancel
-                        </button>
+                        <div className="p-5">
+                            <h2 id="search-scope-title" className="text-lg font-semibold text-white">Which feed?</h2>
+                            <p className="mt-1 text-sm text-[#D1E4FF]">{scopePicker.name}</p>
+                            <p className="mt-2 text-xs leading-[17px] text-[#94A3B8]">
+                                Country is the whole nation. City is the metro area. Local area is the nearest neighbourhood when available.
+                            </p>
+                            <div className="mt-4 flex flex-col gap-2">
+                                {parsedPlaceFeedFromSuggestion(scopePicker).options.map((opt) => (
+                                    <button
+                                        key={opt.scope}
+                                        type="button"
+                                        onClick={() => {
+                                            openFeedSelection(resolvePlaceFeedSelection(scopePicker, opt.scope), 'location');
+                                            setScopePicker(null);
+                                        }}
+                                        className="rounded-xl border border-white/10 bg-[rgba(15,36,48,0.55)] px-4 py-3 text-left text-sm font-semibold text-white"
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <button type="button" onClick={() => setScopePicker(null)} className="mt-3 w-full py-2.5 text-sm font-semibold text-[#00F2FF]">
+                                Cancel
+                            </button>
                         </div>
                     </div>
-                </motion.div>
-            )}
-    </div>
+                </div>
+            ) : null}
+
+            <GazetteerAlertSheet
+                visible={alertSheet != null}
+                title={alertSheet?.title ?? ''}
+                message={alertSheet?.message}
+                showIcon
+                icon={alertSheet?.title === 'Action failed' || alertSheet?.title === 'Sign in required' ? 'alert' : 'success'}
+                confirmButtonText="OK"
+                onConfirm={() => setAlertSheet(null)}
+                onDismiss={() => setAlertSheet(null)}
+            />
+        </div>
     );
 }

@@ -33,7 +33,10 @@ import GalleryPreviewPage from '../pages/GalleryPreviewPage';
 import StoryLinkCreatePage from '../pages/StoryLinkCreatePage';
 import TermsPage from '../pages/TermsPage';
 import ContentPreferencesPage from '../pages/ContentPreferencesPage';
+import VideoPlaybackSettingsPage from '../pages/VideoPlaybackSettingsPage';
+import ChangePhoneNumberPage from '../pages/ChangePhoneNumberPage';
 import PublicPostPage from '../pages/PublicPostPage';
+import PostDetailPage from '../pages/PostDetailPage';
 import PortraitEnforcer from './PortraitEnforcer';
 
 
@@ -67,7 +70,6 @@ export default function Root() {
                             <Route path="/splash" element={<SplashPage />} />
                             <Route path="/landing" element={<LandingPage />} />
                             <Route path="/p/:token" element={<PublicPostPage />} />
-                            <Route path="/post/:id" element={<PublicPostPage />} />
                             {/* Cold start: go to splash without mounting App chrome first */}
                             <Route path="/" element={<Navigate to="/splash" replace />} />
                             <Route element={<AppGate />}>
@@ -93,7 +95,10 @@ export default function Root() {
                                 <Route path="discover" element={<DiscoverPage />} />
                                 <Route path="search" element={<SearchPage />} />
                                 <Route path="profile" element={<ProfilePage />} />
+                                <Route path="post/:id" element={<PostDetailPage />} />
                                 <Route path="preferences/locations" element={<ContentPreferencesPage />} />
+                                <Route path="settings/playback" element={<VideoPlaybackSettingsPage />} />
+                                <Route path="settings/phone" element={<ChangePhoneNumberPage />} />
                                 <Route path="profile/cover" element={<ProfileCoverPage />} />
                                 <Route path="user/:handle" element={<ViewProfilePage />} />
                                 <Route path="collection/:collectionId" element={<CollectionFeedPage />} />

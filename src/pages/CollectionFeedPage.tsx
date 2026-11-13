@@ -1,301 +1,162 @@
 import React from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/Auth';
-import { getCollectionPosts } from '../api/collections';
-import { decorateForUser, toggleLike, toggleFollowForPost, incrementViews, incrementShares, reclipPost } from '../api/posts';
-import { useOnline } from '../hooks/useOnline';
-import { enqueue } from '../utils/mutationQueue';
-import type { Post } from '../types';
-import { FeedCard } from '../App';
-import { FiArrowLeft, FiX } from 'react-icons/fi';
-import CommentsModal from '../components/CommentsModal';
-import ShareModal from '../components/ShareModal';
-import ScenesModal from '../components/ScenesModal';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { FiArrowLeft, FiBookmark, FiImage, FiPlay, FiX } from 'react-icons/fi';
+import { getCollection, getCollectionPosts } from '../api/collections';
+import { resolvePostThumbnail } from '../api/collections';
+import { upsertLocalPost } from '../api/posts';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+import { siblingJpegFromVideoUrl } from '../utils/postMedia';
+import { formatViewCount } from '../utils/feedPostNewsTicker';
+import { getPostBodyText, getTextOnlyBackgroundColor, getTextOnlyTextColor, isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
+import type { Collection, Post } from '../types';
 
-export default function CollectionFeedPage() {
-    const { collectionId } = useParams<{ collectionId: string }>();
-    const nav = useNavigate();
-    const location = useLocation();
-    const { user } = useAuth();
-    const online = useOnline();
-    const userId = user?.id || '';
-    const [posts, setPosts] = React.useState<Post[]>([]);
-    const [isLoading, setIsLoading] = React.useState(true);
-    const [collectionName, setCollectionName] = React.useState<string>('Collection');
-    const [commentsModalOpen, setCommentsModalOpen] = React.useState(false);
-    const [selectedPostId, setSelectedPostId] = React.useState<string | null>(null);
-    const [shareModalOpen, setShareModalOpen] = React.useState(false);
-    const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
-    const [scenesOpen, setScenesOpen] = React.useState(false);
-    const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
-
-    function updateOne(id: string, updater: (post: Post) => Post) {
-        setPosts(prev => prev.map(p => p.id === id ? updater(p) : p));
-    }
-
-    function handleOpenComments(postId: string) {
-        setSelectedPostId(postId);
-        setCommentsModalOpen(true);
-    }
-
-    // Get collection name from location state
-    React.useEffect(() => {
-        const state = location.state as any;
-        if (state?.collectionName) {
-            setCollectionName(state.collectionName);
-        }
-    }, [location.state]);
-
-    // Load collection posts
-    React.useEffect(() => {
-        if (collectionId && user?.id) {
-            loadCollectionPosts();
-        }
-    }, [collectionId, user?.id]);
-
-    async function loadCollectionPosts() {
-        if (!collectionId || !user?.id) return;
-
-        setIsLoading(true);
-        try {
-            const collectionPosts = await getCollectionPosts(collectionId);
-            const decorated = collectionPosts.map(p => decorateForUser(user.id, p));
-            setPosts(decorated);
-        } catch (error) {
-            console.error('Error loading collection posts:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    }
-
-    if (!user) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-brand-50 to-brand-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
-                <div className="text-center">
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Not Signed In</h2>
-                    <p className="text-gray-600 dark:text-gray-400 mb-4">Please sign in to view collections</p>
-                    <button
-                        onClick={() => nav('/login')}
-                        className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
-                    >
-                        Sign In
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-brand-50 to-brand-100 dark:from-gray-900 dark:to-gray-800 pb-20">
-            {/* Header */}
-            <div className="sticky top-0 z-[80] bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm">
-                <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-4">
-                    <button
-                        onClick={() => nav('/profile')}
-                        className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        aria-label="Back"
-                    >
-                        <FiArrowLeft className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-                    </button>
-                    <div className="flex-1">
-                        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{collectionName}</h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {posts.length} {posts.length === 1 ? 'post' : 'posts'}
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => nav('/profile')}
-                        className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        aria-label="Close collections"
-                    >
-                        <FiX className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-                    </button>
-                </div>
-            </div>
-
-            {/* Posts Feed */}
-            <div className="max-w-2xl mx-auto pt-6">
-                {isLoading ? (
-                    <div className="text-center py-12">
-                        <div className="inline-block w-8 h-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" />
-                        <p className="mt-4 text-gray-600 dark:text-gray-400">Loading posts...</p>
-                    </div>
-                ) : posts.length === 0 ? (
-                    <div className="text-center py-12">
-                        <p className="text-gray-600 dark:text-gray-400">No posts in this collection yet</p>
-                    </div>
-                ) : (
-                    <div className="space-y-6">
-                        {posts.map(p => (
-                            <FeedCard
-                                key={p.id}
-                                post={p}
-                                onLike={async () => {
-                                    if (!online) {
-                                        updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
-                                        await enqueue({ type: 'like', postId: p.id, userId });
-                                        return;
-                                    }
-                                    const updated = await toggleLike(userId, p.id, p);
-                                    updateOne(p.id, _post => ({ ...updated }));
-                                    window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                                        detail: { liked: updated.userLiked, likes: updated.stats.likes }
-                                    }));
-                                }}
-                                onFollow={async () => {
-                                    if (!online) {
-                                        await enqueue({ type: 'follow', postId: p.id, userId });
-                                        return;
-                                    }
-                                    const updated = await toggleFollowForPost(userId, p.id);
-                                    updateOne(p.id, _post => ({ ...updated }));
-                                }}
-                                onShare={async () => {
-                                    setSelectedPostForShare(p);
-                                    setShareModalOpen(true);
-                                }}
-                                onOpenComments={() => handleOpenComments(p.id)}
-                                onView={async () => {
-                                    if (!online) {
-                                        await enqueue({ type: 'view', postId: p.id, userId });
-                                        return;
-                                    }
-                                    const updated = await incrementViews(userId, p.id);
-                                    if (updated.userHandle === 'Unknown') return;
-                                    updateOne(p.id, post => ({
-                                        ...post,
-                                        stats: updated.stats && typeof updated.stats.views === 'number'
-                                            ? { ...post.stats, views: updated.stats.views }
-                                            : post.stats
-                                    }));
-                                    window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
-                                }}
-                                onReclip={async () => {
-                                    if (p.userHandle === user?.handle) {
-                                        console.log('Cannot reclip your own post');
-                                        return;
-                                    }
-                                    if (p.userReclipped) {
-                                        console.log('Post already reclipped by user, ignoring reclip request');
-                                        return;
-                                    }
-                                    if (!online) {
-                                        updateOne(p.id, post => ({
-                                            ...post,
-                                            userReclipped: true,
-                                            stats: { ...post.stats, reclips: post.stats.reclips + 1 }
-                                        }));
-                                        await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
-                                        window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
-                                        return;
-                                    }
-                                    const { originalPost: updatedOriginalPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
-                                    updateOne(p.id, _post => ({ ...updatedOriginalPost }));
-                                    window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, {
-                                        detail: { reclips: updatedOriginalPost.stats.reclips }
-                                    }));
-                                }}
-                                onOpenScenes={() => {
-                                    setSelectedPostForScenes(p);
-                                    setScenesOpen(true);
-                                }}
-                            />
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* Modals */}
-            {selectedPostId && (
-                <CommentsModal
-                    postId={selectedPostId}
-                    isOpen={commentsModalOpen}
-                    onClose={() => {
-                        setCommentsModalOpen(false);
-                        setSelectedPostId(null);
-                    }}
-                />
-            )}
-            {selectedPostForShare && (
-                <ShareModal
-                    post={selectedPostForShare}
-                    isOpen={shareModalOpen}
-                    onClose={() => {
-                        setShareModalOpen(false);
-                        setSelectedPostForShare(null);
-                    }}
-                    onShareSuccess={(postId) =>
-                        updateOne(postId, (p) => ({
-                            ...p,
-                            stats: { ...p.stats, shares: p.stats.shares + 1 },
-                        }))
-                    }
-                />
-            )}
-            {selectedPostForScenes && (
-                <ScenesModal
-                    post={selectedPostForScenes}
-                    isOpen={scenesOpen}
-                    onClose={() => {
-                        setScenesOpen(false);
-                        setSelectedPostForScenes(null);
-                    }}
-                    onLike={async () => {
-                        if (!online) {
-                            updateOne(selectedPostForScenes.id, post => ({ ...post, userLiked: !post.userLiked }));
-                            await enqueue({ type: 'like', postId: selectedPostForScenes.id, userId });
-                            return;
-                        }
-                        const updated = await toggleLike(userId, selectedPostForScenes.id, selectedPostForScenes);
-                        updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
-                        setSelectedPostForScenes(updated);
-                        window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {
-                            detail: { liked: updated.userLiked, likes: updated.stats.likes }
-                        }));
-                    }}
-                    onFollow={async () => {
-                        if (!online) {
-                            await enqueue({ type: 'follow', postId: selectedPostForScenes.id, userId });
-                            return;
-                        }
-                        const updated = await toggleFollowForPost(userId, selectedPostForScenes.id);
-                        updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
-                        setSelectedPostForScenes(updated);
-                    }}
-                    onShare={async () => {
-                        setSelectedPostForShare(selectedPostForScenes);
-                        setShareModalOpen(true);
-                    }}
-                    onOpenComments={() => handleOpenComments(selectedPostForScenes.id)}
-                    onReclip={async () => {
-                        if (selectedPostForScenes.userHandle === user?.handle) {
-                            console.log('Cannot reclip your own post');
-                            return;
-                        }
-                        if (selectedPostForScenes.userReclipped) {
-                            console.log('Post already reclipped by user, ignoring reclip request');
-                            return;
-                        }
-                        if (!online) {
-                            updateOne(selectedPostForScenes.id, post => ({
-                                ...post,
-                                userReclipped: true,
-                                stats: { ...post.stats, reclips: post.stats.reclips + 1 }
-                            }));
-                            await enqueue({ type: 'reclip', postId: selectedPostForScenes.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
-                            window.dispatchEvent(new CustomEvent(`reclipAdded-${selectedPostForScenes.id}`));
-                            return;
-                        }
-                        const { originalPost: updatedOriginalPost } = await reclipPost(userId, selectedPostForScenes.id, user?.handle || 'Unknown@Unknown');
-                        updateOne(selectedPostForScenes.id, _post => ({ ...updatedOriginalPost }));
-                        setSelectedPostForScenes(updatedOriginalPost);
-                        window.dispatchEvent(new CustomEvent(`reclipAdded-${selectedPostForScenes.id}`, {
-                            detail: { reclips: updatedOriginalPost.stats.reclips }
-                        }));
-                    }}
-                />
-            )}
-        </div>
-    );
+function collectionTileImage(post: Post): string | undefined {
+  const still = resolvePostThumbnail(post);
+  if (still) return rewriteMediaUrlForClient(still);
+  const item = (post.mediaItems || []).find((entry) => entry?.type === 'image' || entry?.type === 'video');
+  const jpeg = siblingJpegFromVideoUrl(item?.url || post.mediaUrl);
+  return jpeg ? rewriteMediaUrlForClient(jpeg) : undefined;
 }
 
+function postViews(post: Post): number {
+  const extra = post as Post & { views_count?: number; views?: number };
+  return Math.max(0, Number(extra.views_count ?? post.stats?.views ?? extra.views ?? 0) || 0);
+}
+
+function CollectionGridTile({ post }: { post: Post }) {
+  const imageUri = collectionTileImage(post);
+  const bodyText = getPostBodyText(post);
+  const videoPost = isVideoPost(post);
+  const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
+  const textColor = card?.textColor || getTextOnlyTextColor(post);
+  const views = formatViewCount(postViews(post));
+  return (
+    <span className="relative flex h-full w-full overflow-hidden rounded-lg border border-white/10 bg-[#111827]">
+      {imageUri ? (
+        <img src={imageUri} alt="" className="absolute inset-0 h-full w-full object-cover" />
+      ) : videoPost ? (
+        <span className="flex h-full w-full items-center justify-center">
+          <FiPlay className="h-[22px] w-[22px] text-white" />
+        </span>
+      ) : isTextOnlyPost(post) || bodyText ? (
+        <span
+          className="flex h-full w-full items-start p-1.5 text-left text-[10px] font-semibold leading-[13px]"
+          style={{
+            color: textColor,
+            background: card && card.colors.length >= 2
+              ? `linear-gradient(180deg, ${card.colors.join(', ')})`
+              : card?.colors[0] || getTextOnlyBackgroundColor(post),
+          }}
+        >
+          <span className="line-clamp-4">{bodyText || 'Post'}</span>
+        </span>
+      ) : (
+        <span className="flex h-full w-full items-center justify-center text-[#6B7280]">
+          <FiImage className="h-[22px] w-[22px]" />
+        </span>
+      )}
+      <span
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-11"
+        style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.55))' }}
+      />
+      <span className="absolute bottom-2 left-2 z-[2] inline-flex items-center gap-1 rounded-lg bg-black/45 px-1.5 py-0.5 text-[11px] font-bold text-white">
+        <FiPlay className="h-3 w-3" />
+        {views}
+      </span>
+    </span>
+  );
+}
+
+export default function CollectionFeedPage() {
+  const { collectionId = '' } = useParams<{ collectionId: string }>();
+  const nav = useNavigate();
+  const location = useLocation();
+  const routeState = location.state as { collectionName?: string; initialCollection?: Collection } | null;
+  const [collection, setCollection] = React.useState<Collection | null>(routeState?.initialCollection ?? null);
+  const [posts, setPosts] = React.useState<Post[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  const title = routeState?.collectionName || collection?.name || 'Collection';
+  const count = posts.length || collection?.postIds?.length || 0;
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const lookupId = collectionId || String(routeState?.initialCollection?.id ?? '');
+    const collectionName = routeState?.collectionName;
+    if (!lookupId && !collectionName) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    void (async () => {
+      try {
+        const coll = (await getCollection(lookupId, collectionName)) || routeState?.initialCollection || null;
+        const collectionPosts = await getCollectionPosts(lookupId, collectionName);
+        if (cancelled) return;
+        setCollection(coll);
+        setPosts(collectionPosts);
+      } catch (error) {
+        console.error('Error loading collection:', error);
+        if (!cancelled) {
+          setCollection(routeState?.initialCollection ?? null);
+          setPosts([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionId, routeState?.collectionName, routeState?.initialCollection]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center" style={{ background: 'linear-gradient(180deg, #05050A 0%, #0B0F19 100%)' }}>
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen" style={{ background: 'linear-gradient(180deg, #05050A 0%, #0B0F19 100%)' }}>
+      <div className="flex items-center justify-between gap-3 border-b border-white/[0.12] bg-[rgba(15,23,42,0.85)] px-4 py-3.5">
+        <button type="button" onClick={() => nav(-1)} aria-label="Back" className="text-white">
+          <FiArrowLeft className="h-6 w-6" />
+        </button>
+        <h1 className="min-w-0 flex-1 truncate text-center text-lg font-bold text-white">{title}</h1>
+        <button type="button" onClick={() => nav(-1)} aria-label="Close collection" className="text-white">
+          <FiX className="h-6 w-6" />
+        </button>
+      </div>
+      <div className="border-b border-white/[0.08] bg-[rgba(15,23,42,0.85)] px-4 py-3">
+        <p className="text-sm font-medium text-[#94A3B8]">
+          {count} {count === 1 ? 'post' : 'posts'}
+        </p>
+      </div>
+      {posts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center px-10 py-16 text-center">
+          <FiBookmark className="h-12 w-12 text-[#94A3B8]" />
+          <p className="mt-3 text-base text-[#6B7280]">No posts in this collection yet</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3">
+          {posts.map((post) => (
+            <button
+              key={post.id}
+              type="button"
+              onClick={() => {
+                upsertLocalPost(post);
+                nav(`/post/${encodeURIComponent(post.id)}`, { state: { post } });
+              }}
+              className="aspect-[3/4] p-[1.5px]"
+            >
+              <CollectionGridTile post={post} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

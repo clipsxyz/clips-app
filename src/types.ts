@@ -372,6 +372,10 @@ export type CollectionLatestPost = {
   media_url?: string;
   mediaType?: string;
   media_type?: string;
+  text?: string;
+  text_content?: string;
+  cardStyle?: string;
+  card_style?: string;
 };
 
 export type Collection = {

@@ -377,7 +377,8 @@ export default function App() {
   const isFeedPage = loc.pathname === '/feed';
   const isCreateFullscreen =
     loc.pathname === '/create/instant' || loc.pathname === '/create/gallery-preview';
-  const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen; // No scroll, no bottom nav
+  const isDiscoverPage = loc.pathname === '/discover';
+  const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen || isDiscoverPage; // No scroll, no bottom nav
 
   // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesnâ€™t shift fixed chrome
   React.useEffect(() => {
@@ -415,7 +416,7 @@ export default function App() {
                 background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)',
                 backgroundColor: '#000000',
               }
-            : { backgroundColor: isFeedPage ? '#000000' : '#030712' }
+            : { backgroundColor: isFeedPage || loc.pathname.startsWith('/post/') ? '#000000' : '#030712' }
         }
       >
         {loc.pathname !== '/login'
@@ -430,6 +431,11 @@ export default function App() {
           && loc.pathname !== '/create/instant'
           && loc.pathname !== '/create/gallery-preview'
           && loc.pathname !== '/create/story-link'
+          && !loc.pathname.startsWith('/post/')
+          && loc.pathname !== '/settings/playback'
+          && loc.pathname !== '/settings/phone'
+          && !loc.pathname.startsWith('/collection/')
+          && !isDiscoverPage
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <div
           className={
@@ -451,6 +457,8 @@ export default function App() {
           && loc.pathname !== '/clip'
           && loc.pathname !== '/create'
           && loc.pathname !== '/template-editor'
+          && loc.pathname !== '/settings/playback'
+          && loc.pathname !== '/settings/phone'
           && loc.pathname !== '/login' && (
             <BottomNav
             onCreateClick={() => navigate('/create/instant')}

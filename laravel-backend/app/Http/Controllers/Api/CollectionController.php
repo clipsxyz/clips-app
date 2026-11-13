@@ -23,7 +23,9 @@ class CollectionController extends Controller
                 'posts.media_url',
                 'posts.media_type',
                 'posts.thumbnail_url',
-                'posts.media_items'
+                'posts.media_items',
+                'posts.text_content',
+                'posts.card_style'
             )->orderByDesc('collection_posts.created_at');
         }]);
     }

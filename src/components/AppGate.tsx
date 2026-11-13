@@ -3,6 +3,7 @@ import App from '../App';
 import { useAuth } from '../context/Auth';
 import { parsePublicShareLink } from '../utils/publicShareLink';
 import PublicStoryPage from '../pages/PublicStoryPage';
+import PublicPostPage from '../pages/PublicPostPage';
 
 const AUTH_PATHS = new Set(['/login', '/terms']);
 
@@ -22,6 +23,9 @@ export default function AppGate() {
         const share = parsePublicShareLink(loc.pathname, loc.search);
         if (share?.kind === 'story') {
             return <PublicStoryPage />;
+        }
+        if (/^\/post\/[^/]+$/.test(loc.pathname)) {
+            return <PublicPostPage />;
         }
         if (!AUTH_PATHS.has(loc.pathname)) {
             return <Navigate to="/landing" replace />;

@@ -111,6 +111,10 @@ class Collection extends Model
             'mediaUrl' => $latest->media_url,
             'media_type' => $latest->media_type,
             'mediaType' => $latest->media_type,
+            'text' => $latest->text_content,
+            'text_content' => $latest->text_content,
+            'card_style' => $latest->card_style,
+            'cardStyle' => $latest->card_style,
         ] : null;
 
         $createdMs = $this->created_at ? $this->created_at->timestamp * 1000 : null;

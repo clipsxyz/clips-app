@@ -24,6 +24,9 @@ function mapLatestPost(raw: any): CollectionLatestPost | undefined {
         typeof (latest.media_url ?? latest.mediaUrl) === 'string'
             ? (latest.media_url ?? latest.mediaUrl)
             : undefined;
+    const textRaw = latest.text ?? latest.text_content;
+    const text = typeof textRaw === 'string' ? textRaw : undefined;
+    const cardStyle = latest.cardStyle ?? latest.card_style;
     return {
         id: latest.id != null ? String(latest.id) : undefined,
         thumbnailUrl: thumbnail,
@@ -32,6 +35,10 @@ function mapLatestPost(raw: any): CollectionLatestPost | undefined {
         media_url: media,
         mediaType: latest.media_type ?? latest.mediaType,
         media_type: latest.media_type ?? latest.mediaType,
+        text,
+        text_content: text,
+        cardStyle: typeof cardStyle === 'string' ? cardStyle : undefined,
+        card_style: typeof cardStyle === 'string' ? cardStyle : undefined,
     };
 }
 
@@ -357,6 +364,29 @@ export function getCollectionThumbnailUrl(collection: Collection, postPool?: Pos
         if (img) return img;
     }
     return undefined;
+}
+
+/** Cover post for a collection tile, including text-only posts that have no image. */
+export function collectionCoverPost(collection: Collection, postPool?: Post[]): Post | undefined {
+    const latest = collection.latestPost;
+    const id = String(latest?.id || collection.postIds?.[0] || '');
+    const pooled = id
+        ? postPool?.find((post) => String(post.id) === id) ?? posts.find((post) => String(post.id) === id)
+        : undefined;
+    const latestText = typeof latest?.text === 'string' ? latest.text : latest?.text_content;
+    const cardStyle = latest?.cardStyle || latest?.card_style || pooled?.cardStyle;
+    const text = String(latestText || pooled?.text || pooled?.caption || '').trim();
+    if (!pooled && !text && !latest) return undefined;
+    return {
+        ...(pooled || {}),
+        id: pooled?.id || id || 'cover',
+        text: text || pooled?.text || '',
+        cardStyle,
+        mediaUrl: pooled?.mediaUrl || latest?.mediaUrl,
+        mediaType: pooled?.mediaType || (latest?.mediaType as Post['mediaType']),
+        thumbnailUrl: pooled?.thumbnailUrl || latest?.thumbnailUrl,
+        videoPosterUrl: pooled?.videoPosterUrl || latest?.thumbnailUrl,
+    } as Post;
 }
 
 function compactPersistedMediaUrl(url?: string): string | undefined {
