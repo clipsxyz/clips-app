@@ -742,6 +742,8 @@ export interface ConversationSummary {
     chatGroupId?: string;
     groupName?: string;
     groupAvatarUrl?: string | null;
+    /** Profile photo for a direct conversation, from the inbox payload. */
+    avatarUrl?: string | null;
     lastMessage?: ChatMessage;
     unread: number;
     isPinned?: boolean;
@@ -955,7 +957,7 @@ export async function listConversations(forHandle: string, viewerId?: string): P
                         type?: string;
                         chat_group_id?: string;
                         group?: { id: string; name: string; avatar_url?: string | null; avatarUrl?: string | null; creator_id?: string };
-                        other_user?: { handle: string };
+                        other_user?: { handle: string; avatar_url?: string | null; avatarUrl?: string | null };
                         latest_message?: any;
                         unread_count?: number;
                     }) => {
@@ -997,6 +999,7 @@ export async function listConversations(forHandle: string, viewerId?: string): P
                         return {
                             kind: 'dm' as const,
                             otherHandle,
+                            avatarUrl: row.other_user?.avatar_url || row.other_user?.avatarUrl || null,
                             lastMessage,
                             unread,
                             isPinned: false,

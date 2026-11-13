@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Support\PublicMediaUrl;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
@@ -44,6 +46,23 @@ class Message extends Model
 
     /** Serialized quote preview so DM clients can render the reply context after reload. */
     protected $appends = ['reply_to'];
+
+    /**
+     * Stored URLs often point at localhost or an old LAN address. Rewrite them
+     * onto the host that is asking, so the phone can load a photo sent from the web.
+     */
+    protected function imageUrl(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if (! is_string($value) || trim($value) === '') {
+                    return $value;
+                }
+
+                return PublicMediaUrl::forClient($value) ?? $value;
+            },
+        );
+    }
 
     /**
      * Always emit both casings so share-with-caption DMs still attach the post

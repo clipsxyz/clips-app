@@ -1,4 +1,5 @@
 import React from 'react';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
 
@@ -13,11 +14,12 @@ export default function Avatar({
     onClick,
 }: AvatarProps) {
     const initials = getAvatarInitials(name);
+    const photoSrc = src ? rewriteMediaUrlForClient(src) : '';
     const [photoFailed, setPhotoFailed] = React.useState(false);
     React.useEffect(() => {
         setPhotoFailed(false);
-    }, [src]);
-    const showPhoto = Boolean(src) && !photoFailed;
+    }, [photoSrc]);
+    const showPhoto = Boolean(photoSrc) && !photoFailed;
     const isNumericSize = typeof size === 'number';
     const { dim, fontSize } = isNumericSize ? resolveAvatarDimensions(size) : { dim: 0, fontSize: 14 };
 
@@ -36,7 +38,7 @@ export default function Avatar({
         <>
             {showPhoto ? (
                 <img
-                    src={src}
+                    src={photoSrc}
                     alt={`${name}'s profile picture`}
                     className="w-full h-full object-cover rounded-full"
                     onError={() => setPhotoFailed(true)}

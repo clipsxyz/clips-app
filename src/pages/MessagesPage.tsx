@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiCamera, FiTrash2, FiPlay, FiPause, FiSquare } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiCamera, FiTrash2, FiPlay, FiPause, FiSquare, FiUser, FiAlertCircle, FiXCircle, FiCopy } from 'react-icons/fi';
 import { BsEmojiSmile } from 'react-icons/bs';
-import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
-import { MdStickyNote2, MdTranslate } from 'react-icons/md';
+import { FaPaperPlane } from 'react-icons/fa';
 import Avatar from '../components/Avatar';
 import { IMessageDmBubbleShell } from '../components/IMessageDmBubbleShell';
 import { useAuth } from '../context/Auth';
@@ -25,15 +24,17 @@ import {
     fetchGroupThread,
     fetchGroupThreadMessagesPage,
     markGroupConversationReadById,
+    deleteChatMessage,
 } from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
 import { getPostById, getFollowedUsers, getState, toggleLike, incrementShares } from '../api/posts';
-import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
+import { toggleFollow, fetchUserProfile, leaveChatGroup, uploadFile } from '../api/client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import ScenesModal from '../components/ScenesModal';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
-import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 import type { Post } from '../types';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
@@ -43,14 +44,14 @@ import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
 import {
-    DM_RECEIVED_BG,
-    DM_INPUT_BAR,
     DM_INPUT_FIELD,
     type DmSentBubbleStyle,
     getDmSentBubblePreference,
     setDmSentBubblePreference,
-    dmSentBubbleBgClass,
+    dmSentBubbleColor,
+    dmSentBubbleGradient,
 } from '../constants/dmImessageTheme';
+import { formatDmPresenceLabel } from '../utils/dmThreadStatus';
 
 const DEBUG_MESSAGE_PAGING = import.meta.env.DEV && import.meta.env.VITE_DEBUG_MESSAGE_PAGING === 'true';
 
@@ -82,13 +83,14 @@ function isLikelyVideoUrl(url: string | undefined): boolean {
 function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: string; className?: string }) {
     const [videoFailed, setVideoFailed] = React.useState(false);
     const [imageFailed, setImageFailed] = React.useState(false);
-    const likelyImage = isLikelyImageUrl(url);
-    const likelyVideo = isLikelyVideoUrl(url);
+    const displayUrl = url.startsWith('data:') || url.startsWith('blob:') ? url : rewriteMediaUrlForClient(url);
+    const likelyImage = isLikelyImageUrl(displayUrl);
+    const likelyVideo = isLikelyVideoUrl(displayUrl);
 
     if (!likelyImage && !videoFailed) {
         return (
             <video
-                src={url}
+                src={displayUrl}
                 className={className}
                 muted
                 playsInline
@@ -103,7 +105,7 @@ function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: s
     if (imageFailed) {
         return <div className={`${className || ''} flex items-center justify-center text-[10px] font-semibold text-white/85 bg-black/50`}>Preview</div>;
     }
-    return <img src={url} alt={alt} className={className} onError={() => setImageFailed(true)} />;
+    return <img src={displayUrl} alt={alt} className={className} onError={() => setImageFailed(true)} />;
 }
 
 // Helper function to extract post ID from message text
@@ -669,11 +671,29 @@ export default function MessagesPage() {
     
     // Chat info modal state
     const [showChatInfo, setShowChatInfo] = useState(false);
+    const [chatInfoAlert, setChatInfoAlert] = useState<{
+        title: string;
+        message?: string;
+        icon?: 'success' | 'alert' | 'info';
+        showIcon?: boolean;
+        confirmButtonText?: string;
+        cancelButtonText?: string;
+        showCancelButton?: boolean;
+        onConfirm?: () => void;
+    } | null>(null);
     const [isMuted, setIsMuted] = useState(false);
     const [isBlocked, setIsBlocked] = useState(false);
-    /** Sent bubble: iMessage blue vs SMS green (persisted). */
+    /** Sent bubble: passport sea glass or brass (persisted). */
     const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>(() => getDmSentBubblePreference());
-    const sentBubbleBg = dmSentBubbleBgClass(dmSentStyle);
+    const sentGradient = dmSentBubbleGradient(dmSentStyle);
+    const sentColor = dmSentBubbleColor(dmSentStyle);
+    const [otherUserLastActiveAt, setOtherUserLastActiveAt] = useState<string | number | null>(null);
+    const [presenceNow, setPresenceNow] = useState(() => Date.now());
+    useEffect(() => {
+        const id = window.setInterval(() => setPresenceNow(Date.now()), 30000);
+        return () => window.clearInterval(id);
+    }, []);
+    const dmPresenceLabel = isGroupThread ? 'Group chat' : formatDmPresenceLabel(otherUserLastActiveAt, presenceNow);
     
     // Edit state
     const [editingMessage, setEditingMessage] = useState<MessageUI | null>(null);
@@ -715,7 +735,7 @@ export default function MessagesPage() {
     const [vanishMode, setVanishMode] = useState(false);
     
     // Image compose: after picking an image, user can add caption before sending
-    const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string } | null>(null);
+    const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string; file: File } | null>(null);
     // Scenes modal: tap shared post in DM to open fullscreen, close returns to DM
     const [scenesOpen, setScenesOpen] = useState(false);
     const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
@@ -1333,6 +1353,10 @@ export default function MessagesPage() {
                         if (profile && (profile.avatar_url || profile.avatarUrl)) {
                             setOtherUserAvatar(profile.avatar_url || profile.avatarUrl);
                         }
+                        const lastActive = (profile as { last_active_at?: string | null; lastActiveAt?: string | null } | null)?.last_active_at
+                            ?? (profile as { lastActiveAt?: string | null } | null)?.lastActiveAt
+                            ?? null;
+                        setOtherUserLastActiveAt(lastActive);
                     }
                 } catch (error) {
                     console.warn(`Failed to fetch avatar for ${handle}:`, error);
@@ -1348,8 +1372,7 @@ export default function MessagesPage() {
     // location icon behaves like the profile page:
     // - If they have explicit places_traveled, use that.
     // - Otherwise, derive places from their bio text.
-    // - For mock users like Bob, fall back to the same hard‑coded list
-    //   used on the profile page so behavior is consistent.
+    // - Otherwise leave the list empty.
     React.useEffect(() => {
         async function loadOtherUserPlaces() {
             if (!handle || !user?.id) {
@@ -1378,11 +1401,6 @@ export default function MessagesPage() {
                     } catch (error) {
                         console.warn('Failed to fetch profile for places traveled in DMs:', error);
                     }
-                }
-
-                // 3) Mock fallback for Bob@Ireland (match ViewProfilePage behavior)
-                if ((!places || places.length === 0) && handle === 'Bob@Ireland') {
-                    places = ['Cork', 'Galway', 'Belfast', 'London', 'Paris'];
                 }
 
                 setOtherUserPlacesTraveled(places && places.length > 0 ? places : []);
@@ -2165,7 +2183,7 @@ export default function MessagesPage() {
             const imageUrl = reader.result as string;
             if (!user?.handle || (!handle && !groupId)) return;
             // Show image compose UI: preview + optional caption before sending
-            setImageCompose({ imageUrl, caption: '' });
+            setImageCompose({ imageUrl, caption: '', file });
         };
         reader.readAsDataURL(file);
     };
@@ -2176,7 +2194,7 @@ export default function MessagesPage() {
 
     const handleSendImageWithCaption = async () => {
         if (!imageCompose || !user?.handle || (!handle && !groupId)) return;
-        const { imageUrl, caption } = imageCompose;
+        const { imageUrl, caption, file } = imageCompose;
         setImageCompose(null);
 
         const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -2198,7 +2216,19 @@ export default function MessagesPage() {
         setTimeout(() => scrollToBottom(), 100);
         isSendingMessageRef.current = true;
 
-        appendToThread({ imageUrl, text: caption.trim() || undefined }).then((realMessage) => {
+        const sendHostedPhoto = async () => {
+            let hostedUrl = imageUrl;
+            if (isLaravelApiEnabled()) {
+                const upload = await uploadFile(file);
+                hostedUrl = String(upload?.fileUrl || upload?.url || '').trim();
+                if (!/^https?:\/\//i.test(hostedUrl) || hostedUrl.length > 500) {
+                    throw new Error('Upload did not return a public image URL.');
+                }
+            }
+            return appendToThread({ imageUrl: hostedUrl, text: caption.trim() || undefined });
+        };
+
+        sendHostedPhoto().then((realMessage) => {
             setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== tempId);
                 const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
@@ -2224,7 +2254,9 @@ export default function MessagesPage() {
             });
         }).catch(error => {
             console.error('Error sending image:', error);
+            setMessages(prev => prev.filter(m => m.id !== tempId));
             isSendingMessageRef.current = false;
+            showToast?.('Could not send this photo. Try again.');
         });
     };
 
@@ -2400,9 +2432,6 @@ export default function MessagesPage() {
         }
         
         try {
-            // Use browser's built-in translation or a simple API
-            // For now, we'll use a mock translation (in production, use Google Translate API or similar)
-            // Note: This is a placeholder - you'd need to integrate with a real translation service
             const translatedText = await translateText(text);
             
             setTranslatedMessages(prev => ({
@@ -2419,16 +2448,8 @@ export default function MessagesPage() {
         closeContextMenu();
     };
     
-    // Simple translation function (placeholder - replace with real API)
-    const translateText = async (text: string): Promise<string> => {
-        // In production, use Google Translate API, DeepL, or similar
-        // For now, return a mock translation
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                // Mock translation - in production, call actual translation API
-                resolve(`[Translated] ${text}`);
-            }, 500);
-        });
+    const translateText = async (_text: string): Promise<string> => {
+        throw new Error('Translation is not available');
     };
 
     const handleReport = () => {
@@ -2538,23 +2559,78 @@ export default function MessagesPage() {
         closeContextMenu();
     };
 
-    // Close menu when clicking outside
+    const messageSheetArmedRef = React.useRef(false);
     React.useEffect(() => {
-        const handleClickOutside = () => {
-            if (contextMenu) {
-                closeContextMenu();
-            }
-        };
-
-        if (contextMenu) {
-            document.addEventListener('click', handleClickOutside);
-            document.addEventListener('contextmenu', handleClickOutside);
-            return () => {
-                document.removeEventListener('click', handleClickOutside);
-                document.removeEventListener('contextmenu', handleClickOutside);
-            };
+        if (!contextMenu) {
+            messageSheetArmedRef.current = false;
+            return;
         }
+        messageSheetArmedRef.current = false;
+        const id = window.setTimeout(() => {
+            messageSheetArmedRef.current = true;
+        }, 350);
+        return () => window.clearTimeout(id);
     }, [contextMenu]);
+
+    const dismissMessageSheet = () => {
+        if (!messageSheetArmedRef.current) return;
+        closeContextMenu();
+    };
+
+    const reactToOpenMessage = (emoji: string) => {
+        if (!contextMenu?.message) return;
+        handleAddReaction(contextMenu.message.id, emoji);
+        setStickerReactionAnimation({ messageId: contextMenu.message.id, emoji, phase: 'pop' });
+        closeContextMenu();
+    };
+
+    const handleCopyMessage = async () => {
+        const text = contextMenu?.message?.text;
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            closeContextMenu();
+            setChatInfoAlert({
+                title: 'Copied',
+                message: 'Message text copied to clipboard.',
+                icon: 'success',
+                confirmButtonText: 'OK',
+            });
+        } catch {
+            closeContextMenu();
+            showToast('Could not copy message');
+        }
+    };
+
+    const handleDeleteMessage = () => {
+        const msg = contextMenu?.message;
+        if (!msg || !user?.handle || !msg.isFromMe) return;
+        closeContextMenu();
+        setChatInfoAlert({
+            title: 'Delete this message?',
+            message: 'It will be removed from this chat for both of you.',
+            icon: 'alert',
+            confirmButtonText: 'Delete',
+            cancelButtonText: 'Cancel',
+            showCancelButton: true,
+            onConfirm: () => {
+                const previous = messages;
+                setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+                void deleteChatMessage(user.handle, msg.id, {
+                    otherHandle: handle,
+                    chatGroupId: groupId,
+                }).catch(() => {
+                    setMessages(previous);
+                    setChatInfoAlert({
+                        title: 'Delete failed',
+                        message: 'Could not delete this message right now.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                });
+            },
+        });
+    };
 
     // Sticker reaction animation: after "pop" phase, find reaction pill and switch to "fly" phase
     useEffect(() => {
@@ -2663,39 +2739,43 @@ export default function MessagesPage() {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-black text-white flex items-center justify-center">
+            <div className="flex h-full min-h-0 items-center justify-center bg-black text-white">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-black text-white flex flex-col">
+        <div className="h-full min-h-0 bg-black text-white flex flex-col">
             {/* Header */}
-            <div className="sticky top-0 z-[120] isolate bg-black/95 backdrop-blur-md border-b border-white/[0.08]">
-                <div className={`relative z-10 flex items-center ${compactPhone ? 'px-2.5 py-2.5' : 'px-4 py-3'}`}>
+            <div
+                className="shrink-0 z-[120] isolate border-b border-white/[0.12]"
+                style={{ background: 'linear-gradient(180deg, rgba(32,38,48,0.82) 0%, rgba(11,14,19,0.94) 100%)' }}
+            >
+                <div className="relative z-10 flex items-center px-3 py-2.5">
                     <button
                         onClick={() => navigate(-1)}
-                        className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
+                        className="flex h-9 w-9 items-center justify-center"
+                        aria-label="Back"
                     >
-                        <FiChevronLeft className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
+                        <FiChevronLeft className="h-[26px] w-[26px]" />
                     </button>
                     {isGroupThread && (
-                        <div className="flex items-center ml-2 flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/[0.05] px-2.5 py-1.5">
-                            <Avatar src={groupAvatarUrl} name={groupDisplayName} size="sm" className="flex-shrink-0 ring-1 ring-white/15" />
-                            <div className="ml-3 flex-1 min-w-0">
-                                <span className="font-semibold text-white truncate block">{groupDisplayName}</span>
-                                <span className="text-xs text-gray-400">Group chat</span>
+                        <div className="ml-1 flex min-w-0 flex-1 items-center gap-2.5">
+                            <Avatar src={groupAvatarUrl} name={groupDisplayName} size={36} className="flex-shrink-0" />
+                            <div className="min-w-0 flex-1">
+                                <span className="block truncate text-base font-semibold text-white">{groupDisplayName}</span>
+                                <span className="mt-px block text-xs text-[#9CA3AF]">Group chat</span>
                             </div>
                         </div>
                     )}
                     {handle && !isGroupThread && (
-                        <div className="flex items-center ml-3 flex-1">
-                            <div className="relative overflow-visible flex-shrink-0">
+                        <div className="ml-1 flex min-w-0 flex-1 items-center gap-2.5">
+                            <div className="relative h-9 w-9 flex-shrink-0 overflow-visible">
                                 <Avatar
                                     src={otherUserAvatar}
-                                    name={handle}
-                                    size="sm"
+                                    name={handle.split('@')[0] || handle}
+                                    size={36}
                                     hasStory={hasUnviewedStories}
                                     className="cursor-pointer"
                                     onClick={() => {
@@ -2770,9 +2850,8 @@ export default function MessagesPage() {
                                             }
                                         }}
                                         disabled={isFollowLoading}
-                                        className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 ${
-                                            dmSentStyle === 'green' ? 'bg-[#34C759] hover:bg-[#2DB84E]' : 'bg-[#0A84FF] hover:bg-[#0077ED]'
-                                        }`}
+                                        className="absolute -bottom-0.5 -right-0.5 z-30 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-black transition-all duration-200 active:scale-90"
+                                        style={{ backgroundColor: sentColor }}
                                         aria-label="Follow user"
                                     >
                                         <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
@@ -2780,73 +2859,70 @@ export default function MessagesPage() {
                                 )}
                                 {/* Checkmark icon when following (replaces + icon) */}
                                 {user?.handle && handle !== user.handle && isFollowing && showFollowCheck && (
-                                    <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
+                                    <div className="absolute -bottom-0.5 -right-0.5 z-30 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-black bg-[#22C55E]">
                                         <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
                                     </div>
                                 )}
                             </div>
-                            <div className="ml-3 flex-1">
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => navigate(`/user/${encodeURIComponent(handle)}`)}
-                                        className="text-left"
-                                    >
-                                        <span className="font-semibold text-white">{handle}</span>
-                                    </button>
-                                </div>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                    <span className="text-xs text-gray-400">Active now</span>
-                                </div>
+                            <div className="min-w-0 flex-1">
+                                <button
+                                    onClick={() => navigate(`/user/${encodeURIComponent(handle)}`)}
+                                    className="block max-w-full truncate text-left text-base font-semibold text-white"
+                                >
+                                    {handle}
+                                </button>
+                                {dmPresenceLabel ? (
+                                    <span className="mt-px block truncate text-xs text-[#9CA3AF]">{dmPresenceLabel}</span>
+                                ) : null}
                             </div>
                         </div>
                     )}
-                    <div className={`flex items-center ${compactPhone ? 'gap-1' : 'gap-2'}`}>
+                    <div className="flex items-center gap-1">
                         {/* Location Icon Button */}
                         {handle && !isGroupThread && (
                             <button
-                                className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
+                                className="flex h-9 w-9 items-center justify-center"
                                 onClick={() => {
-                                    // If no places traveled, show the "No Places Traveled" card
                                     if (!otherUserPlacesTraveled || otherUserPlacesTraveled.length === 0) {
-                                        Swal.fire(bottomSheet({
+                                        setChatInfoAlert({
                                             title: 'No Places Traveled',
                                             message: `${handle} hasn't added any places they've traveled to their profile yet.`,
                                             icon: 'alert',
-                                        }));
-                                    } else {
-                                        // Show a places traveled card (SweetAlert) using the same data
-                                        const placesHtml = otherUserPlacesTraveled
-                                            .map(place => `<li style="padding: 6px 0; border-bottom: 1px solid #f3f4f6;">${place}</li>`)
-                                            .join('');
-
-                                        Swal.fire(bottomSheet({
-                                            title: 'Places Traveled',
-                                            html: `<ul class="swal-bottom-sheet-message" style="list-style: none; margin: 0; padding: 0 4px; max-height: 260px; overflow-y: auto;">${placesHtml}</ul>`,
-                                            icon: 'none',
-                                        }));
+                                            showIcon: true,
+                                            confirmButtonText: 'OK',
+                                        });
+                                        return;
                                     }
+                                    setChatInfoAlert({
+                                        title: 'Places Traveled',
+                                        message: otherUserPlacesTraveled.join('\n'),
+                                        icon: 'info',
+                                        showIcon: true,
+                                        confirmButtonText: 'OK',
+                                    });
                                 }}
                                 title="View places traveled"
+                                aria-label="Places traveled"
                             >
-                                <FiMapPin className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
+                                <FiMapPin className="h-[22px] w-[22px]" />
                             </button>
                         )}
                         {isGroupThread && groupId ? (
                             <button
                                 type="button"
-                                className={`${compactPhone ? 'p-1.5' : 'p-2'} rounded-full border border-violet-400/30 bg-violet-500/15 hover:bg-violet-500/25 transition-colors text-violet-200`}
+                                className="flex h-9 w-9 items-center justify-center text-white"
                                 onClick={() => setInviteMemberOpen(true)}
                                 title="Invite someone by username"
                                 aria-label="Invite to group"
                             >
-                                <FiUserPlus className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
+                                <FiUserPlus className="h-[22px] w-[22px]" />
                             </button>
                         ) : null}
                         <button
-                            className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
+                            className="flex h-9 w-9 items-center justify-center"
                             onClick={() => setShowChatInfo(true)}
                         >
-                            <FiMoreHorizontal className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
+                            <FiMoreHorizontal className="h-[22px] w-[22px]" />
                         </button>
                     </div>
                 </div>
@@ -2856,8 +2932,7 @@ export default function MessagesPage() {
             <div
                 ref={listRef}
                 onScroll={(e) => handleListScroll(e.currentTarget)}
-                className={`flex-1 overflow-y-auto ${compactPhone ? 'px-2.5 py-3 pb-36' : 'px-4 py-4 pb-40'}`}
-                style={{ minHeight: 0, maxHeight: 'calc(100vh - 120px)' }}
+                className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
             >
                 <div className="space-y-1">
                     {loadingOlderMessages && (
@@ -3051,15 +3126,16 @@ export default function MessagesPage() {
                                                 
                                                 const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
-                                                    <div className={`flex items-end gap-2 ml-auto ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
+                                                    <div className="ml-auto flex max-w-[78%] items-end gap-2">
                                                         <div className="flex flex-col items-end gap-1 min-w-0 flex-1">
                                                             <IMessageDmBubbleShell
                                                                 isFromMe
-                                                                tailBgClassName={sentBubbleBg}
-                                                                bubbleClassName={`break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${
+                                                                tailBgClassName=""
+                                                                gradientColors={isMediaOnlyMessage ? undefined : sentGradient}
+                                                                bubbleClassName={`break-words cursor-pointer select-none relative text-[15px] leading-[21px] antialiased ${
                                                                     isMediaOnlyMessage
                                                                         ? 'bg-transparent p-0 shadow-none'
-                                                                        : `${sentBubbleBg} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
+                                                                        : 'px-3.5 py-2.5'
                                                                 }`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
@@ -3149,7 +3225,7 @@ export default function MessagesPage() {
                                                             )}
                                                             {msg.text && (
                                                                 <div>
-                                                                    <p className="text-white text-sm leading-relaxed select-none" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
+                                                                    <p className="select-none text-[15px] leading-[21px] text-white" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
                                                                         {translatedMessages[msg.id] || msg.text}
                                                                     </p>
                                                                     {translatedMessages[msg.id] && (
@@ -3208,28 +3284,15 @@ export default function MessagesPage() {
                                                                 )}
                                                                 {/* Read receipt - double checkmark (sent), filled (delivered), blue (read) */}
                                                                 <div className="flex items-center">
-                                                                    <svg className={`w-3.5 h-3.5 ${msg.read ? (dmSentStyle === 'green' ? 'text-[#34C759]' : 'text-[#0A84FF]') : 'text-[#8E8E93]'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                    <svg className="h-[13px] w-[13px]" style={{ color: msg.read ? sentColor : '#8E8E93' }} fill="currentColor" viewBox="0 0 20 20">
                                                                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                                     </svg>
-                                                                    <svg className={`w-3.5 h-3.5 -ml-1.5 ${msg.read ? (dmSentStyle === 'green' ? 'text-[#34C759]' : 'text-[#0A84FF]') : 'text-[#8E8E93]'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                    <svg className="-ml-1.5 h-[13px] w-[13px]" style={{ color: msg.read ? sentColor : '#8E8E93' }} fill="currentColor" viewBox="0 0 20 20">
                                                                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                                     </svg>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                        {msg.senderAvatar && (
-                                                            <Avatar
-                                                                src={msg.senderAvatar}
-                                                                name={msg.senderHandle}
-                                                                size="sm"
-                                                                className="flex-shrink-0 cursor-pointer"
-                                                                onClick={() => {
-                                                                    if (user?.handle) {
-                                                                        navigate(`/user/${encodeURIComponent(user.handle)}`);
-                                                                    }
-                                                                }}
-                                                            />
-                                                        )}
                                                     </div>
                                                 );
                                             })()
@@ -3452,23 +3515,21 @@ export default function MessagesPage() {
                                                 
                                                 const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
-                                                    <div className={`flex items-end gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
-                                                        {msg.senderAvatar && (
-                                                            <Avatar
-                                                                src={msg.senderAvatar}
-                                                                name={msg.senderHandle}
-                                                                size="sm"
-                                                                className="flex-shrink-0"
-                                                            />
-                                                        )}
-                                                        <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                                                    <div className="flex max-w-[78%] items-end gap-2">
+                                                        <Avatar
+                                                            src={msg.senderAvatar || otherUserAvatar || getAvatarForHandle(msg.senderHandle)}
+                                                            name={(msg.senderHandle || handle || '').split('@')[0] || 'User'}
+                                                            size={32}
+                                                            className="flex-shrink-0"
+                                                        />
+                                                        <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                                                             <IMessageDmBubbleShell
                                                                 isFromMe={false}
-                                                                tailBgClassName={DM_RECEIVED_BG}
-                                                                bubbleClassName={`break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${
+                                                                tailBgClassName=""
+                                                                bubbleClassName={`break-words cursor-pointer select-none relative text-[15px] leading-[21px] antialiased ${
                                                                     isMediaOnlyMessage
                                                                         ? 'bg-transparent p-0 shadow-none'
-                                                                        : `${DM_RECEIVED_BG} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
+                                                                        : 'border border-white/[0.12] bg-white/[0.08] px-3.5 py-2.5'
                                                                 }`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
@@ -3558,7 +3619,7 @@ export default function MessagesPage() {
                                                                 )}
                                                                 {msg.text && !commentPostId && (
                                                                     <div>
-                                                                        <p className="text-white text-sm leading-relaxed select-none" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
+                                                                        <p className="select-none text-[15px] leading-[21px] text-white" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
                                                                             {translatedMessages[msg.id] || msg.text}
                                                                         </p>
                                                                         {translatedMessages[msg.id] && (
@@ -3638,8 +3699,8 @@ export default function MessagesPage() {
                             />
                             <IMessageDmBubbleShell
                                 isFromMe={false}
-                                tailBgClassName={DM_RECEIVED_BG}
-                                bubbleClassName={`${DM_RECEIVED_BG} px-4 py-3 relative`}
+                                tailBgClassName=""
+                                bubbleClassName="relative border border-white/[0.12] bg-white/[0.08] px-4 py-3"
                             >
                                 <div className="flex items-center gap-1">
                                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -3653,7 +3714,7 @@ export default function MessagesPage() {
             </div>
 
             {/* Input bar — grayscale chrome only (bubbles keep blue/green preference) */}
-            <div className={`fixed bottom-0 left-0 right-0 ${DM_INPUT_BAR} border-t border-white/10 z-20 ${compactPhone ? 'pb-[max(2px,env(safe-area-inset-bottom))]' : ''}`}>
+            <div className="z-20 shrink-0 border-t border-white/[0.12] bg-[rgba(12,15,20,0.92)] pb-[max(6px,env(safe-area-inset-bottom))]">
                 {/* Reply Preview - show screenshot/thumbnail when replying to shared post (MP4 or image) */}
                 {replyingTo && (() => {
                     const replyPostId = replyingTo.postId || extractPostId(replyingTo.text || '');
@@ -3816,7 +3877,7 @@ export default function MessagesPage() {
                 ) : null}
                 {!ENABLE_VOICE_NOTES || !voiceDraft ? (
                 <div className={`flex flex-col ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
-                    <div className="flex items-end gap-2 min-w-0 pb-px">
+                    <div className="flex min-w-0 items-center gap-2.5 pb-px">
                         {ENABLE_VOICE_NOTES && isRecording ? (
                             <div className="flex-1 flex items-center min-h-[44px] px-3 rounded-[24px] border-2 border-white bg-[#09090b] gap-3">
                                 <button
@@ -3847,7 +3908,7 @@ export default function MessagesPage() {
                                     size="sm"
                                     className="h-8 w-8 shrink-0"
                                 />
-                                <div className="flex min-h-10 flex-1 min-w-0 items-center rounded-full bg-[#16181C] pl-3.5 pr-1.5">
+                                <div className="flex min-h-10 min-w-0 flex-1 items-center rounded-full border border-white/[0.12] bg-white/[0.08] pl-3.5 pr-1.5">
                                     <input
                                         type="text"
                                         value={messageText}
@@ -3918,136 +3979,115 @@ export default function MessagesPage() {
                 ) : null}
             </div>
 
-            {/* Context Menu - position above tap when near bottom so full card is visible */}
-            {contextMenu && (() => {
-                const menuHeightEstimate = 420;
-                const padding = 16;
-                const showAbove = contextMenu.y + menuHeightEstimate > window.innerHeight - padding;
-                const top = showAbove
-                    ? Math.max(padding, contextMenu.y - menuHeightEstimate - 10)
-                    : contextMenu.y - 10;
-                const transform = showAbove ? 'translate(-50%, 0)' : 'translate(-50%, -10px)';
-                return (
+            {contextMenu?.message && (
                 <div
-                    className="fixed bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-50 min-w-[200px] max-h-[calc(100vh-32px)] overflow-y-auto"
-                    style={{
-                        left: `${contextMenu.x}px`,
-                        top: `${top}px`,
-                        transform
-                    }}
-                    onClick={(e) => e.stopPropagation()}
+                    className="fixed inset-0 z-50 flex items-end justify-center"
+                    style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}
+                    onClick={dismissMessageSheet}
                 >
-                    <div className="py-2">
-                        {/* Timestamp */}
-                        {contextMenu.message && (
-                            <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-700">
-                                {formatTimestamp(contextMenu.message.timestamp)}
-                            </div>
-                        )}
-
-                        {/* Menu Items */}
-                        {contextMenu.message?.isFromMe && (
-                            <button
-                                onClick={handleEditMessage}
-                                className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                            >
-                                <FiEdit3 className="w-5 h-5" />
-                                <span>Edit</span>
+                    <div
+                        className="w-[min(400px,calc(100%-32px))] max-h-[78%] overflow-hidden rounded-t-3xl border border-b-0 border-white/[0.08] bg-[#03091B]"
+                        style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Message actions"
+                    >
+                        <div className="flex justify-center py-2">
+                            <div className="h-1 w-10 rounded-full bg-white/30" />
+                        </div>
+                        <p className="border-b border-white/10 px-4 pb-2.5 text-center text-xs text-[#9CA3AF]">
+                            {formatTimestamp(contextMenu.message.timestamp)}
+                        </p>
+                        <div className="flex justify-between border-b border-white/10 px-3.5 py-3">
+                            {['❤️', '😂', '🔥', '👍', '😮', '😢'].map((emoji) => (
+                                <button
+                                    key={emoji}
+                                    type="button"
+                                    aria-label={`React ${emoji}`}
+                                    onClick={() => reactToOpenMessage(emoji)}
+                                    className="flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.08] text-[22px]"
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="max-h-80 overflow-y-auto">
+                            {contextMenu.message.isFromMe && !isGroupThread ? (
+                                <button type="button" onClick={handleEditMessage} className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#F9FAFB]">
+                                    <FiEdit3 className="h-5 w-5" />
+                                    <span>Edit</span>
+                                </button>
+                            ) : null}
+                            <button type="button" onClick={handleReply} className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#F9FAFB]">
+                                <FiCornerUpLeft className="h-5 w-5" />
+                                <span>Reply</span>
                             </button>
-                        )}
-                        <button
-                            onClick={handleReply}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                        >
-                            <FiCornerUpLeft className="w-5 h-5" />
-                            <span>Reply</span>
-                        </button>
-                        {contextMenu.message?.storyId && (
+                            {contextMenu.message.storyId ? (
+                                <button type="button" onClick={handleViewStory} className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#F9FAFB]">
+                                    <FiImage className="h-5 w-5" />
+                                    <span>View story</span>
+                                </button>
+                            ) : null}
                             <button
-                                onClick={handleViewStory}
-                                className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                            >
-                                <FiImage className="w-5 h-5" />
-                                <span>View story</span>
-                            </button>
-                        )}
-                        <button
-                            onClick={() => {
-                                if (contextMenu?.message) {
-                                    handleAddReaction(contextMenu.message.id, '❤️');
-                                    setStickerReactionAnimation({ messageId: contextMenu.message.id, emoji: '❤️', phase: 'pop' });
-                                }
-                                closeContextMenu();
-                            }}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                        >
-                            <span className="text-lg">❤️</span>
-                            <span>React</span>
-                        </button>
-                        <button
-                            onClick={() => {
-                                if (contextMenu?.message) {
+                                type="button"
+                                onClick={() => {
                                     setMessageForSticker(contextMenu.message);
-                                }
-                                setShowStickerPicker(true);
-                                closeContextMenu();
-                            }}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                        >
-                            <MdStickyNote2 className="w-5 h-5" />
-                            <span>Add sticker</span>
-                        </button>
-
+                                    setShowStickerPicker(true);
+                                    closeContextMenu();
+                                }}
+                                className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#F9FAFB]"
+                            >
+                                <BsEmojiSmile className="h-5 w-5" />
+                                <span>Add sticker</span>
+                            </button>
+                            <button type="button" onClick={handleForward} className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#F9FAFB]">
+                                <FaPaperPlane className="h-5 w-5" />
+                                <span>Forward</span>
+                            </button>
+                            {contextMenu.message.text ? (
+                                <button type="button" onClick={() => { void handleCopyMessage(); }} className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#F9FAFB]">
+                                    <FiCopy className="h-5 w-5" />
+                                    <span>Copy text</span>
+                                </button>
+                            ) : null}
+                            {contextMenu.message.isFromMe ? (
+                                <button type="button" onClick={handleDeleteMessage} className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#EF4444]">
+                                    <FiTrash2 className="h-5 w-5" />
+                                    <span>Delete message</span>
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const target = contextMenu.message.senderHandle || handle;
+                                            if (!target) return;
+                                            closeContextMenu();
+                                            navigate(`/user/${encodeURIComponent(target)}`);
+                                        }}
+                                        className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#F9FAFB]"
+                                    >
+                                        <FiUser className="h-5 w-5" />
+                                        <span>View profile</span>
+                                    </button>
+                                    <button type="button" onClick={handleReport} className="flex w-full items-center gap-3 px-[18px] py-3.5 text-left text-base font-medium text-[#EF4444]">
+                                        <FiAlertCircle className="h-5 w-5" />
+                                        <span>Report</span>
+                                    </button>
+                                </>
+                            )}
+                        </div>
                         <button
-                            onClick={handleForward}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                            type="button"
+                            onClick={closeContextMenu}
+                            className="mx-4 mt-1 mb-1 w-[calc(100%-32px)] rounded-xl bg-white/[0.08] py-3.5 text-center text-base font-semibold text-[#E5E7EB]"
                         >
-                            <FaPaperPlane className="w-5 h-5" />
-                            <span>Forward</span>
-                        </button>
-
-                        <button
-                            onClick={handleTranslate}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                        >
-                            <MdTranslate className="w-5 h-5" />
-                            <span>Translate</span>
-                        </button>
-
-                        <button
-                            onClick={handleReport}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-red-500 border-t border-gray-700"
-                        >
-                            <FaExclamationCircle className="w-5 h-5" />
-                            <span>Report</span>
-                        </button>
-
-                        <button
-                            onClick={() => {
-                                // Show additional options
-                                if (contextMenu?.message) {
-                                    const msg = contextMenu.message;
-                                    // Options: Pin message, Save message, etc.
-                                    const options = [
-                                        { label: 'Pin Message', action: () => showToast('Message pinned') },
-                                        { label: 'Save Message', action: () => showToast('Message saved') },
-                                        { label: 'Select Messages', action: () => showToast('Select mode enabled') },
-                                    ];
-                                    
-                                    // For now, just show a toast - could expand to a submenu
-                                    showToast('More options coming soon');
-                                }
-                                closeContextMenu();
-                            }}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                        >
-                            <FiMoreHorizontal className="w-5 h-5" />
-                            <span>More</span>
+                            Cancel
                         </button>
                     </div>
                 </div>
-                );
-            })()}
+            )}
 
             {/* Sticker Picker Modal */}
             {showStickerPicker && (
@@ -4285,200 +4325,250 @@ export default function MessagesPage() {
                 </div>
             )}
 
-            {/* Chat Info/Options Modal */}
             {showChatInfo && (handle || groupId) && (
                 <div
-                    className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center"
+                    className="fixed inset-0 z-50 flex items-end justify-center bg-black/80"
                     onClick={() => setShowChatInfo(false)}
                 >
                     <div
-                        className="relative w-full max-w-md max-h-[80vh] overflow-hidden rounded-t-3xl border border-white/10 border-b-0 bg-[#060d16]"
+                        className="relative w-full max-w-md max-h-[80%] overflow-hidden rounded-t-3xl border border-b-0 border-white/10"
+                        style={{
+                            backgroundColor: '#03091B',
+                            backgroundImage: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)',
+                            paddingBottom: 'max(16px, env(safe-area-inset-bottom))',
+                        }}
                         onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Chat Info"
                     >
-                        <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                        <div className="relative z-[2] sticky top-0 border-b border-white/10 px-4 py-3 flex items-center justify-between bg-[#060d16]/70 backdrop-blur-sm">
-                            <h3 className="text-white font-semibold">Chat Info</h3>
-                            <button
-                                onClick={() => setShowChatInfo(false)}
-                                className="text-gray-400 hover:text-white"
-                            >
-                                <FiX className="w-6 h-6" />
+                        <div className="flex items-center justify-between border-b border-white/[0.12] px-4 py-3">
+                            <h3 className="text-base font-semibold text-white">Chat Info</h3>
+                            <button type="button" onClick={() => setShowChatInfo(false)} aria-label="Close">
+                                <FiX className="h-6 w-6 text-white" />
                             </button>
                         </div>
-
-                        <div className="relative z-[2] p-4 overflow-y-auto max-h-[calc(80vh-3.5rem)] pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+                        <div className="max-h-[480px] overflow-y-auto px-4 pb-7 pt-4">
                             {isGroupThread && groupId ? (
                                 <>
-                                    <div className="flex items-center gap-4 mb-4 rounded-2xl border border-white/10 bg-white/[0.05] p-3">
-                                        <Avatar src={groupAvatarUrl} name={groupDisplayName} size="lg" className="flex-shrink-0 ring-1 ring-white/15" />
-                                        <div className="flex-1">
-                                            <h4 className="text-white font-semibold text-lg">{groupDisplayName}</h4>
-                                            <p className="text-gray-400 text-sm">Group chat</p>
+                                    <div className="mb-5 flex items-center gap-4">
+                                        <Avatar src={groupAvatarUrl} name={groupDisplayName} size={56} />
+                                        <div className="min-w-0 flex-1">
+                                            <h4 className="truncate text-lg font-semibold text-white">{groupDisplayName}</h4>
+                                            <p className="mt-0.5 text-sm text-[#E2E8F0]">Group chat</p>
                                         </div>
                                     </div>
-                                    <div className="space-y-3">
-                                        <p className="text-xs text-gray-400 leading-relaxed rounded-xl border border-white/10 bg-white/[0.04] p-3">
-                                            To add people, use the <span className="text-cyan-400">+</span> button in the chat header, or
-                                            open their profile and choose <span className="text-cyan-400">Invite to group</span>.
-                                        </p>
-                                        <button
-                                            onClick={async () => {
-                                                if (!groupId) return;
-                                                if (confirm(`Leave "${groupDisplayName}"? You can be invited again later.`)) {
-                                                    try {
-                                                        await leaveChatGroup(groupId);
-                                                        showToast('Left group');
-                                                        setShowChatInfo(false);
-                                                        navigate('/inbox');
-                                                    } catch (error) {
-                                                        console.error('Error leaving group:', error);
-                                                        showToast('Failed to leave group');
-                                                    }
-                                                }
-                                            }}
-                                            className="w-full text-left px-4 py-3 rounded-xl border border-red-500/20 bg-red-500/10 hover:bg-red-500/15 flex items-center gap-3 text-red-500 transition-colors"
-                                        >
-                                            <FiX className="w-5 h-5" />
-                                            <span>Leave Group</span>
-                                        </button>
-                                    </div>
+                                    <p className="mb-4 text-xs leading-[18px] text-[#94A3B8]">
+                                        To add people, use the + button in the chat header, or open their profile and choose Invite to group.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!groupId) return;
+                                            setChatInfoAlert({
+                                                title: `Leave "${groupDisplayName}"?`,
+                                                message: 'You can be invited again later.',
+                                                icon: 'info',
+                                                confirmButtonText: 'Leave group',
+                                                cancelButtonText: 'Cancel',
+                                                showCancelButton: true,
+                                                onConfirm: () => {
+                                                    void (async () => {
+                                                        try {
+                                                            await leaveChatGroup(groupId);
+                                                            setShowChatInfo(false);
+                                                            navigate('/inbox');
+                                                        } catch (error) {
+                                                            console.error('Error leaving group:', error);
+                                                            setChatInfoAlert({
+                                                                title: 'Action failed',
+                                                                message: 'Could not leave this group right now.',
+                                                                icon: 'alert',
+                                                                confirmButtonText: 'OK',
+                                                            });
+                                                        }
+                                                    })();
+                                                },
+                                            });
+                                        }}
+                                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-base font-semibold text-[#EF4444]"
+                                    >
+                                        <FiXCircle className="h-5 w-5" />
+                                        <span>Leave Group</span>
+                                    </button>
                                 </>
                             ) : (
                                 <>
-                            {/* User Info */}
-                            <div className="flex items-center gap-4 mb-6">
-                                <Avatar
-                                    name={handle ?? ''}
-                                    src={getAvatarForHandle(handle ?? '')}
-                                    size="lg"
-                                />
-                                <div className="flex-1">
-                                    <h4 className="text-white font-semibold text-lg">{handle ?? ''}</h4>
-                                    <p className="text-gray-400 text-sm">Active now</p>
-                                </div>
-                            </div>
-
-                            <div className="mb-6">
-                                <p className="text-xs text-gray-500 mb-2">Your sent messages</p>
-                                <p className="text-[11px] text-gray-500 mb-2">iMessage blue or SMS-style green (saved on this device).</p>
-                                <div className="flex rounded-xl overflow-hidden border border-gray-700 p-0.5 bg-black/30">
+                                    <div className="mb-5 flex items-center gap-4">
+                                        <Avatar
+                                            name={(handle ?? '').split('@')[0] || 'User'}
+                                            src={otherUserAvatar || getAvatarForHandle(handle ?? '')}
+                                            size={56}
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <h4 className="truncate text-lg font-semibold text-white">{handle ?? ''}</h4>
+                                            {dmPresenceLabel ? <p className="mt-0.5 text-sm text-[#E2E8F0]">{dmPresenceLabel}</p> : null}
+                                        </div>
+                                    </div>
+                                    <p className="mb-1 text-xs text-[#94A3B8]">Your sent messages</p>
+                                    <p className="mb-2 text-[11px] text-[#94A3B8]">Passport colours from View Profile (saved on this device).</p>
+                                    <div className="mb-4 flex rounded-xl border border-[#374151] bg-black/30 p-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setDmSentStyle('blue');
+                                                setDmSentBubblePreference('blue');
+                                            }}
+                                            className="flex-1 rounded-[10px] py-2.5 text-sm font-semibold"
+                                            style={dmSentStyle === 'blue' ? { backgroundColor: '#3d9b8f', color: '#FFFFFF' } : { color: '#9CA3AF' }}
+                                        >
+                                            Sea glass
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setDmSentStyle('green');
+                                                setDmSentBubblePreference('green');
+                                            }}
+                                            className="flex-1 rounded-[10px] py-2.5 text-sm font-semibold"
+                                            style={dmSentStyle === 'green' ? { backgroundColor: '#c4a574', color: '#FFFFFF' } : { color: '#9CA3AF' }}
+                                        >
+                                            Brass
+                                        </button>
+                                    </div>
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            setDmSentStyle('blue');
-                                            setDmSentBubblePreference('blue');
-                                        }}
-                                        className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                                            dmSentStyle === 'blue' ? 'bg-[#0A84FF] text-white' : 'text-gray-400 hover:text-white'
-                                        }`}
-                                    >
-                                        Blue
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setDmSentStyle('green');
-                                            setDmSentBubblePreference('green');
-                                        }}
-                                        className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                                            dmSentStyle === 'green' ? 'bg-[#34C759] text-white' : 'text-gray-400 hover:text-white'
-                                        }`}
-                                    >
-                                        Green
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Options */}
-                            <div className="space-y-2">
-                                <button
-                                    onClick={async () => {
-                                        if (!handle) return;
-                                        navigate(`/user/${encodeURIComponent(handle)}`);
-                                        setShowChatInfo(false);
-                                    }}
-                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-white transition-colors"
-                                >
-                                    <FiUserPlus className="w-5 h-5" />
-                                    <span>View Profile</span>
-                                </button>
-
-                                <button
-                                    onClick={async () => {
-                                        if (!user?.handle || !handle) return;
-                                        try {
-                                            if (isMuted) {
-                                                await unmuteConversation(user.handle, handle);
-                                                setIsMuted(false);
-                                                showToast('Notifications unmuted');
-                                            } else {
-                                                await muteConversation(user.handle, handle);
-                                                setIsMuted(true);
-                                                showToast('Notifications muted');
-                                            }
+                                            if (!handle) return;
                                             setShowChatInfo(false);
-                                        } catch (error) {
-                                            console.error('Error toggling mute:', error);
-                                            showToast('Failed to update mute settings');
-                                        }
-                                    }}
-                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-white transition-colors"
-                                >
-                                    <FiMic className="w-5 h-5" />
-                                    <span>{isMuted ? 'Unmute Notifications' : 'Mute Notifications'}</span>
-                                </button>
-
-                                <button
-                                    onClick={async () => {
-                                        if (!user?.handle || !handle) return;
-                                        try {
+                                            navigate(`/user/${encodeURIComponent(handle)}`);
+                                        }}
+                                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-base font-medium text-white"
+                                    >
+                                        <FiUser className="h-5 w-5" />
+                                        <span>View Profile</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!user?.handle || !handle) return;
+                                            void (async () => {
+                                                try {
+                                                    if (isMuted) {
+                                                        await unmuteConversation(user.handle, handle);
+                                                        setIsMuted(false);
+                                                    } else {
+                                                        await muteConversation(user.handle, handle);
+                                                        setIsMuted(true);
+                                                    }
+                                                    setShowChatInfo(false);
+                                                } catch (error) {
+                                                    console.error('Error toggling mute:', error);
+                                                    setChatInfoAlert({
+                                                        title: 'Action failed',
+                                                        message: 'Could not update mute state right now.',
+                                                        icon: 'alert',
+                                                        confirmButtonText: 'OK',
+                                                    });
+                                                }
+                                            })();
+                                        }}
+                                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-base font-medium text-white"
+                                    >
+                                        <FiMic className="h-5 w-5" />
+                                        <span>{isMuted ? 'Unmute Notifications' : 'Mute Notifications'}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!user?.handle || !handle) return;
                                             if (isBlocked) {
-                                                await unblockUser(user.handle, handle);
-                                                setIsBlocked(false);
-                                                showToast('User unblocked');
-                                                setShowChatInfo(false);
+                                                void (async () => {
+                                                    try {
+                                                        await unblockUser(user.handle, handle);
+                                                        setIsBlocked(false);
+                                                        setShowChatInfo(false);
+                                                    } catch (error) {
+                                                        console.error('Error unblocking user:', error);
+                                                        setChatInfoAlert({
+                                                            title: 'Action failed',
+                                                            message: 'Could not unblock this user right now.',
+                                                            icon: 'alert',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                    }
+                                                })();
                                                 return;
                                             }
-
-                                            if (confirm(`Block ${handle}? You won't receive messages from them.`)) {
-                                                await blockUser(user.handle, handle);
-                                                setIsBlocked(true);
-                                                showToast('User blocked');
-                                                setShowChatInfo(false);
-                                                navigate('/inbox');
-                                            }
-                                        } catch (error) {
-                                            console.error('Error updating blocked status:', error);
-                                            showToast(isBlocked ? 'Failed to unblock user' : 'Failed to block user');
-                                        }
-                                    }}
-                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-red-500 transition-colors"
-                                >
-                                    <FaExclamationCircle className="w-5 h-5" />
-                                    <span>{isBlocked ? 'Unblock User' : 'Block User'}</span>
-                                </button>
-
-                                <button
-                                    onClick={async () => {
-                                        if (!user?.handle || !handle) return;
-                                        if (confirm(`Delete conversation with ${handle}? This cannot be undone.`)) {
-                                            try {
-                                                await deleteConversation(user.handle, handle);
-                                                showToast('Conversation deleted');
-                                                setShowChatInfo(false);
-                                                navigate('/inbox');
-                                            } catch (error) {
-                                                console.error('Error deleting conversation:', error);
-                                                showToast('Failed to delete conversation');
-                                            }
-                                        }
-                                    }}
-                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-red-500 transition-colors"
-                                >
-                                    <FiX className="w-5 h-5" />
-                                    <span>Delete Conversation</span>
-                                </button>
-                            </div>
+                                            setChatInfoAlert({
+                                                title: `Block ${handle}?`,
+                                                message: "You won't receive messages from them.",
+                                                icon: 'alert',
+                                                confirmButtonText: 'Block',
+                                                cancelButtonText: 'Cancel',
+                                                showCancelButton: true,
+                                                onConfirm: () => {
+                                                    if (!user?.handle || !handle) return;
+                                                    void (async () => {
+                                                        try {
+                                                            await blockUser(user.handle, handle);
+                                                            setIsBlocked(true);
+                                                            setShowChatInfo(false);
+                                                            navigate('/inbox');
+                                                        } catch (error) {
+                                                            console.error('Error blocking user:', error);
+                                                            setChatInfoAlert({
+                                                                title: 'Action failed',
+                                                                message: 'Could not block this user right now.',
+                                                                icon: 'alert',
+                                                                confirmButtonText: 'OK',
+                                                            });
+                                                        }
+                                                    })();
+                                                },
+                                            });
+                                        }}
+                                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-base font-medium text-[#EF4444]"
+                                    >
+                                        <FiAlertCircle className="h-5 w-5" />
+                                        <span>{isBlocked ? 'Unblock User' : 'Block User'}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!user?.handle || !handle) return;
+                                            setChatInfoAlert({
+                                                title: `Delete conversation with ${handle}?`,
+                                                message: 'This cannot be undone.',
+                                                icon: 'alert',
+                                                confirmButtonText: 'Delete',
+                                                cancelButtonText: 'Cancel',
+                                                showCancelButton: true,
+                                                onConfirm: () => {
+                                                    if (!user?.handle || !handle) return;
+                                                    void (async () => {
+                                                        try {
+                                                            await deleteConversation(user.handle, handle);
+                                                            setShowChatInfo(false);
+                                                            navigate('/inbox');
+                                                        } catch (error) {
+                                                            console.error('Error deleting conversation:', error);
+                                                            setChatInfoAlert({
+                                                                title: 'Action failed',
+                                                                message: 'Could not delete this conversation right now.',
+                                                                icon: 'alert',
+                                                                confirmButtonText: 'OK',
+                                                            });
+                                                        }
+                                                    })();
+                                                },
+                                            });
+                                        }}
+                                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-base font-medium text-[#EF4444]"
+                                    >
+                                        <FiXCircle className="h-5 w-5" />
+                                        <span>Delete Conversation</span>
+                                    </button>
                                 </>
                             )}
                         </div>
@@ -4532,6 +4622,22 @@ export default function MessagesPage() {
                 confirmButtonText="Open chat"
                 onConfirm={() => setCommunityCreatedAlert(null)}
                 onDismiss={() => setCommunityCreatedAlert(null)}
+            />
+            <GazetteerAlertSheet
+                visible={chatInfoAlert != null}
+                title={chatInfoAlert?.title ?? ''}
+                message={chatInfoAlert?.message}
+                icon={chatInfoAlert?.icon ?? 'alert'}
+                showIcon={chatInfoAlert?.showIcon}
+                confirmButtonText={chatInfoAlert?.confirmButtonText ?? 'OK'}
+                cancelButtonText={chatInfoAlert?.cancelButtonText}
+                showCancelButton={chatInfoAlert?.showCancelButton}
+                onConfirm={() => {
+                    const action = chatInfoAlert?.onConfirm;
+                    setChatInfoAlert(null);
+                    action?.();
+                }}
+                onDismiss={() => setChatInfoAlert(null)}
             />
         </div>
     );

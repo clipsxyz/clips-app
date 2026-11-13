@@ -68,7 +68,7 @@ export default function GazetteerAlertSheet({
                     ) : null}
                     <h2 className="mb-2 text-center text-lg font-semibold text-white">{title}</h2>
                     {message ? (
-                        <p className="mb-5 text-center text-[15px] leading-[22px] text-[#E2E8F0]">{message}</p>
+                        <p className="mb-5 whitespace-pre-line text-center text-[15px] leading-[22px] text-[#E2E8F0]">{message}</p>
                     ) : null}
                     <button
                         type="button"

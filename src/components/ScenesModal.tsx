@@ -29,7 +29,7 @@ import { getAvatarForHandle } from '../api/users';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
-import { postHasVideoMedia } from '../utils/postMedia';
+import { postHasVideoMedia, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
 import { showToast } from '../utils/toast';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
@@ -353,6 +353,10 @@ export default function ScenesModal({
     const hasMultipleItems = items.length > 1;
     const currentItem = items[currentIndex];
     const isTextOnlyPost = !post.mediaUrl && !(post.mediaItems && post.mediaItems.length > 0) && !!post.text;
+    const [sceneVideoReady, setSceneVideoReady] = React.useState(false);
+    React.useEffect(() => {
+        setSceneVideoReady(false);
+    }, [currentItem?.url, currentIndex, post.id]);
 
 
     const clearChromeHideTimer = React.useCallback(() => {
@@ -1871,23 +1875,53 @@ export default function ScenesModal({
                             }
 
                             // Create media element
+                            const sceneStillRaw = currentItem.type === 'video'
+                                ? (
+                                    (currentItem as { posterUrl?: string; poster_url?: string; thumbnailUrl?: string; thumbnail_url?: string }).posterUrl
+                                    || (currentItem as { poster_url?: string }).poster_url
+                                    || (currentItem as { thumbnailUrl?: string }).thumbnailUrl
+                                    || (currentItem as { thumbnail_url?: string }).thumbnail_url
+                                    || post.videoPosterUrl
+                                    || post.thumbnailUrl
+                                    || siblingJpegFromVideoUrl(currentItem.url)
+                                    || ''
+                                )
+                                : '';
+                            const sceneStill = sceneStillRaw ? rewriteMediaUrlForClient(sceneStillRaw) : '';
+                            const sceneVideoUrl = currentItem.type === 'video' && currentItem.url
+                                ? rewriteMediaUrlForClient(currentItem.url)
+                                : currentItem.url;
                             let mediaElement = currentItem.type === 'video' ? (
                                 <div className="relative flex h-full w-full items-center justify-center">
+                                    {sceneStill ? (
+                                        <img
+                                            src={sceneStill}
+                                            alt=""
+                                            className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                                            style={{ opacity: sceneVideoReady ? 0 : 1 }}
+                                        />
+                                    ) : null}
                                     <video
                                         ref={videoRef}
                                         className={
                                             isCaptionExpanded
-                                                ? 'max-h-full max-w-full bg-black pointer-events-none transition-opacity duration-200'
-                                                : 'h-full w-full bg-black object-contain pointer-events-none transition-opacity duration-200'
+                                                ? 'relative max-h-full max-w-full bg-transparent pointer-events-none transition-opacity duration-200'
+                                                : 'relative h-full w-full bg-transparent object-contain pointer-events-none transition-opacity duration-200'
                                         }
-                                        style={{ borderRadius: isCaptionExpanded ? 20 : 0 }}
-                                        src={currentItem.url}
+                                        style={{
+                                            borderRadius: isCaptionExpanded ? 20 : 0,
+                                            opacity: sceneVideoReady || !sceneStill ? 1 : 0,
+                                        }}
+                                        src={sceneVideoUrl}
+                                        poster={sceneStill || undefined}
                                         controls={false}
                                         autoPlay
                                         loop
                                         playsInline
                                         muted={isMuted}
                                         preload="auto"
+                                        onLoadedData={() => setSceneVideoReady(true)}
+                                        onPlaying={() => setSceneVideoReady(true)}
                                         onPlay={() => setIsPaused(false)}
                                         onPause={() => setIsPaused(true)}
                                         onTimeUpdate={(e) => {

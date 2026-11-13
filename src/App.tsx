@@ -7,6 +7,7 @@ import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
 import ShareToStoriesFeedIcon from './components/ShareToStoriesFeedIcon';
+import AddToStorySheet from './components/AddToStorySheet';
 import FeedPostNewsTicker from './components/FeedPostNewsTicker';
 import FeedTextOnlyCard from './components/FeedTextOnlyCard';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
@@ -105,7 +106,8 @@ import type { EffectConfig } from './utils/effects';
 import ProgressiveImage from './components/ProgressiveImage';
 import ZoomableMedia from './components/ZoomableMedia';
 import ImageFullscreenViewer from './components/ImageFullscreenViewer';
-import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
+import { FEED_UI } from './constants/feedUiTokens';
+import { feedCardAspectRatio } from './utils/mediaAspectRatio';
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
 import { showToast } from './utils/toast';
@@ -378,7 +380,8 @@ export default function App() {
   const isCreateFullscreen =
     loc.pathname === '/create/instant' || loc.pathname === '/create/gallery-preview';
   const isDiscoverPage = loc.pathname === '/discover';
-  const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen || isDiscoverPage; // No scroll, no bottom nav
+  const isDmThread = loc.pathname.startsWith('/messages');
+  const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen || isDiscoverPage || isDmThread;
 
   // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesnâ€™t shift fixed chrome
   React.useEffect(() => {
@@ -416,7 +419,7 @@ export default function App() {
                 background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)',
                 backgroundColor: '#000000',
               }
-            : { backgroundColor: isFeedPage || loc.pathname.startsWith('/post/') ? '#000000' : '#030712' }
+            : { backgroundColor: isFeedPage || isDmThread || loc.pathname.startsWith('/post/') ? '#000000' : '#030712' }
         }
       >
         {loc.pathname !== '/login'
@@ -436,6 +439,7 @@ export default function App() {
           && loc.pathname !== '/settings/phone'
           && !loc.pathname.startsWith('/collection/')
           && !isDiscoverPage
+          && !isDmThread
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <div
           className={
@@ -459,7 +463,8 @@ export default function App() {
           && loc.pathname !== '/template-editor'
           && loc.pathname !== '/settings/playback'
           && loc.pathname !== '/settings/phone'
-          && loc.pathname !== '/login' && (
+          && loc.pathname !== '/login'
+          && !isDmThread && (
             <BottomNav
             onCreateClick={() => navigate('/create/instant')}
             onInboxClick={() => navigate('/inbox')}
@@ -2671,6 +2676,15 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
   const [aspectRatio, setAspectRatio] = React.useState<number | null>(null); // width/height ratio
   const [carouselFrameAspectRatio, setCarouselFrameAspectRatio] = React.useState<number | null>(null); // lock frame to first carousel item
+  const imageSizeByUrlRef = React.useRef(new Map<string, { width: number; height: number }>());
+  const [imageSizeTick, setImageSizeTick] = React.useState(0);
+  const rememberStillSize = React.useCallback((src: string | undefined, width: number, height: number) => {
+    if (!src || !(width > 0) || !(height > 0)) return;
+    const prev = imageSizeByUrlRef.current.get(src);
+    if (prev && prev.width === width && prev.height === height) return;
+    imageSizeByUrlRef.current.set(src, { width, height });
+    setImageSizeTick((n) => n + 1);
+  }, []);
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
@@ -3162,13 +3176,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       loadedMediaUrlsRef.current.add(currentItem.url);
     }
     if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-      // Calculate clamped dimensions using Instagram rules
-      const dimensions = getInstagramImageDimensions(img.naturalWidth, img.naturalHeight);
-      if (!hasMultipleItems) {
-        setAspectRatio(dimensions.aspectRatio);
-      } else if (currentIndex === 0) {
-        setCarouselFrameAspectRatio(dimensions.aspectRatio);
-      }
+      rememberStillSize(currentItem?.url, img.naturalWidth, img.naturalHeight);
+      rememberStillSize(img.currentSrc || img.src, img.naturalWidth, img.naturalHeight);
     }
   };
 
@@ -3375,9 +3384,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       setTimeout(() => {
         if (imageRef.current && imageRef.current.complete && imageRef.current.naturalWidth > 0) {
           setIsLoading(false);
-          if (!hasMultipleItems) {
-            setAspectRatio(imageRef.current.naturalHeight / imageRef.current.naturalWidth);
-          }
+          rememberStillSize(url, imageRef.current.naturalWidth, imageRef.current.naturalHeight);
         } else {
           setIsLoading(true);
         }
@@ -3399,9 +3406,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       // Check immediately if image is already loaded
       if (imageRef.current.complete && imageRef.current.naturalWidth > 0) {
         setIsLoading(false);
-        if (!aspectRatio) {
-          setAspectRatio(imageRef.current.naturalWidth / imageRef.current.naturalHeight);
-        }
+        rememberStillSize(currentItem.url, imageRef.current.naturalWidth, imageRef.current.naturalHeight);
       }
     }
   }, [currentItem?.url, currentItem?.type, aspectRatio]);
@@ -3454,21 +3459,21 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Images stay Instagram 4:5. Videos default to 4:5 (vertical) or 16:9 (landscape).
+    // Stills follow the phone card: portrait capped at 4:5, landscape at its own ratio,
+    // unknown at 16:9. Height comes from the card width, not the browser window.
     if (currentItem?.type === 'image') {
-      const imageRatio = hasMultipleItems
-        ? (carouselFrameAspectRatio ?? aspectRatio)
-        : aspectRatio;
-      const isLandscape = imageRatio != null && imageRatio < 1;
+      const still = currentItem.url ? imageSizeByUrlRef.current.get(currentItem.url) : undefined;
+      const ratio = feedCardAspectRatio(still?.width, still?.height);
       return {
         width: '100%',
-        height: window.innerWidth * (isLandscape ? 9 / 16 : FEED_TARGET_ASPECT),
-        maxHeight: '58vh',
+        aspectRatio: String(ratio),
+        maxHeight: `${FEED_UI.media.maxViewportFraction * 100}vh`,
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        backgroundColor: '#000000',
       };
     }
 
@@ -3520,7 +3525,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       justifyContent: 'center',
       boxSizing: 'border-box'
     };
-  }, [aspectRatio, carouselFrameAspectRatio, hasMultipleItems, currentItem?.type]);
+  }, [aspectRatio, carouselFrameAspectRatio, hasMultipleItems, currentItem?.type, currentItem?.url, imageSizeTick]);
 
   const handleOpenScenesPress = React.useCallback(() => {
     const now = Date.now();
@@ -3639,10 +3644,17 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   alt=""
                   priority={priority && slideIndex === 0}
                   className="w-full h-full"
-                  position="top center"
+                  fit={(() => {
+                    const size = imageSizeByUrlRef.current.get(item.url);
+                    return size && size.width / size.height > 1 ? 'contain' : 'cover';
+                  })()}
+                  position="center"
                   onLoad={(e) => {
                     if (item.url) loadedMediaUrlsRef.current.add(item.url);
-                    if (e && slideIndex === 0) handleImageLoad(e);
+                    if (e?.currentTarget && e.currentTarget.naturalWidth > 0) {
+                      rememberStillSize(item.url, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight);
+                    }
+                    if (e) handleImageLoad(e);
                   }}
                   onError={handleImageError}
                 />
@@ -3780,7 +3792,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               alt=""
               priority={priority}
               className="w-full h-full"
-              position="top center"
+              fit={(() => {
+                const size = imageSizeByUrlRef.current.get(currentItem.url);
+                return size && size.width / size.height > 1 ? 'contain' : 'cover';
+              })()}
+              position="center"
               onLoad={(e) => {
                 // ProgressiveImage passes the event, use it directly
                 if (e) {
@@ -3885,7 +3901,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
           return shouldShow;
         })() ? (
-          <div className="absolute bottom-4 right-4 z-40">
+          <div className="absolute bottom-3 left-3 z-30">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -3907,24 +3923,28 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 }
                 onShowTaggedUsers?.();
               }}
-              className="w-8 h-8 rounded-full bg-black bg-opacity-70 flex items-center justify-center hover:bg-opacity-90 transition-all shadow-lg"
+              className="relative flex h-[26px] w-[26px] items-center justify-center rounded-full border border-white/15 bg-black/70 text-white"
               aria-label="View tagged users"
               title={`View ${taggedUsers?.length || 0} tagged ${(taggedUsers?.length || 0) === 1 ? 'person' : 'people'}`}
             >
               <svg
-                width="14"
-                height="14"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 className="text-white"
                 fill="currentColor"
                 xmlns="http://www.w3.org/2000/svg"
               >
-                {/* Person silhouette - head and shoulders */}
                 <path
                   d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z"
                   fill="currentColor"
                 />
               </svg>
+              {(taggedUsers?.length || 0) > 1 ? (
+                <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#7A8AF0] px-0.5 text-[8px] font-bold leading-none text-white">
+                  {(taggedUsers?.length || 0) > 9 ? '9+' : taggedUsers?.length}
+                </span>
+              ) : null}
             </button>
           </div>
         ) : null}
@@ -5940,6 +5960,7 @@ function Stories24FeedRail({
   }, [expandingStory, openStoryFromRail]);
 
   const { user } = useAuth();
+  const [addToStoryOpen, setAddToStoryOpen] = React.useState(false);
   const orderedItems = React.useMemo(
     () => orderStories24RailItems(stories24Items, user?.handle),
     [stories24Items, user?.handle],
@@ -5985,21 +6006,22 @@ function Stories24FeedRail({
   };
 
   return (
-    <div className="py-1">
-      <div className="mb-3 flex items-center justify-between px-4">
+    <div className="w-full py-1">
+      <div className="mb-3 flex w-full items-center justify-between px-4">
         <h3 className="flex min-w-0 items-center gap-1.5 text-[17px] font-normal tracking-[0.2px] text-white">
           <FiMapPin className="h-4 w-4 shrink-0 text-white" aria-hidden />
           <span>Stories 24</span>
         </h3>
         <button
           type="button"
-          onClick={() => navigate('/clip')}
+          onClick={() => setAddToStoryOpen(true)}
           className="ml-3 inline-flex items-center gap-1.5 rounded-full border border-white/45 bg-white/[0.08] px-3 py-1.5 text-[13px] font-semibold text-white"
         >
           <FiPlus className="h-3 w-3" />
           <span>Add yours</span>
         </button>
       </div>
+      <AddToStorySheet visible={addToStoryOpen} onDismiss={() => setAddToStoryOpen(false)} />
       {displayCards.length > 0 ? (
         <div
           className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide pl-3 pr-4"
@@ -8693,7 +8715,7 @@ function FeedPageWrapper() {
         onTouchEnd={handleFeedPullEnd}
         onTouchCancel={handleFeedPullEnd}
       >
-      {stories24Items.length > 0 && !customLocation ? (
+      {stories24Items.length > 0 ? (
         <Stories24FeedRail
           stories24Items={stories24Items}
           navigate={navigate}
@@ -9059,16 +9081,6 @@ function FeedPageWrapper() {
 
       {end && flat.length === 0 && (
         <div className="p-8 text-center text-gray-600 dark:text-gray-300">
-          {stories24Items.length > 0 && (
-            <div className="mb-6 text-left">
-              <Stories24FeedRail
-                stories24Items={stories24Items}
-                navigate={navigate}
-                onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
-                previewVideosPaused={feedScrolling || !feedTabVisible}
-              />
-            </div>
-          )}
           {showFollowingFeed || currentFilter.toLowerCase() === 'discover' ? (
             <>
               <div className="text-lg font-semibold mb-1">Unlock Your Following News Feed</div>

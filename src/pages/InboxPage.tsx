@@ -17,7 +17,6 @@ import { listConversations, type ConversationSummary, pinConversation, unpinConv
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
-import { acceptFollowRequest as acceptFollowRequestLocal, denyFollowRequest as denyFollowRequestLocal, removeFollowRequest } from '../api/privacy';
 import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
 import type { StoryGroup } from '../types';
@@ -60,6 +59,63 @@ function normalizeHandleKey(handle?: string): string {
     const value = (handle || '').trim();
     if (!value) return '';
     return value.replace(/^@/, '').toLowerCase();
+}
+
+function displayHandle(handle: string): string {
+    const raw = (handle || '').trim();
+    if (!raw) return 'User';
+    const name = raw.split('@')[0]?.trim();
+    return name || raw;
+}
+
+function compactInboxTime(timestamp?: number): string {
+    if (!timestamp) return '';
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (seconds < 60) return 'now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 5) return `${weeks}w`;
+    return timeAgo(timestamp);
+}
+
+function sameDmHandle(a?: string | null, b?: string | null): boolean {
+    return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+}
+
+function conversationPreviewText(conv: ConversationSummary, viewerHandle?: string | null): string {
+    const last = conv.lastMessage;
+    if (!last) return conv.kind === 'group' ? 'Open group' : 'Open conversation';
+    const fromMe = !!viewerHandle && sameDmHandle(last.senderHandle, viewerHandle);
+    if (last.storyId) {
+        const body = last.text?.trim();
+        if (last.storyContextText === 'Reacted to your story' && body) {
+            return fromMe ? `You reacted ${body} to their story` : `Reacted ${body} to your story`;
+        }
+        if (last.storyContextText === 'Reacted to your story') {
+            return fromMe ? 'You reacted to their story' : 'Reacted to your story';
+        }
+        if (body === 'Replied to your story') {
+            return fromMe ? 'You replied to their story' : 'Replied to your story';
+        }
+        if (body && body !== 'Replied to your story') return body;
+        if (last.storyContextText?.trim()) return last.storyContextText.trim();
+        return fromMe ? 'You replied to their story' : 'Replied to your story';
+    }
+    if (last.text?.trim()) {
+        const body = last.text.replace(/\s+/g, ' ').trim();
+        if (/^liked (your|a) post/i.test(body)) return body;
+        if (fromMe) return body.startsWith('You: ') ? body : `You: ${body}`;
+        return body;
+    }
+    if (last.commentText?.trim()) return `Commented: ${last.commentText}`;
+    if (last.imageUrl) return fromMe ? 'You: Photo' : 'Photo';
+    if (last.audioUrl) return fromMe ? 'You: Voice message' : 'Voice message';
+    return conv.kind === 'group' ? 'Open group' : 'Open conversation';
 }
 
 function inboxConversationRowId(conv: ConversationSummary): string {
@@ -303,7 +359,7 @@ function ConversationItem({
                             onPin();
                             closeSwipeActions();
                         }}
-                        className="w-14 sm:w-16 bg-white/20 hover:bg-white/30 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        className="w-14 bg-white/20 text-[11px] font-semibold text-white"
                         title={conv.isPinned ? 'Unpin conversation' : 'Pin conversation'}
                     >
                         {conv.isPinned ? 'Unpin' : 'Pin'}
@@ -317,7 +373,7 @@ function ConversationItem({
                             else onMarkUnread?.();
                             closeSwipeActions();
                         }}
-                        className="w-14 sm:w-16 bg-white/25 hover:bg-white/35 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        className="w-14 bg-white/25 text-[11px] font-semibold text-white"
                         title={conv.unread > 0 ? 'Mark as read' : 'Mark as unread'}
                     >
                         {conv.unread > 0 ? 'Read' : 'Unread'}
@@ -330,7 +386,7 @@ function ConversationItem({
                             onToggleMute();
                             closeSwipeActions();
                         }}
-                        className="w-14 sm:w-16 bg-white/15 hover:bg-white/25 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        className="w-14 bg-white/15 text-[11px] font-semibold text-white"
                         title={conv.isMuted ? 'Unmute conversation' : 'Mute conversation'}
                     >
                         {conv.isMuted ? 'Unmute' : 'Mute'}
@@ -343,7 +399,7 @@ function ConversationItem({
                             onDeleteConversation();
                             closeSwipeActions();
                         }}
-                        className="w-14 sm:w-16 bg-red-600/90 hover:bg-red-500 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        className="w-14 bg-red-600/90 text-[11px] font-semibold text-white"
                         title={isGroupRow ? 'Leave group' : 'Delete conversation'}
                     >
                         {isGroupRow ? 'Leave' : 'Delete'}
@@ -378,7 +434,14 @@ function ConversationItem({
             <div className="relative overflow-visible flex-shrink-0">
                 <Avatar
                     name={displayTitle}
-                    src={isGroupRow ? undefined : (getAvatarSrc ? getAvatarSrc(conv.otherHandle) : getAvatarForHandle(conv.otherHandle))}
+                    src={
+                        isGroupRow
+                            ? conv.groupAvatarUrl || undefined
+                            : (getAvatarSrc ? getAvatarSrc(conv.otherHandle) : undefined) ||
+                              conv.avatarUrl ||
+                              getAvatarForHandle(conv.otherHandle) ||
+                              undefined
+                    }
                     size="md"
                     hasStory={hasStory}
                     onClick={handleAvatarClick}
@@ -768,7 +831,7 @@ export default function InboxPage() {
             if (user?.id) {
                 try {
                     const groups = await fetchFollowedUsersStoryGroups(user.id, followedUsers as string[]);
-                    // Enrich with avatar URLs (use current user's avatar or mock avatars from getAvatarForHandle)
+                    // Enrich with the signed-in user's photo, or the stored profile photo.
                     const groupsWithAvatars = groups.map((group) => {
                         if (group.userId === user.id && user.avatarUrl) {
                             return { ...group, avatarUrl: user.avatarUrl };
@@ -849,15 +912,8 @@ export default function InboxPage() {
             
             // If already following, just unfollow
             if (wasFollowing) {
-                s.follows[handle] = false;
-                try {
-                    const result = await toggleFollow(handle);
-                    if (result && typeof result.following === 'boolean') {
-                        s.follows[handle] = result.following;
-                    }
-                } catch (apiError) {
-                    console.warn('API follow failed, using local state:', apiError);
-                }
+                const result = await toggleFollow(handle);
+                s.follows[handle] = result && typeof result.following === 'boolean' ? result.following : false;
                 await loadData();
                 return;
             }
@@ -909,50 +965,13 @@ export default function InboxPage() {
                         // Public profile - follow immediately
                         s.follows[handle] = true;
                     }
-                } catch (apiError: any) {
-                    const isConnectionError = 
-                        apiError?.message === 'CONNECTION_REFUSED' ||
-                        apiError?.name === 'ConnectionRefused' ||
-                        apiError?.message?.includes('Failed to fetch');
-                    
-                    if (isConnectionError && profilePrivate) {
-                        // Mock fallback for private profile
-                        createFollowRequest(user.handle, handle);
-                        
-                        try {
-                            await createNotification({
-                                type: 'follow_request',
-                                fromHandle: user.handle,
-                                toHandle: handle,
-                                message: `${user.handle} wants to follow you`
-                            });
-                        } catch (error) {
-                            console.warn('Failed to create follow request notification:', error);
-                        }
-                        
-                        Swal.fire(bottomSheet({
-                            title: 'Follow Request Sent',
-                            message: 'Your follow request has been sent. You will be notified when they accept.',
-                            icon: 'alert',
-                        }));
-                        
-                        await loadData();
-                        return;
-                    }
-                    
-                    // For other errors, use optimistic update
-                    s.follows[handle] = !wasFollowing;
+                } catch (apiError) {
+                    throw apiError;
                 }
             } else {
-                // Public profile - follow immediately
-                s.follows[handle] = true;
-                try {
-                    const result = await toggleFollow(handle);
-                    if (result && typeof result.following === 'boolean') {
-                        s.follows[handle] = result.following;
-                    }
-                } catch (apiError) {
-                    console.warn('API follow failed, using local state:', apiError);
+                const result = await toggleFollow(handle);
+                if (result && typeof result.following === 'boolean') {
+                    s.follows[handle] = result.following;
                 }
             }
             
@@ -1224,23 +1243,7 @@ export default function InboxPage() {
             const { acceptFollowRequest: acceptFollowRequestAPI } = await import('../api/client');
             const encodedHandle = encodeURIComponent(notif.fromHandle);
             
-            try {
-                await acceptFollowRequestAPI(encodedHandle);
-            } catch (apiError: any) {
-                // If API fails, use localStorage fallback
-                const isConnectionError = 
-                    apiError?.message === 'CONNECTION_REFUSED' ||
-                    apiError?.name === 'ConnectionRefused' ||
-                    apiError?.message?.includes('Failed to fetch');
-                
-                if (isConnectionError) {
-                    // Use localStorage fallback
-                    const { acceptFollowRequest: acceptFollowRequestLocal } = await import('../api/privacy');
-                    acceptFollowRequestLocal(notif.fromHandle, user.handle);
-                } else {
-                    throw apiError;
-                }
-            }
+            await acceptFollowRequestAPI(encodedHandle);
             
             // Add to followed users (using the posts API state)
             const { toggleFollowForPost } = await import('../api/posts');
@@ -1287,23 +1290,7 @@ export default function InboxPage() {
             const { denyFollowRequest: denyFollowRequestAPI } = await import('../api/client');
             const encodedHandle = encodeURIComponent(notif.fromHandle);
             
-            try {
-                await denyFollowRequestAPI(encodedHandle);
-            } catch (apiError: any) {
-                // If API fails, use localStorage fallback
-                const isConnectionError = 
-                    apiError?.message === 'CONNECTION_REFUSED' ||
-                    apiError?.name === 'ConnectionRefused' ||
-                    apiError?.message?.includes('Failed to fetch');
-                
-                if (isConnectionError) {
-                    // Use localStorage fallback
-                    const { denyFollowRequest: denyFollowRequestLocal } = await import('../api/privacy');
-                    denyFollowRequestLocal(notif.fromHandle, user.handle);
-                } else {
-                    throw apiError;
-                }
-            }
+            await denyFollowRequestAPI(encodedHandle);
             
             await deleteNotification(notif.id, user.handle);
             await loadData();
@@ -1324,25 +1311,6 @@ export default function InboxPage() {
                     <FiChevronLeft className="w-5 h-5" />
                 </button>
                 <h1 className="text-xl font-semibold">Notifications</h1>
-                <div className="flex-1" />
-                <div className="flex gap-2">
-                    <button
-                        onClick={async () => {
-                            // Seed mock stories for Bob
-                            const { seedMockStoriesForUser } = await import('../api/stories');
-                            await seedMockStoriesForUser('Bob@Ireland', 'user-bob');
-                            showToast('Mock 24hr stories added for Bob');
-                            // Reload conversations to show purple border
-                            if (user?.handle) {
-                                const conversations = await listConversations(user.handle);
-                                setItems(conversations);
-                            }
-                        }}
-                        className="px-3 py-1.5 text-sm rounded-lg bg-pink-600 hover:bg-pink-700 text-white font-medium transition-colors"
-                    >
-                        Add Bob Stories
-                    </button>
-                </div>
             </div>
 
             {/* Stories row (TikTok / Instagram style) */}
@@ -2225,7 +2193,11 @@ export default function InboxPage() {
                             <div className="flex items-start gap-3 p-4 border-b border-white/15">
                                 <Avatar
                                     name={title}
-                                    src={isGroupRow ? undefined : (dmAvatarMap[c.otherHandle] || getAvatarForHandle(c.otherHandle))}
+                                    src={
+                                        isGroupRow
+                                            ? c.groupAvatarUrl || undefined
+                                            : dmAvatarMap[c.otherHandle] || c.avatarUrl || getAvatarForHandle(c.otherHandle) || undefined
+                                    }
                                     size="lg"
                                 />
                                 <div className="flex-1 min-w-0 pt-0.5">

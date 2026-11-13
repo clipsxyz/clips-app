@@ -13,6 +13,7 @@ export function IMessageDmBubbleShell({
   bubbleStyle,
   layout = 'dm',
   showTail = true,
+  gradientColors,
   ...bubbleProps
 }: {
   isFromMe: boolean;
@@ -22,23 +23,39 @@ export function IMessageDmBubbleShell({
   bubbleClassName: string;
   children: ReactNode;
   bubbleStyle?: CSSProperties;
-  /** `feed`: bubble stays content-width (no flex-1 stretch). `dm`: received row can grow like Messages. */
+  /** `feed`: news-card tail. `dm`: Instagram thread bubble, content width, no tail. */
   layout?: 'dm' | 'feed';
-  /** When false, render a flat card (no speech tail) — e.g. feed “news card” text posts. */
+  /** When false, render a flat card (no speech tail). DM layout never draws a tail. */
   showTail?: boolean;
+  /** Sent-message wash. Ignored on the feed layout. */
+  gradientColors?: readonly string[];
 } & HTMLAttributes<HTMLDivElement>) {
   const tailStickout = 9;
   const tailVert = 13;
   const tailBottomOffset = 10;
+  const isDm = layout !== 'feed';
+  const drawTail = !isDm && showTail;
+  const dmCorners: CSSProperties = isFromMe
+    ? {
+        borderTopLeftRadius: 18,
+        borderTopRightRadius: 18,
+        borderBottomLeftRadius: 18,
+        borderBottomRightRadius: 4,
+      }
+    : {
+        borderTopLeftRadius: 18,
+        borderTopRightRadius: 18,
+        borderBottomRightRadius: 18,
+        borderBottomLeftRadius: 4,
+      };
 
-  const outerClass =
-    layout === 'feed'
-      ? 'relative min-w-0 w-fit max-w-[min(100%,30rem)]'
-      : `relative min-w-0 w-fit max-w-[min(100%,30rem)]${isFromMe ? '' : ' flex-1'}`;
+  const outerClass = isDm
+    ? `relative min-w-0 w-fit max-w-full ${isFromMe ? 'self-end' : 'self-start'}`
+    : 'relative min-w-0 w-fit max-w-[min(100%,30rem)]';
 
   return (
     <div className={outerClass} data-dm-imessage-bubble="">
-      {showTail ? (
+      {drawTail ? (
         <div
           aria-hidden
           className={`absolute z-[5] pointer-events-none ${tailBackgroundColor ? '' : tailBgClassName}`}
@@ -64,8 +81,18 @@ export function IMessageDmBubbleShell({
         />
       ) : null}
       <div
-        className={`relative z-10 overflow-visible rounded-[1.2rem] shadow-[0_1px_2px_rgba(0,0,0,0.55)] ring-0 ${bubbleClassName}`}
-        style={bubbleStyle}
+        className={`relative z-10 ${
+          isDm
+            ? 'overflow-hidden shadow-none'
+            : 'overflow-visible rounded-[1.2rem] shadow-[0_1px_2px_rgba(0,0,0,0.55)] ring-0'
+        } ${bubbleClassName}`}
+        style={{
+          ...(isDm ? dmCorners : {}),
+          ...(isDm && gradientColors && gradientColors.length >= 2
+            ? { background: `linear-gradient(135deg, ${gradientColors.join(', ')})` }
+            : {}),
+          ...bubbleStyle,
+        }}
         {...bubbleProps}
       >
         {children}

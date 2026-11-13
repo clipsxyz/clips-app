@@ -108,6 +108,7 @@ import {
     setDmSentBubblePreference,
     type DmSentBubbleStyle,
 } from '../constants/dmImessageTheme.native';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import { siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { toFileUri } from '../utils/ffmpegNative';
 import { ox } from '../constants/nativeOpticalScale';
@@ -781,7 +782,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                     {item.imageUrl ? (
                         ctx.isLikelyVideoUrl(item.imageUrl) ? (
                             <DmInlineVideoMessage
-                                uri={item.imageUrl}
+                                uri={rewriteMediaUrlForClient(item.imageUrl)}
                                 posterUrl={sharedPost?.videoPosterUrl ?? sharedPost?.thumbnailUrl}
                                 posterCandidates={[
                                     sharedPost?.mediaItems?.[0]?.posterUrl,
@@ -798,7 +799,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                                 end={{ x: 0.5, y: 1 }}
                                 style={styles.messageImageCard}
                             >
-                                <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
+                                <Image source={{ uri: rewriteMediaUrlForClient(item.imageUrl) }} style={styles.messageImage} />
                             </LinearGradient>
                         )
                     ) : null}
