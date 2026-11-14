@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import LinearGradient from 'react-native-linear-gradient';
@@ -18,9 +18,9 @@ import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 
 /** Circular profile photo: 32×32, fully round. */
 const FEED_HEADER_AVATAR_SIZE = 32;
-/** Compact overlay badge (follow +, DM, follow check, request pill). */
-const FEED_HEADER_BADGE_SIZE = 10;
-const FEED_HEADER_BADGE_ICON = 6;
+/** Web message badge: `w-5 h-5` circle, `w-2.5` red plane, bottom-right of the photo. */
+const FEED_HEADER_BADGE_SIZE = 20;
+const FEED_HEADER_BADGE_ICON = 10;
 
 export type FeedPostHeaderProps = {
     post: Post;
@@ -57,7 +57,7 @@ export default function FeedPostHeader({
     menuAnchorRef,
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
-    const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
+    const [followBusy, setFollowBusy] = useState(false);
 
     const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
@@ -94,20 +94,13 @@ export default function FeedPostHeader({
 
     const viewerId = user?.id != null ? String(user.id) : undefined;
 
-    useEffect(() => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        if (!isCurrentUser && onFollow && isFollowing) {
-            setShowFollowCheck(true);
-            timer = setTimeout(() => setShowFollowCheck(false), 2500);
-        } else {
-            setShowFollowCheck(false);
-        }
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    }, [isFollowing, isCurrentUser, onFollow]);
-
     const showAvatar = variant === 'default' || variant === 'textOnlyChrome';
+    const followLabel = isFollowing ? 'Following' : hasPendingRequest ? 'Requested' : 'Follow';
+    const pressFollow = () => {
+        if (!onFollow || followBusy) return;
+        setFollowBusy(true);
+        void onFollow().finally(() => setFollowBusy(false));
+    };
 
     const avatarBlock = showAvatar ? (
         <View
@@ -131,34 +124,20 @@ export default function FeedPostHeader({
                     }}
                 />
             </View>
-            {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
-                <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
-                    <Icon name="add" size={FEED_HEADER_BADGE_ICON} color="#FFFFFF" />
-                </TouchableOpacity>
-            ) : null}
-            {!isCurrentUser && hasPendingRequest ? (
-                <View style={styles.requestedPill} pointerEvents="none">
-                    <Text style={styles.requestedPillText}>Req</Text>
-                </View>
-            ) : null}
             {!isCurrentUser && isMutualFollow && onOpenDM ? (
-                <TouchableOpacity
+                <GesturePressable
                     style={styles.dmButton}
                     onPress={() => {
                         const handle = (post.userHandle || safeHandle).trim();
                         if (!handle) return;
                         onOpenDM(handle, post.id, true);
                     }}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                     accessibilityRole="button"
                     accessibilityLabel={`Message ${safeHandle}`}
                 >
                     <Icon name="paper-plane" size={FEED_HEADER_BADGE_ICON} color="#EF4444" />
-                </TouchableOpacity>
-            ) : null}
-            {!isCurrentUser && isFollowing && !isMutualFollow && showFollowCheck ? (
-                <View style={styles.followCheck}>
-                    <Icon name="checkmark" size={FEED_HEADER_BADGE_ICON} color="#FFFFFF" />
-                </View>
+                </GesturePressable>
             ) : null}
         </View>
     ) : null;
@@ -208,6 +187,18 @@ export default function FeedPostHeader({
                 ) : null}
             </View>
             <View style={styles.right}>
+                {!isCurrentUser && onFollow ? (
+                    <TouchableOpacity
+                        style={styles.followPill}
+                        onPress={pressFollow}
+                        disabled={followBusy}
+                        accessibilityRole="button"
+                        accessibilityLabel={followLabel}
+                        accessibilityState={{ selected: isFollowing, disabled: followBusy }}
+                    >
+                        <Text style={styles.followPillText}>{followLabel}</Text>
+                    </TouchableOpacity>
+                ) : null}
                 {onOverflowPress ? (
                     <GesturePressable
                         onPress={onOverflowPress}
@@ -307,10 +298,26 @@ const styles = StyleSheet.create({
         height: FEED_HEADER_AVATAR_SIZE,
     },
     right: {
-        alignItems: 'flex-end',
-        justifyContent: 'center',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
         gap: 2,
         flexShrink: 0,
+    },
+    followPill: {
+        minHeight: 32,
+        paddingHorizontal: 14,
+        borderRadius: 8,
+        backgroundColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.5)',
+    },
+    followPillText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
     },
     avatarWrap: {
         position: 'relative',
@@ -324,39 +331,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    followPlus: {
-        position: 'absolute',
-        right: -2,
-        bottom: -2,
-        width: FEED_HEADER_BADGE_SIZE,
-        height: FEED_HEADER_BADGE_SIZE,
-        borderRadius: FEED_HEADER_BADGE_SIZE / 2,
-        backgroundColor: '#3B82F6',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1.5,
-        borderColor: '#000000',
-    },
-    requestedPill: {
-        position: 'absolute',
-        right: -4,
-        bottom: -2,
-        minWidth: 22,
-        height: FEED_HEADER_BADGE_SIZE,
-        paddingHorizontal: 3,
-        borderRadius: FEED_HEADER_BADGE_SIZE / 2,
-        backgroundColor: 'rgba(61, 155, 143, 0.95)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1.5,
-        borderColor: '#000000',
-    },
-    requestedPillText: {
-        color: '#FFFFFF',
-        fontSize: 7,
-        fontWeight: '700',
-        letterSpacing: 0.2,
-    },
     dmButton: {
         position: 'absolute',
         right: -2,
@@ -367,21 +341,10 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1.5,
-        borderColor: '#000000',
-    },
-    followCheck: {
-        position: 'absolute',
-        right: -2,
-        bottom: -2,
-        width: FEED_HEADER_BADGE_SIZE,
-        height: FEED_HEADER_BADGE_SIZE,
-        borderRadius: FEED_HEADER_BADGE_SIZE / 2,
-        backgroundColor: '#22C55E',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1.5,
-        borderColor: '#000000',
+        borderWidth: 1,
+        borderColor: '#374151',
+        zIndex: 30,
+        elevation: 4,
     },
     reclipRow: {
         flexDirection: 'row',

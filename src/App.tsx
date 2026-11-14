@@ -1554,7 +1554,14 @@ function PostHeader({
       e.preventDefault();
     }
     setProfileMenuOpen(false);
-    navigate('/stories', { state: { openUserHandle: profileTargetHandle } });
+    navigate('/stories', {
+      state: {
+        openUserHandle: profileTargetHandle,
+        soloMode: true,
+        skipStories24RailReturn: true,
+        fromStories24Rail: false,
+      },
+    });
   };
 
   const handleBlockFromQuickActions = async (e?: React.MouseEvent) => {
@@ -1803,27 +1810,45 @@ function PostHeader({
       style={
         hasStory
           ? {
-              padding: 1,
-              background: '#FFFFFF',
+              boxSizing: 'border-box',
+              border: '1px solid #FFFFFF',
+              padding: 2.5,
+              background: 'transparent',
             }
           : undefined
       }
     >
-      <span
-        className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-black"
-        style={hasStory ? { padding: 2.5 } : undefined}
-      >
-        <Avatar
-          src={avatarSrc}
-          name={post.userHandle.split('@')[0]}
-          size={hasStory ? 26 : 'sm'}
-          hideBorder
-          hasStory={false}
-          onClick={openAvatarTarget}
-        />
-      </span>
+      <Avatar
+        src={avatarSrc}
+        name={post.userHandle.split('@')[0]}
+        size={hasStory ? 25 : 'sm'}
+        hideBorder
+        hasStory={false}
+        onClick={openAvatarTarget}
+      />
     </span>
   );
+
+  const followPillLabel = isFollowingThisUser ? 'Following' : followRequested ? 'Requested' : 'Follow';
+  const followPill = !isCurrentUser && onFollow ? (
+    <button
+      type="button"
+      aria-label={followPillLabel}
+      aria-pressed={isFollowingThisUser}
+      onClick={async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        try {
+          await onFollow();
+        } catch (error) {
+          console.error('Error in onFollow from header pill:', error);
+        }
+      }}
+      className="shrink-0 rounded-lg border border-white/50 bg-transparent px-3.5 py-1.5 text-[13px] font-semibold leading-none text-white outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+    >
+      {followPillLabel}
+    </button>
+  ) : null;
 
   if (variant === "textOnlyFeed" && children != null) {
     const avatarBlock = (
@@ -1834,31 +1859,6 @@ function PostHeader({
         data-feed-dm-anchor={post.id}
       >
         {feedAvatar}
-        {!isCurrentUser && onFollow && !isFollowingThisUser && (
-          <button
-            type="button"
-            onClick={async (e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              if (onFollow) {
-                try {
-                  await onFollow();
-                } catch (error) {
-                  console.error("Error in onFollow from click:", error);
-                }
-              }
-            }}
-            className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-md z-30"
-            style={{
-              touchAction: "manipulation",
-              WebkitTapHighlightColor: "transparent",
-              pointerEvents: "auto",
-            }}
-            aria-label="Follow user"
-          >
-            <FiPlus className="w-2.5 h-2.5 text-white" strokeWidth={2.5} />
-          </button>
-        )}
         {!isCurrentUser && isMutualFollow && onOpenDM && (
           <button
             type="button"
@@ -1877,11 +1877,6 @@ function PostHeader({
           >
             <VscLiveShare className="w-2.5 h-2.5 text-red-500" />
           </button>
-        )}
-        {!isCurrentUser && onFollow && isFollowingThisUser && !isMutualFollow && (
-          <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border border-white dark:border-gray-900 flex items-center justify-center shadow-md z-30">
-            <FiCheck className="w-2.5 h-2.5 text-white" strokeWidth={2.75} />
-          </div>
         )}
       </div>
     );
@@ -1922,27 +1917,30 @@ function PostHeader({
                 </span>
               </button>
             </div>
-            {onMenuClick ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  onMenuClick();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                className={`relative z-50 flex items-center justify-center rounded-full p-2 transition-all active:scale-[.98] ${
-                  isOverlaid
-                    ? 'text-white hover:opacity-70'
-                    : 'text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
-                }`}
-                aria-label="Post options"
-                title="Post options"
-              >
-                <FiList className="h-4 w-4" />
-              </button>
-            ) : null}
+            <div className="flex shrink-0 items-center gap-1">
+              {followPill}
+              {onMenuClick ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onMenuClick();
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  className={`relative z-50 flex items-center justify-center rounded-full p-2 outline-none ring-0 transition-all focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 active:scale-[.98] ${
+                    isOverlaid
+                      ? 'text-white hover:opacity-70'
+                      : 'text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
+                  }`}
+                  aria-label="Post options"
+                  title="Post options"
+                >
+                  <FiList className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
           </div>
           {socialSourceLabel ? (
             <span
@@ -1982,32 +1980,6 @@ function PostHeader({
             data-feed-dm-anchor={post.id}
           >
             {feedAvatar}
-            {/* + icon overlay on profile picture to follow (TikTok style) */}
-            {!isCurrentUser && onFollow && !isFollowingThisUser && (
-              <button
-                type="button"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  if (onFollow) {
-                    try {
-                      await onFollow();
-                    } catch (error) {
-                      console.error('Error in onFollow from click:', error);
-                    }
-                  }
-                }}
-                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-md z-30"
-                style={{ 
-                  touchAction: 'manipulation',
-                  WebkitTapHighlightColor: 'transparent',
-                  pointerEvents: 'auto'
-                }}
-                aria-label="Follow user"
-              >
-                <FiPlus className="w-2.5 h-2.5 text-white" strokeWidth={2.5} />
-              </button>
-            )}
             {/* DM icon only when mutual follow (both follow each other) */}
             {!isCurrentUser && isMutualFollow && onOpenDM && (
               <button
@@ -2027,12 +1999,6 @@ function PostHeader({
               >
                 <VscLiveShare className="w-2.5 h-2.5 text-red-500" />
               </button>
-            )}
-            {/* Green tick when we follow them but they don't follow us */}
-            {!isCurrentUser && onFollow && isFollowingThisUser && !isMutualFollow && (
-              <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border border-white dark:border-gray-900 flex items-center justify-center shadow-md z-30">
-                <FiCheck className="w-2.5 h-2.5 text-white" strokeWidth={2.75} />
-              </div>
             )}
           </div>
           <div className="ml-2.5 flex-1 min-w-0 flex flex-col gap-0" onClick={(e) => e.stopPropagation()}>
@@ -2076,7 +2042,8 @@ function PostHeader({
             ) : null}
           </div>
         </div>
-        <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
+        <div className="relative z-10 flex shrink-0 items-center gap-1">
+          {followPill}
           {onMenuClick && (
             <button
               onClick={(e) => {
@@ -2086,7 +2053,7 @@ function PostHeader({
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
-              className={`p-2 min-w-[40px] min-h-[40px] flex items-center justify-center transition-all active:scale-[.98] z-50 relative ${isOverlaid
+              className={`relative z-50 flex min-h-[40px] min-w-[40px] items-center justify-center p-2 outline-none ring-0 transition-all focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 active:scale-[.98] ${isOverlaid
                 ? 'text-white hover:opacity-70'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
@@ -2693,6 +2660,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const openScenesCooldownRef = React.useRef(0);
   const isProcessingDoubleTap = React.useRef<boolean>(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  const carouselVideoRefs = React.useRef<Array<HTMLVideoElement | null>>([]);
+  const feedVideoInViewRef = React.useRef(false);
   const imageRef = React.useRef<HTMLImageElement>(null);
   const observerRef = React.useRef<IntersectionObserver | null>(null);
   const mediaContainerRef = React.useRef<HTMLDivElement>(null);
@@ -2727,6 +2696,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const hasMultipleItems = items.length > 1;
   const currentItem = items[currentIndex];
+  const currentIndexRef = React.useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+  const hasFeedVideo = items.some((item) => item.type === 'video' && !!item.url);
   const imageOnlyItems = React.useMemo(
     () => items.filter((it) => it.type === 'image' && it.url),
     [items]
@@ -3033,18 +3005,53 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [postId, currentItem?.type]);
 
+  const pauseCarouselExcept = React.useCallback((activeIndex: number) => {
+    carouselVideoRefs.current.forEach((el, index) => {
+      if (!el || index === activeIndex) return;
+      try {
+        el.pause();
+      } catch {
+        /* ignore */
+      }
+    });
+  }, []);
+
+  const playActiveFeedVideo = React.useCallback(() => {
+    const activeIndex = currentIndexRef.current;
+    const active = hasMultipleItems
+      ? carouselVideoRefs.current[activeIndex] || null
+      : videoRef.current;
+    if (active) videoRef.current = active;
+    pauseCarouselExcept(activeIndex);
+    if (!feedVideoInViewRef.current || items[activeIndex]?.type !== 'video' || !active) return;
+    const allowAutoplay = autoplayPref === 'always' || (autoplayPref === 'wifi' && !lowBandwidthMode);
+    if (!allowAutoplay) return;
+    active.muted = isMuted;
+    active.play().catch((err) => {
+      if (err?.name !== 'NotSupportedError' && !String(err?.message || '').includes('no supported source')) {
+        console.warn('Video play failed:', err);
+      }
+    });
+    setIsPlaying(true);
+  }, [autoplayPref, hasMultipleItems, isMuted, items, lowBandwidthMode, pauseCarouselExcept]);
+
   // Intersection Observer for auto-play (wrapped in try/catch for mobile â€“ avoids "Something went wrong" on phone)
   React.useEffect(() => {
-    if (currentItem?.type !== 'video' || !videoRef.current) return;
-    const videoEl = videoRef.current;
+    const root = mediaContainerRef.current;
+    if (!hasFeedVideo || !root) return;
     try {
       observerRef.current = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
             try {
               if (entry.isIntersecting) {
-                const v = videoRef.current;
-                if (v) {
+                feedVideoInViewRef.current = true;
+                const activeIndex = currentIndexRef.current;
+                const v = hasMultipleItems
+                  ? carouselVideoRefs.current[activeIndex] || videoRef.current
+                  : videoRef.current;
+                if (v) videoRef.current = v;
+                if (v && items[activeIndex]?.type === 'video') {
                   const duration = Number(v.duration);
                   const validDuration = Number.isFinite(duration) && duration > 0;
                   if (postId && videoTimesMap && validDuration) {
@@ -3056,6 +3063,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   const allowAutoplay =
                     autoplayPref === 'always' || (autoplayPref === 'wifi' && !lowBandwidthMode);
                   const visibilityGate = lowBandwidthMode ? entry.intersectionRatio >= 0.9 : true;
+                  pauseCarouselExcept(activeIndex);
                   if (allowAutoplay && visibilityGate) {
                     const now = Date.now();
                     const sinceLast = now - lastFeedAutoplayAtMs;
@@ -3080,6 +3088,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   }
                 }
               } else {
+                feedVideoInViewRef.current = false;
+                pauseCarouselExcept(-1);
                 const v = videoRef.current;
                 if (v) {
                   if (autoplayTimerRef.current) {
@@ -3101,7 +3111,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         },
         { threshold: lowBandwidthMode ? [0.5, 0.9] : 0.5 }
       );
-      observerRef.current.observe(videoEl);
+      observerRef.current.observe(root);
     } catch (err) {
       console.warn('IntersectionObserver setup error:', err);
     }
@@ -3115,7 +3125,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         autoplayTimerRef.current = null;
       }
     };
-  }, [currentItem?.type, postId, lowBandwidthMode, autoplayPref]);
+  }, [hasFeedVideo, hasMultipleItems, items, postId, lowBandwidthMode, autoplayPref, pauseCarouselExcept]);
+
+  // Swiping a carousel moves the playable file. Play the slide in view and stop the others.
+  React.useEffect(() => {
+    if (!hasMultipleItems) return;
+    const active = carouselVideoRefs.current[currentIndex] || null;
+    if (active) videoRef.current = active;
+    pauseCarouselExcept(currentIndex);
+    if (feedVideoInViewRef.current && currentItem?.type === 'video') {
+      playActiveFeedVideo();
+    }
+  }, [currentIndex, currentItem?.type, hasMultipleItems, pauseCarouselExcept, playActiveFeedVideo]);
 
   // Sync video muted state with isMuted state
   React.useEffect(() => {
@@ -3617,6 +3638,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               let slideElement: React.ReactNode = hasValidVideoSrc ? (
                 <video
                   key={item.url}
+                  ref={(node) => {
+                    carouselVideoRefs.current[slideIndex] = node;
+                    if (slideIndex === currentIndexRef.current) videoRef.current = node;
+                  }}
                   src={item.url}
                   className="w-full h-full"
                   style={{ objectFit: 'cover' }}
@@ -3628,7 +3653,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   draggable={false}
                   onContextMenu={(e) => e.preventDefault()}
                   controlsList="nodownload noremoteplayback"
-                  onLoadedData={handleVideoLoad}
+                  onLoadedData={(e) => {
+                    if (slideIndex !== currentIndexRef.current) return;
+                    handleVideoLoad();
+                    if (feedVideoInViewRef.current) {
+                      e.currentTarget.play().catch(() => {});
+                    }
+                  }}
                   onError={handleVideoError}
                 />
               ) : item.type === 'video' ? (
@@ -3840,27 +3871,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {!isLoading && !hasError && currentItem.type === 'video' && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    toggleGlobalMute();
-                  }}
-                  onTouchEnd={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    toggleGlobalMute();
-                  }}
-                  className="absolute bottom-3 right-3 z-30 flex h-[26px] w-[26px] items-center justify-center rounded-full border border-white/55 bg-black/70 text-white"
-                  aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-                  title={isMuted ? 'Unmute video' : 'Mute video'}
-                >
-                  {isMuted ? <FiVolumeX size={13} /> : <FiVolume2 size={13} />}
-                </button>
-              )}
-
             </div>
           );
         })()}
@@ -3882,6 +3892,27 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             ))}
           </>
         )}
+
+        {currentItem?.type === 'video' ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              toggleGlobalMute();
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              toggleGlobalMute();
+            }}
+            className="absolute bottom-3 right-3 z-30 flex h-[26px] w-[26px] items-center justify-center rounded-full border border-white/55 bg-black/70 text-white"
+            aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+            title={isMuted ? 'Unmute video' : 'Mute video'}
+          >
+            {isMuted ? <FiVolumeX size={13} /> : <FiVolume2 size={13} />}
+          </button>
+        ) : null}
 
         {/* Tagged Users Icon - Bottom of image/video */}
         {(() => {
@@ -5901,7 +5932,7 @@ function Stories24RailCollapseOverlay() {
   return null;
 }
 
-/** Horizontal Stories 24 strip — short cards, rank numbers, and a white border on the front card. */
+/** Horizontal Stories 24 strip — short cards and a white border on the front card. */
 function Stories24FeedRail({
   stories24Items,
   navigate,
@@ -5939,19 +5970,12 @@ function Stories24FeedRail({
     });
   }, [navigate, onBeforeOpenStoryFromRail]);
 
-  const handleStoryCardTap = React.useCallback((e: React.MouseEvent<HTMLButtonElement>, storyItem: Stories24RailItem) => {
-    if (expandingStory) return;
-    const rect = e.currentTarget.getBoundingClientRect();
+  const handleStoryCardTap = React.useCallback((_e: React.MouseEvent<HTMLButtonElement>, storyItem: Stories24RailItem) => {
     const railHandles = stories24Items
       .map((item) => item.handle)
-      .filter((handle) => handle && handle !== '__add_yours__');
-    setExpandingStory({
-      item: storyItem,
-      railHandles,
-      rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
-      phase: 'start',
-    });
-  }, [expandingStory, stories24Items]);
+      .filter((handle) => handle && !isStories24AddYoursHandle(handle));
+    openStoryFromRail(storyItem, railHandles);
+  }, [openStoryFromRail, stories24Items]);
 
   React.useEffect(() => {
     if (!expandingStory) return;
@@ -5995,7 +6019,7 @@ function Stories24FeedRail({
       if (railSlotCount <= 0) return;
       const next = Math.max(
         0,
-        Math.min(railSlotCount - 1, Math.round(event.currentTarget.scrollLeft / 264)),
+        Math.min(railSlotCount - 1, Math.round(event.currentTarget.scrollLeft / 230)),
       );
       if (next === focusedCardIndexRef.current) return;
       focusedCardIndexRef.current = next;
@@ -6039,8 +6063,15 @@ function Stories24FeedRail({
           className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide pl-3 pr-4"
           onScroll={onRailScroll}
         >
-          {displayCards.map(({ item, index }, slot) => {
+          {displayCards.map(({ item }, slot) => {
             const seen = stories24RailItemIsSeen(item);
+            const isOwnStory =
+              !!user?.handle &&
+              item.handle.trim().toLowerCase() === user.handle.trim().toLowerCase();
+            const avatarRaw = isOwnStory
+              ? user?.avatarUrl || item.avatarUrl || getAvatarForHandle(item.handle)
+              : item.avatarUrl || getAvatarForHandle(item.handle);
+            const avatarSrc = avatarRaw ? rewriteMediaUrlForClient(avatarRaw) : undefined;
             const rawTitle = (item.title || '').trim();
             const caption =
               rawTitle && !['shared a post', 'new story', 'add yours'].includes(rawTitle.toLowerCase())
@@ -6051,12 +6082,10 @@ function Stories24FeedRail({
               : `@${item.handle.replace(/^@/, '')}`;
             const cardLabel = caption || displayHandle;
             const cardMeta = caption ? item.subtitle || displayHandle : '';
-            const still = item.thumb && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(item.thumb) ? item.thumb : '';
+            const stillRaw = item.thumb && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(item.thumb) ? item.thumb : '';
+            const still = stillRaw ? rewriteMediaUrlForClient(stillRaw) : '';
             return (
               <div key={item.handle} className="flex shrink-0 items-center">
-                <span className="mr-1.5 w-7 text-left text-[26px] font-extrabold leading-[30px] text-white">
-                  {(index ?? 0) + 1}
-                </span>
                 <button
                   type="button"
                   data-stories24-card={encodeURIComponent(item.handle)}
@@ -6082,12 +6111,14 @@ function Stories24FeedRail({
                     style={{ background: 'linear-gradient(90deg, #03091B 0%, rgba(3,9,27,0.82) 46%, rgba(3,9,27,0.2) 100%)' }}
                     aria-hidden
                   />
-                  <Avatar
-                    src={item.avatarUrl || getAvatarForHandle(item.handle)}
-                    name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
-                    size={36}
-                    hasStory={!seen}
-                  />
+                  <span className="relative z-[1] shrink-0">
+                    <Avatar
+                      src={avatarSrc}
+                      name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                      size={36}
+                      hasStory={!seen}
+                    />
+                  </span>
                   <span className="relative z-[1] ml-2.5 min-w-0 flex-1">
                     <span className="block text-[13px] font-bold leading-4 text-white line-clamp-2">{cardLabel}</span>
                     {cardMeta ? (
@@ -6102,7 +6133,6 @@ function Stories24FeedRail({
           })}
           {hasMoreStories ? (
             <div className="flex shrink-0 items-center">
-              <span className="mr-1.5 w-7" aria-hidden />
               <button
                 type="button"
                 onClick={openViewAll}
@@ -7266,6 +7296,30 @@ function FeedPageWrapper() {
     return () => window.removeEventListener('postCreated', handlePostCreated);
   }, []);
 
+  // One follow flag per author. A tap, a profile change, or a feed refresh updates every
+  // card for that person, including cards that were off screen.
+  React.useEffect(() => {
+    return onFollowStatusChanged((payload) => {
+      const lower = String(payload.handle || '')
+        .trim()
+        .replace(/^@+/, '')
+        .toLowerCase();
+      if (!lower) return;
+      setPages((prev) =>
+        prev.map((page) =>
+          page.map((p) =>
+            String(p.userHandle || '')
+              .trim()
+              .replace(/^@+/, '')
+              .toLowerCase() === lower
+              ? { ...p, isFollowing: payload.isFollowing === true }
+              : p,
+          ),
+        ),
+      );
+    });
+  }, []);
+
   // Sync feed when user follows/unfollows from profile (or elsewhere) so newsfeed cards stay correct
   React.useEffect(() => {
     const handler = (e: CustomEvent<{ handle: string; isFollowing: boolean }>) => {
@@ -8238,7 +8292,9 @@ function FeedPageWrapper() {
           const latestMediaUrl = latest.mediaUrl;
           const latestMediaType = latest.mediaType;
           const firstImage = sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl;
-          let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined);
+          const poster = (latest.videoPosterUrl || '').trim();
+          const posterStill = poster && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(poster) ? poster : undefined;
+          let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined) || posterStill;
           const text =
             (latest.text || (latest as any).text_content || '').trim()
             || (latest.sharedFromPost ? 'Shared a post' : 'New story');
@@ -8259,15 +8315,31 @@ function FeedPageWrapper() {
 
           // Collapse-back overlay uses a static <img> only; video URLs are not drawn during the transform animation.
           if (!thumb && latestMediaType === 'video' && latestMediaUrl) {
-            thumb = await captureVideoFrameDataUrl(latestMediaUrl);
+            thumb = await captureVideoFrameDataUrl(rewriteMediaUrlForClient(latestMediaUrl));
+          }
+          if (thumb && !thumb.startsWith('data:')) {
+            thumb = rewriteMediaUrlForClient(thumb);
           }
 
+          const storyIds = sortedStories.map((story) => story.id).filter(Boolean);
+          const isOwnStory =
+            !!user.handle &&
+            group.userHandle.trim().toLowerCase() === user.handle.trim().toLowerCase();
+          const storyAvatar = (latest as { avatarUrl?: string }).avatarUrl;
+          const avatarRaw = isOwnStory
+            ? user.avatarUrl || group.avatarUrl || storyAvatar
+            : group.avatarUrl || storyAvatar || getAvatarForHandle(group.userHandle);
+          const avatarUrl = avatarRaw ? rewriteMediaUrlForClient(avatarRaw) : undefined;
           nextItems.push({
             handle: group.userHandle,
             title,
             subtitle,
             thumb,
+            avatarUrl,
             previewVideoUrl: latestMediaType === 'video' ? latestMediaUrl : undefined,
+            storyId: latest.id,
+            storyIds,
+            hasViewed: sortedStories.length > 0 && sortedStories.every((story) => story.hasViewed),
           });
           if (nextItems.length >= 12) break;
         }
@@ -8323,7 +8395,7 @@ function FeedPageWrapper() {
       });
     }
 
-    return ordered.slice(0, 12);
+    return orderStories24RailItems(ordered, user?.handle).slice(0, 41);
   }, [storiesRailItems, user?.handle]);
 
   const openStories24FromHeader = React.useCallback(() => {
@@ -8390,7 +8462,23 @@ function FeedPageWrapper() {
     }
   }, [user, routerLocation.pathname, routerLocation.key, flat.length]);
 
+  const followInFlightRef = React.useRef(new Set<string>());
+
   async function handleMainFeedFollow(p: Post): Promise<void> {
+          const followKey = String(p.userHandle || '').trim().toLowerCase();
+          if (followKey && followInFlightRef.current.has(followKey)) return;
+          if (followKey) followInFlightRef.current.add(followKey);
+          const finishFollow = () => {
+            if (followKey) followInFlightRef.current.delete(followKey);
+          };
+          try {
+          await runMainFeedFollow(p);
+          } finally {
+            finishFollow();
+          }
+  }
+
+  async function runMainFeedFollow(p: Post): Promise<void> {
           if (!online) {
             updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
             setFollowState(userId, p.userHandle, !p.isFollowing);
@@ -8615,13 +8703,35 @@ function FeedPageWrapper() {
                   }
                 }
               } else {
-                // Public profile â€“ follow via API then update UI
+                // The pill said Follow, so this tap must end on Following.
+                // The server route is a toggle: if a follow already existed it removes it
+                // and the pill snaps back. When that happens, follow again.
                 try {
-                  const result = await toggleFollow(p.userHandle);
-                  const newFollowingState =
-                    result?.status === 'accepted' || result?.following === true;
-                  setFollowState(userId, p.userHandle, newFollowingState);
-                  updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: newFollowingState }));
+                  let result = await toggleFollow(p.userHandle);
+                  const removedExistingFollow =
+                    result?.status === 'unfollowed' ||
+                    (result?.following === false && result?.status !== 'pending');
+                  if (removedExistingFollow) {
+                    result = await toggleFollow(p.userHandle);
+                  }
+                  const pending = result?.status === 'pending';
+                  const nowFollowing = pending
+                    ? false
+                    : result?.following === true || result?.status === 'accepted' || result?.status !== 'unfollowed';
+                  if (pending && user?.handle) {
+                    createFollowRequest(user.handle, p.userHandle);
+                  }
+                  setFollowState(userId, p.userHandle, nowFollowing);
+                  const lower = p.userHandle.trim().toLowerCase();
+                  setPages((prev) =>
+                    prev.map((page) =>
+                      page.map((post) =>
+                        post.userHandle && post.userHandle.trim().toLowerCase() === lower
+                          ? { ...post, isFollowing: nowFollowing }
+                          : post,
+                      ),
+                    ),
+                  );
                 } catch (apiError: any) {
                   const isConnectionError =
                     apiError?.message === 'CONNECTION_REFUSED' ||

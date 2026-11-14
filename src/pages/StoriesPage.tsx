@@ -20,6 +20,7 @@ import { getAvatarForHandle } from '../api/users';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
+import { storyHasRenderableMedia } from '../utils/storyMediaNative';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
@@ -201,6 +202,7 @@ export default function StoriesPage() {
     const fromDmViewStory = location.state?.fromDmViewStory === true;
     const fromStories24Rail = location.state?.fromStories24Rail === true;
     const skipStories24RailReturn = location.state?.skipStories24RailReturn === true;
+    const soloMode = location.state?.soloMode === true;
     const railHandles = Array.isArray(location.state?.railHandles)
         ? (location.state.railHandles as string[])
         : [];
@@ -589,8 +591,18 @@ export default function StoriesPage() {
                 return { ...group, avatarUrl };
             }));
 
-            // Always inject Gazetteer world highlights as a mock story group (first position)
-            let finalGroups = withGazetteerWorldGroup(groupsWithAvatars);
+            const soloHandle = soloMode && typeof openUserHandle === 'string'
+                ? openUserHandle.replace(/^@/, '').trim().toLowerCase()
+                : '';
+            const scopedGroups = soloHandle
+                ? groupsWithAvatars.filter(
+                    (group) => (group.userHandle || '').replace(/^@/, '').trim().toLowerCase() === soloHandle,
+                )
+                : groupsWithAvatars;
+
+            // Always inject Gazetteer world highlights as a mock story group (first position).
+            // A solo open stays on the tapped author and does not roll into that group.
+            let finalGroups = soloHandle ? scopedGroups : withGazetteerWorldGroup(scopedGroups);
 
             // Keep feed rail playback order when provided.
             if (requestedHandles.length > 0) {
@@ -613,7 +625,7 @@ export default function StoriesPage() {
         } finally {
             setLoading(false);
         }
-    }, [user?.id, user?.avatarUrl, openUserHandle, railHandlesKey]);
+    }, [user?.id, user?.avatarUrl, openUserHandle, railHandlesKey, soloMode]);
 
     // Load story groups when user is available
     React.useEffect(() => {
@@ -689,33 +701,30 @@ export default function StoriesPage() {
             return;
         }
 
-        // Fast path: if stories are already loaded in this group, open immediately.
-        if (group.stories && group.stories.length > 0) {
-            const existingIdx = storyGroups.findIndex(g => g.userId === group.userId || g.userHandle === group.userHandle);
-            const groupIndex = existingIdx >= 0 ? existingIdx : 0;
-            const initialStoryIndex = preferredStoryId
-                ? Math.max(0, group.stories.findIndex((story) => story.id === preferredStoryId))
-                : 0;
-            setCurrentGroupIndex(groupIndex);
-            currentGroupIndexRef.current = groupIndex;
-            setCurrentStoryIndex(initialStoryIndex);
-            currentStoryIndexRef.current = initialStoryIndex;
-            setViewingStories(true);
-            setAutoOpeningStory(false);
-            setProgress(0);
-            setPaused(false);
-            setIsMuted(getGlobalVideoMuted());
-            elapsedTimeRef.current = 0;
-            return;
-        }
-
         const followedUserHandles = await getFollowedUsers(user.id);
-        const stories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
+        const fetchedStories = await fetchUserStories(
+            user.id,
+            group.userId,
+            followedUserHandles || [],
+            group.userHandle,
+        );
+        const fetchedRenderable = (fetchedStories || []).filter(storyHasRenderableMedia);
+        const groupRenderable = (group.stories || []).filter(storyHasRenderableMedia);
+        const stories =
+            fetchedRenderable.length > 0
+                ? fetchedStories
+                : groupRenderable.length > 0
+                  ? group.stories
+                  : fetchedStories && fetchedStories.length > 0
+                    ? fetchedStories
+                    : group.stories || [];
         if (!stories || stories.length === 0) return;
 
         // Find the group index in the original array, or add it if not found
         setStoryGroups(prev => {
-            let groupIndex = prev.findIndex(g => g.userId === group.userId);
+            let groupIndex = prev.findIndex(
+                (g) => g.userId === group.userId || g.userHandle === group.userHandle,
+            );
             const initialStoryIndex = preferredStoryId
                 ? Math.max(0, stories.findIndex((story) => story.id === preferredStoryId))
                 : 0;

@@ -1185,6 +1185,16 @@ export function hasExplicitFollowState(
   return Object.keys(follows).some((k) => k.toLowerCase() === lower);
 }
 
+function normFollowHandle(handle: string | undefined): string {
+  return String(handle || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase();
+}
+
+/** When the viewer last tapped follow/unfollow. A feed response that started earlier must not undo it. */
+const followChangedAt = new Map<string, number>();
+
 /** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates.
  *  Unfollow stores `false` (does not delete) so decorateForUser won't fall back to a stale post.isFollowing. */
 function setFollowStateKey(follows: Record<string, boolean>, handle: string, isFollowing: boolean): void {
@@ -1207,6 +1217,8 @@ export async function getFollowedUsers(userId: string): Promise<string[]> {
 // Explicitly set follow state for a given handle. Persists to localStorage.
 export function setFollowState(userId: string, handle: string, isFollowing: boolean): void {
   const uid = typeof userId === 'string' ? userId : String(userId);
+  const key = normFollowHandle(handle);
+  if (key) followChangedAt.set(key, Date.now());
   const s = getState(uid);
   setFollowStateKey(s.follows, handle, isFollowing);
   saveFollowsToStorage(uid, s.follows);
@@ -1264,19 +1276,57 @@ export function getLocalPostById(postId: string | undefined | null): Post | unde
   return posts.find((p) => String(p.id) === idKey);
 }
 
+/**
+ * One author has one follow flag. If any post in this response is Following,
+ * the others in the same response follow that instead of flipping the pill back.
+ */
+function unifyAuthorFollowFlags(items: Post[]): Post[] {
+  const followed = new Set<string>();
+  for (const item of items) {
+    if (item.isFollowing !== true) continue;
+    const key = normFollowHandle(item.userHandle);
+    if (key) followed.add(key);
+  }
+  if (followed.size === 0) return items;
+  return items.map((item) => {
+    const key = normFollowHandle(item.userHandle);
+    if (!key || !followed.has(key) || item.isFollowing === true) return item;
+    return { ...item, isFollowing: true };
+  });
+}
+
 // The server follow flag on a fetched post is the same graph the profile page uses.
 // A stale local unfollow must not keep the feed card on Follow, and a stale local
-// follow must not stick after the server says it is gone. That local map is also
-// what the Stories 24 rail uses to decide who appears.
-export function decorateForUser(userId: string, p: Post): Post {
+// follow must not stick after the server says it is gone. A later page must not
+// clear a follow the viewer just set, or that an earlier post by the same person
+// already confirmed. That local map is also what the Stories 24 rail uses.
+export function decorateForUser(
+  userId: string,
+  p: Post,
+  options?: { fetchedAt?: number; allowDowngrade?: boolean },
+): Post {
   const s = getState(userId);
   const fromLocal = getFollowState(s.follows, p.userHandle);
   const fromApi = p.isFollowing === true;
+  const key = normFollowHandle(p.userHandle);
+  const changedAt = key ? followChangedAt.get(key) || 0 : 0;
+  const stalePayload = options?.fetchedAt != null && changedAt > options.fetchedAt;
+  // A feed page fetched right after the tap can still say Follow. Keep the tap.
+  const recentlyFollowed =
+    fromLocal && !fromApi && changedAt > 0 && Date.now() - changedAt < 20000;
+  const allowDowngrade = options?.allowDowngrade !== false;
   let isFollowing = fromApi;
-  if (p.userHandle && fromApi !== fromLocal) {
-    setFollowStateKey(s.follows, p.userHandle, fromApi);
-    saveFollowsToStorage(userId, s.follows);
-    emitFollowStatusChanged({ handle: p.userHandle, isFollowing: fromApi });
+  if (stalePayload || recentlyFollowed) {
+    isFollowing = fromLocal;
+  } else if (key && fromApi !== fromLocal) {
+    if (!fromApi && fromLocal && !allowDowngrade) {
+      isFollowing = true;
+    } else {
+      setFollowStateKey(s.follows, p.userHandle, fromApi);
+      saveFollowsToStorage(userId, s.follows);
+      emitFollowStatusChanged({ handle: p.userHandle, isFollowing: fromApi });
+      isFollowing = fromApi;
+    }
   }
   const idKey = String(p.id);
   const localLiked = Object.prototype.hasOwnProperty.call(s.likes, idKey)
@@ -2017,6 +2067,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       });
 
       const apiCursor = cursor ?? 0;
+      const feedFetchedAt = Date.now();
       // Only send userId if it looks like a UUID (backend requires uuid|exists:users,id)
       const uuidLike = typeof userId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
       const feedTypeApi = tabToBoostFeedType(t);
@@ -2133,7 +2184,10 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       // Decorate every item with local follow/like state so + vs check and heart stay correct (e.g. Following feed)
       const uid = userId || 'me';
       syncLocalLikesFromApi(uid, items, { allowUnlike: true });
-      items = items.map(p => decorateForUser(uid, p));
+      const allowFollowDowngrade = isFirstFeedPageCursor(cursor);
+      items = unifyAuthorFollowFlags(items).map((p) =>
+        decorateForUser(uid, p, { fetchedAt: feedFetchedAt, allowDowngrade: allowFollowDowngrade }),
+      );
 
       return {
         items: items.map(normalizeCaptionFields),

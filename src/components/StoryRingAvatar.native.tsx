@@ -1,15 +1,8 @@
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar.native';
 import { useHasUnseenStory } from '../hooks/useHasActiveStories';
-import {
-    STORY_GRADIENT_RING_COLORS,
-    STORY_GRADIENT_RING_END,
-    STORY_GRADIENT_RING_START,
-    STORY_RING_GAP,
-    STORY_RING_WIDTH,
-} from '../utils/storyRingNative';
+import { STORY_RING_GAP, STORY_RING_UNSEEN_COLOR, STORY_RING_WIDTH } from '../utils/storyRingNative';
 
 type Props = {
     handle: string;
@@ -26,8 +19,8 @@ type Props = {
 };
 
 /**
- * Shared profile photo + Instagram unseen gradient. Seen / no-story authors
- * render a clean avatar with no ring so feed headers and inbox threads match.
+ * Profile photo with a thin white ring when there is an unviewed story.
+ * The gap inside the ring stays clear so the surface behind the photo shows through.
  */
 export default function StoryRingAvatar({
     handle,
@@ -49,29 +42,26 @@ export default function StoryRingAvatar({
         onHasStoryChange,
     });
 
-    const photo = (
-        <Avatar src={src} name={name} size={hasUnseenStory ? size - (STORY_RING_WIDTH + STORY_RING_GAP) * 2 : size} hideBorder />
-    );
+    const photoSize = hasUnseenStory ? size - (STORY_RING_WIDTH + STORY_RING_GAP) * 2 : size;
+    const photo = <Avatar src={src} name={name} size={photoSize} hideBorder />;
 
+    // Border draws the white ring. The padding is the gap, left clear so the
+    // card or media behind the photo shows through.
     const body = hasUnseenStory ? (
-        <LinearGradient
-            colors={[...STORY_GRADIENT_RING_COLORS]}
-            start={STORY_GRADIENT_RING_START}
-            end={STORY_GRADIENT_RING_END}
-            style={[styles.ring, { width: size, height: size, borderRadius: size / 2, padding: STORY_RING_WIDTH }]}
+        <View
+            style={[
+                styles.ring,
+                {
+                    width: size,
+                    height: size,
+                    borderRadius: size / 2,
+                    borderWidth: STORY_RING_WIDTH,
+                    padding: STORY_RING_GAP,
+                },
+            ]}
         >
-            <View
-                style={[
-                    styles.ringInner,
-                    {
-                        borderRadius: size / 2,
-                        padding: STORY_RING_GAP,
-                    },
-                ]}
-            >
-                {photo}
-            </View>
-        </LinearGradient>
+            {photo}
+        </View>
     ) : (
         photo
     );
@@ -94,13 +84,7 @@ const styles = StyleSheet.create({
     ring: {
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    ringInner: {
-        width: '100%',
-        height: '100%',
-        backgroundColor: '#000000',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
+        backgroundColor: 'transparent',
+        borderColor: STORY_RING_UNSEEN_COLOR,
     },
 });

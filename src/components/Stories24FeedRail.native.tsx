@@ -66,8 +66,8 @@ const CARD_RING_WIDTH = 1;
 const CARD_RING_GAP = 2;
 const CARD_AVATAR_PHOTO = 36;
 const CARD_AVATAR_RING = CARD_AVATAR_PHOTO + (CARD_RING_WIDTH + CARD_RING_GAP) * 2;
-/** Rank column + gap + card + space before the next rank. Used to follow the front card while dragging. */
-const RAIL_CARD_STRIDE = 28 + 6 + CARD_W + 10;
+/** Card width plus the gap before the next card. Used to follow the front card while dragging. */
+const RAIL_CARD_STRIDE = CARD_W + 10;
 /** Placeholders written when a story has no caption. Show the handle instead. */
 const RAIL_CAPTION_PLACEHOLDERS = new Set(['shared a post', 'new story', 'add yours']);
 /** Idle / missing poster — never the old BBB rainbow test card. */
@@ -828,7 +828,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                 onScrollEndDrag={() => setRailScrolling(false)}
                 onMomentumScrollEnd={() => setRailScrolling(false)}
             >
-                {displayCards.map(({ item, index }, slot) => {
+                {displayCards.map(({ item }, slot) => {
                     const handleKey = normalizeStories24Handle(item.handle);
                     // Keep the source card visible until the morph clone has a paintable frame.
                     const morphHidden =
@@ -838,14 +838,8 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                         (!!collapsing &&
                             collapseHideSource &&
                             normalizeStories24Handle(collapsing.payload.handle) === handleKey);
-                    const rank = typeof index === 'number' ? index + 1 : null;
                     return (
                         <View key={item.handle} style={styles.cardWithRank}>
-                            {rank != null ? (
-                                <Text style={styles.cardRankBeside}>{rank}</Text>
-                            ) : (
-                                <View style={styles.cardRankSlot} />
-                            )}
                             <StoryCard
                                 item={item}
                                 registerCardRef={registerCardRef}
@@ -862,7 +856,6 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                 })}
                 {hasMoreStories ? (
                     <View style={styles.cardWithRank}>
-                        <View style={styles.cardRankSlot} />
                         <TouchableOpacity
                             style={[styles.card, displayCards.length === litCardIndex && styles.cardLit]}
                             onPress={openViewAll}
@@ -961,19 +954,6 @@ const styles = StyleSheet.create({
     cardWithRank: {
         flexDirection: 'row',
         alignItems: 'center',
-    },
-    cardRankBeside: {
-        width: 28,
-        marginRight: 6,
-        color: '#FFFFFF',
-        fontSize: 26,
-        lineHeight: 30,
-        fontWeight: '800',
-        textAlign: 'left',
-    },
-    cardRankSlot: {
-        width: 28,
-        marginRight: 6,
     },
     viewAllLabel: {
         flex: 1,

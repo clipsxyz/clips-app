@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
-import { BottomSheetFlatList, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { unifiedSearch } from '../api/search';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
 import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
-import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 
 type TaggedUser = {
     handle: string;
@@ -104,10 +108,10 @@ export default function TaggedUsersBottomSheet({
                 />
                 <View style={styles.rowText}>
                     <Text style={styles.name} numberOfLines={1}>
-                        {item.display_name || item.handle}
+                        {item.display_name || item.handle.replace(/^@/, '')}
                     </Text>
                     <Text style={styles.handle} numberOfLines={1}>
-                        {item.handle}
+                        @{item.handle.replace(/^@/, '')}
                     </Text>
                 </View>
             </TouchableOpacity>
@@ -123,48 +127,63 @@ export default function TaggedUsersBottomSheet({
             backgroundStyle={GAZETTEER_SHEET_INBOX.background}
             handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
         >
-            <BottomSheetView style={styles.headerBlock}>
-                <View style={styles.header}>
-                    <View style={styles.headerLeft}>
-                        <View style={styles.headerIcon}>
-                            <Icon name="people" size={20} color={UCL_TEXT_PRIMARY} />
+            {/*
+              Column layout (regular View, not a BottomSheetView sibling of the list)
+              keeps the title pinned. A FlatList sibling paints over the header.
+            */}
+            <View style={styles.body}>
+                <View style={styles.headerBlock}>
+                    <View style={styles.header}>
+                        <View style={styles.headerLeft}>
+                            <View style={styles.headerIcon}>
+                                <Icon name="people" size={20} color={UCL_TEXT_PRIMARY} />
+                            </View>
+                            <View style={styles.headerCopy}>
+                                <Text style={styles.title} numberOfLines={1}>
+                                    Tagged people
+                                </Text>
+                                <Text style={styles.subtitle} numberOfLines={1}>
+                                    {taggedUserHandles.length}{' '}
+                                    {taggedUserHandles.length === 1 ? 'person' : 'people'}
+                                </Text>
+                            </View>
                         </View>
-                        <View>
-                            <Text style={styles.title}>Tagged people</Text>
-                            <Text style={styles.subtitle}>
-                                {taggedUserHandles.length}{' '}
-                                {taggedUserHandles.length === 1 ? 'person' : 'people'}
-                            </Text>
-                        </View>
+                        <TouchableOpacity onPress={onClose} hitSlop={8} style={styles.closeBtn}>
+                            <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
+                        </TouchableOpacity>
                     </View>
-                    <TouchableOpacity onPress={onClose} hitSlop={8}>
-                        <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
-                    </TouchableOpacity>
                 </View>
-            </BottomSheetView>
 
-            {loading ? (
-                <BottomSheetView>
+                {loading ? (
                     <ActivityIndicator color={UCL_TEXT_PRIMARY} style={styles.loader} />
-                </BottomSheetView>
-            ) : (
-                <BottomSheetFlatList
-                    data={users}
-                    keyExtractor={(item) => item.handle}
-                    renderItem={renderItem}
-                    contentContainerStyle={styles.list}
-                    ListEmptyComponent={
-                        <Text style={styles.empty}>No tagged users found</Text>
-                    }
-                />
-            )}
+                ) : (
+                    <BottomSheetFlatList
+                        style={styles.listFlex}
+                        data={users}
+                        keyExtractor={(item, index) => `${item.handle}-${index}`}
+                        renderItem={renderItem}
+                        contentContainerStyle={styles.list}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                        ListEmptyComponent={
+                            <Text style={styles.empty}>No tagged users found</Text>
+                        }
+                    />
+                )}
+            </View>
         </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
+    body: {
+        flex: 1,
+    },
     headerBlock: {
+        zIndex: 2,
         paddingHorizontal: 16,
+        paddingBottom: 12,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.1)',
     },
@@ -172,12 +191,24 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingBottom: 12,
     },
     headerLeft: {
+        flex: 1,
+        minWidth: 0,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
+        paddingRight: 12,
+    },
+    headerCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    closeBtn: {
+        width: 36,
+        height: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerIcon: {
         width: 40,
@@ -199,6 +230,9 @@ const styles = StyleSheet.create({
     },
     loader: {
         paddingVertical: 32,
+    },
+    listFlex: {
+        flex: 1,
     },
     list: {
         paddingHorizontal: 16,

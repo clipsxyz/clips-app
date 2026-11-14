@@ -774,13 +774,13 @@ const styles = StyleSheet.create({
     chromeRoot: {
         ...StyleSheet.absoluteFill,
         zIndex: 20,
-        elevation: 20,
+        elevation: 0,
     },
     closeFabWrap: {
         position: 'absolute',
         left: 12,
         zIndex: 30,
-        elevation: 30,
+        elevation: 0,
     },
     closeFab: {
         position: 'absolute',
@@ -792,7 +792,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.55)',
         zIndex: 30,
-        elevation: 30,
+        elevation: 0,
     },
     /** Audio opt-in for fullscreen video. Centred above the safe-area inset. */
     muteFab: {
@@ -805,7 +805,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.55)',
         zIndex: 25,
-        elevation: 25,
+        elevation: 0,
     },
     headerCloseSpacer: {
         width: 44,
@@ -814,7 +814,7 @@ const styles = StyleSheet.create({
     chromeLayer: {
         ...StyleSheet.absoluteFill,
         zIndex: 20,
-        elevation: 20,
+        elevation: 0,
     },
     stage: {
         flex: 1,
@@ -848,7 +848,7 @@ const styles = StyleSheet.create({
         paddingBottom: 8,
         gap: 4,
         zIndex: 30,
-        elevation: 30,
+        elevation: 0,
         backgroundColor: 'rgba(0,0,0,0.72)',
     },
     chromeFooter: {
@@ -857,7 +857,7 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         zIndex: 30,
-        elevation: 30,
+        elevation: 0,
         backgroundColor: 'rgba(0,0,0,0.92)',
     },
     promotedRow: {

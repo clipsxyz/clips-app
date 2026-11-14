@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
 
 /**
@@ -87,42 +87,29 @@ export function useFollowState(opts: {
     const handle = normalizeHandle(opts.handle || '');
     const userId = opts.userId != null ? String(opts.userId) : '';
 
-    const defaults = useMemo<FollowStateValue>(
-        () => ({
-            isFollowing: opts.isFollowing === true,
-            hasPendingRequest: opts.hasPendingRequest === true,
-        }),
-        [opts.isFollowing, opts.hasPendingRequest],
-    );
-
-    const [state, setState] = useState<FollowStateValue>(() => {
-        const cached = handle ? cache.get(handle) : undefined;
-        if (cached) {
-            return {
-                isFollowing: cached.isFollowing === true,
-                hasPendingRequest: cached.hasPendingRequest === true,
-            };
-        }
-        return defaults;
-    });
-
-    // Adopt fresh props when no broadcast has been seen for this handle yet
-    // (pull-to-refresh refetches, remounts after viewer change, etc).
-    useEffect(() => {
-        if (handle && cache.has(handle)) return;
-        setState(defaults);
-    }, [defaults, handle]);
+    const [, setVersion] = useState(0);
 
     useEffect(() => {
         if (!handle) return undefined;
         return onFollowStatusChanged((payload) => {
             if (!matchesHook(payload, handle, userId)) return;
-            setState({
-                isFollowing: payload.isFollowing === true,
-                hasPendingRequest: payload.hasPendingRequest === true,
-            });
+            setVersion((version) => version + 1);
         });
     }, [handle, userId]);
 
-    return state;
+    // Read the shared cache during render so every card for this person shows the
+    // same label. A per-card copy was staying on Following after a later post had
+    // already moved the author back to Follow.
+    const cached = handle ? cache.get(handle) : undefined;
+    if (cached && matchesHook(cached, handle, userId)) {
+        return {
+            isFollowing: cached.isFollowing === true,
+            hasPendingRequest: cached.hasPendingRequest === true,
+        };
+    }
+
+    return {
+        isFollowing: opts.isFollowing === true,
+        hasPendingRequest: opts.hasPendingRequest === true,
+    };
 }
