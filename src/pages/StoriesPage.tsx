@@ -3799,9 +3799,8 @@ export default function StoriesPage() {
                                 style={
                                     hasUnviewed
                                         ? {
-                                              background:
-                                                  'linear-gradient(to right, rgb(16, 185, 129), rgb(59, 130, 246))',
-                                              padding: '2px',
+                                              background: '#FFFFFF',
+                                              padding: '1px',
                                           }
                                         : {}
                                 }

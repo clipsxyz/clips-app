@@ -19,8 +19,7 @@ import { addComment, addReply, fetchCommentsPage, toggleCommentLike, toggleReply
 import { getCollectionsForPost, unsavePost, savePostToDefaultCollection } from '../api/collections';
 import { getStableUserId } from '../utils/userId';
 import { markFeedPostArchived, setPostNotificationsPref, hasPostNotificationsPref } from '../utils/feedPostPrefs';
-import { isProfilePrivate, canSendMessage, hasPendingFollowRequest, createFollowRequest } from '../api/privacy';
-import { getFollowedUsers, setFollowState } from '../api/posts';
+import { isProfilePrivate, hasPendingFollowRequest } from '../api/privacy';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import type { Comment } from '../types';
@@ -2403,54 +2402,14 @@ export default function ScenesModal({
                                     >
                                         <span>Add a comment…</span>
                                     </button>
-                                    {/* DM + more keep same behavior, compact chips */}
                                     <button
-                                        onClick={async () => {
-                                            if (!post.userHandle || !user?.handle || !user?.id) return;
-                                            if (post.userHandle === user.handle) return;
-
-                                            const followedUsers = await getFollowedUsers(user.id);
-                                            const profilePrivate = isProfilePrivate(post.userHandle);
-                                            const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
-                                            const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
-
-                                            if (!canMessage && profilePrivate) {
-                                                if (hasPending) {
-                                                    await Swal.fire(bottomSheet({
-                                                        title: 'Follow Request Pending',
-                                                        message: "This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.",
-                                                        icon: 'alert',
-                                                    }));
-                                                    return;
-                                                }
-
-                                                const result = await Swal.fire(bottomSheet({
-                                                    title: 'Cannot Send Message',
-                                                    message: "This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.",
-                                                    icon: 'alert',
-                                                    showCancelButton: true,
-                                                    confirmButtonText: 'Request to Follow',
-                                                    cancelButtonText: 'Cancel',
-                                                }));
-
-                                                if (result.isConfirmed) {
-                                                    createFollowRequest(user.handle, post.userHandle);
-                                                    if (user?.id) setFollowState(user.id, post.userHandle, false);
-                                                    Swal.fire(bottomSheet({
-                                                        title: 'Follow Request Sent',
-                                                        message: "You will be notified when they accept your request.",
-                                                        icon: 'success',
-                                                    }));
-                                                }
-                                                return;
-                                            }
-
-                                            navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
-                                            onClose();
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setShareModalOpen(true);
                                         }}
-                                        disabled={!user || post.userHandle === user?.handle}
-                                        className="flex h-[38px] w-[38px] items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:cursor-not-allowed disabled:opacity-35"
-                                        aria-label="Send direct message"
+                                        className="flex h-[38px] w-[38px] items-center justify-center rounded-full border border-white/20 bg-white/10 text-white"
+                                        aria-label="Share"
                                     >
                                         <FiSend className="h-5 w-5 text-white" />
                                     </button>

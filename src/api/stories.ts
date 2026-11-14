@@ -1709,22 +1709,13 @@ export async function fetchFollowedUsersStoryGroups(
                 if (!page.hasMore) break;
             } while (cursor && pages < maxPages);
 
-            // The API (/stories/paged) is scoped to the viewer plus accepted follows.
-            // When the local follow cache has handles, drop anyone not in that set so a
-            // stale location-scoped payload cannot leak into the rail. An empty cache is
-            // trusted (follows made on another device). Direct profile/feed opens use
-            // fetchUserStories / fetchStoryGroupByHandle, not this rail list.
-            const followedSet = new Set(
-                (followedUserHandles || [])
-                    .map((h) => (h || '').trim().toLowerCase().replace(/^@/, ''))
-                    .filter(Boolean),
-            );
+            // /stories/paged is already limited to the viewer and accepted follows.
+            // Filtering that list again with the local follow cache hid people the
+            // profile page already showed as Following, and dropped their stories.
             const filtered = collected.filter((story) => {
                 if (story.userId === userId) return true;
                 if ((story.audience || 'public') === 'only_me') return false;
-                if (followedSet.size === 0) return true;
-                const handle = (story.userHandle || '').trim().toLowerCase().replace(/^@/, '');
-                return followedSet.has(handle);
+                return true;
             });
 
             const byUser = new Map<string, StoryGroup>();

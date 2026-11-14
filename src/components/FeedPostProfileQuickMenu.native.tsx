@@ -207,21 +207,22 @@ export default function FeedPostProfileQuickMenu({
 
     return (
         <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-            <Pressable style={styles.backdrop} onPress={onClose}>
-                <Pressable
-                    style={[styles.card, { top: menuTop, left: menuLeft, width: menuWidth }]}
-                    onPress={(e) => e.stopPropagation()}
-                >
+            <View style={styles.modalRoot}>
+                <Pressable style={styles.backdrop} onPress={onClose} />
+                <View style={[styles.card, { top: menuTop, left: menuLeft, width: menuWidth }]}>
                     {cardInner}
-                </Pressable>
-            </Pressable>
+                </View>
+            </View>
         </Modal>
     );
 }
 
 const styles = StyleSheet.create({
-    backdrop: {
+    modalRoot: {
         flex: 1,
+    },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
         backgroundColor: 'rgba(0,0,0,0.35)',
     },
     card: {

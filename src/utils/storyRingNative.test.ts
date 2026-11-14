@@ -30,9 +30,9 @@ describe('storyRingColor', () => {
         expect(STORY_RING_UNSEEN_COLOR).toBe('#FFFFFF');
     });
 
-    it('maps seen to muted grey', () => {
+    it('maps seen to white', () => {
         expect(storyRingColor('seen')).toBe(STORY_RING_SEEN_COLOR);
-        expect(STORY_RING_SEEN_COLOR).toBe('#8E8E93');
+        expect(STORY_RING_SEEN_COLOR).toBe('#FFFFFF');
     });
 
     it('maps none to the faint idle outline', () => {

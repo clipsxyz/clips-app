@@ -4,20 +4,18 @@ import Icon from 'react-native-vector-icons/Ionicons';
 
 type Props = {
     bottomInset: number;
-    isOwnPost: boolean;
     onAddComment: () => void;
     commentPrompt?: string;
-    onDirectMessage: () => void;
+    onShare: () => void;
     onMore: () => void;
 };
 
 /** Instagram Reels-style footer: frosted comment field + light icon actions. */
 export default function ScenesFooterBar({
     bottomInset,
-    isOwnPost,
     onAddComment,
     commentPrompt = 'Add a comment…',
-    onDirectMessage,
+    onShare,
     onMore,
 }: Props) {
     return (
@@ -30,10 +28,9 @@ export default function ScenesFooterBar({
                 <Text style={styles.commentPillText}>{commentPrompt}</Text>
             </Pressable>
             <Pressable
-                style={[styles.iconChip, isOwnPost && styles.iconChipDisabled]}
-                onPress={onDirectMessage}
-                disabled={isOwnPost}
-                accessibilityLabel="Send direct message"
+                style={styles.iconChip}
+                onPress={onShare}
+                accessibilityLabel="Share"
             >
                 <Icon name="paper-plane-outline" size={20} color="#FFFFFF" />
             </Pressable>
@@ -85,8 +82,5 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.22)',
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    iconChipDisabled: {
-        opacity: 0.35,
     },
 });

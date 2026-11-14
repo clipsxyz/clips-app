@@ -1417,7 +1417,7 @@ export default function InboxScreen({ navigation, route }: any) {
                             >
                                 {hasUnviewed ? (
                                     <LinearGradient
-                                        colors={['#2DD4BF', '#0EA5E9', '#D946EF']}
+                                        colors={['#FFFFFF', '#FFFFFF', '#FFFFFF']}
                                         start={{ x: 0, y: 1 }}
                                         end={{ x: 1, y: 0 }}
                                         style={styles.storyRing}
@@ -2096,12 +2096,12 @@ const styles = StyleSheet.create({
         width: ox(56),
         height: ox(56),
         borderRadius: ox(28),
-        padding: 2,
+        padding: 1,
         alignItems: 'center',
         justifyContent: 'center',
     },
     storyRingSeen: {
-        backgroundColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: '#FFFFFF',
     },
     storyRingInner: {
         width: '100%',

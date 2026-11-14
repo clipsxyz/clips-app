@@ -18,7 +18,6 @@ import ScenesModal from './components/ScenesModal';
 import CreateModal from './components/CreateModal';
 import AboutProfileModal from './components/AboutProfileModal';
 import InterestsFeedCard from './components/InterestsFeedCard';
-import DiscoverAmbientCanvas from './components/DiscoverAmbientCanvas';
 import SuggestedFollowerFeedCard from './components/SuggestedFollowerFeedCard';
 import { INTERESTS_ONBOARDING_DISMISSED_KEY, MAX_INTEREST_SELECTIONS } from './constants/interestOptions';
 import {
@@ -55,6 +54,7 @@ import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
+import { onFollowStatusChanged, useFollowState } from './hooks/useFollowState';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe, updateAuthProfile } from './api/client';
 import { rewriteMediaUrlForClient } from './api/apiBaseUrl';
@@ -1590,11 +1590,8 @@ function PostHeader({
     }
     if (isCurrentUser) return;
     setProfileMenuOpen(false);
-    await Swal.fire(bottomSheet({
-      title: 'Report submitted',
-      message: `Thanks â€” we will review reports about ${post.userHandle}.`,
-      icon: 'success',
-    }));
+    const { promptReportPostWeb } = await import('./utils/promptReportPostWeb');
+    await promptReportPostWeb(post.id);
   };
 
   // Re-check active stories when the quick-actions card opens, so visibility stays accurate.
@@ -1605,19 +1602,19 @@ function PostHeader({
       .catch(() => setHasAnyStory(false));
   }, [profileMenuOpen, profileTargetHandle]);
 
-  // Source of truth for follow state on feed cards:
-  // read it directly from the shared follow state so the + / check
-  // always matches what we've stored locally (even if post.isFollowing
-  // was out of date).
-  const isFollowingThisUser = React.useMemo(() => {
-    try {
-      const s = getState(userId);
-      return getFollowState(s.follows, post.userHandle);
-    } catch {
-      // Fallback to whatever the post says if getState fails for any reason
-      return !!post.isFollowing;
-    }
-  }, [userId, post.userHandle, post.isFollowing]);
+  // Live follow state. The feed post object often stays stale after a follow,
+  // so the header subscribes to the shared follow bus instead of a one-time read.
+  let storedFollowing = !!post.isFollowing;
+  try {
+    storedFollowing = getFollowState(getState(userId).follows, profileTargetHandle);
+  } catch {
+    storedFollowing = !!post.isFollowing;
+  }
+  const liveFollow = useFollowState({
+    handle: profileTargetHandle,
+    isFollowing: storedFollowing,
+  });
+  const isFollowingThisUser = liveFollow.isFollowing;
 
   // Mutual follow = both follow each other â†’ show DM icon (use feed data or check-follows-me API)
   const authorFollowsYou = post.authorFollowsYou === true;
@@ -1761,7 +1758,7 @@ function PostHeader({
             <span>{isFollowingThisUser ? 'Unfollow' : followRequested ? 'Requested' : 'Follow'}</span>
           </button>
         ) : null}
-        {hasStory ? (
+        {hasAnyStory ? (
           <button type="button" className={quickActionClass} onClick={handleViewStories}>
             <FiPlayCircle className="h-[18px] w-[18px] shrink-0 text-white" />
             <span>View stories</span>
@@ -1806,8 +1803,8 @@ function PostHeader({
       style={
         hasStory
           ? {
-              padding: 0.75,
-              background: 'linear-gradient(to top right, #2DD4BF, #0EA5E9, #D946EF)',
+              padding: 1,
+              background: '#FFFFFF',
             }
           : undefined
       }
@@ -4197,6 +4194,7 @@ function EngagementBar({
   const [likersLoading, setLikersLoading] = React.useState(false);
   const [sheetLikes, setSheetLikes] = React.useState(0);
   const [sheetViews, setSheetViews] = React.useState(0);
+  const [likerQuery, setLikerQuery] = React.useState('');
 
   const handleToggleFollowFromLikes = React.useCallback(
     async (handle: string) => {
@@ -4226,8 +4224,18 @@ function EngagementBar({
     [likersFollowing, user]
   );
 
+  const visibleLikers = React.useMemo(() => {
+    const needle = likerQuery.trim().toLowerCase();
+    if (!needle) return likers;
+    return likers.filter((row) => {
+      const name = (row.display_name || '').toLowerCase();
+      return row.handle.toLowerCase().includes(needle) || name.includes(needle);
+    });
+  }, [likerQuery, likers]);
+
   const openLikesSheet = React.useCallback(() => {
     if (!user || likes <= 0) return;
+    setLikerQuery('');
     setShowLikesSheet(true);
     setLikersLoading(true);
     void fetchPostLikers(post.id, user.id, likes, views)
@@ -4541,104 +4549,108 @@ function EngagementBar({
         )}
       </div>
 
-      {/* Likes & plays sheet — View Profile passport canvas */}
       {showLikesSheet && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center px-3 pb-4"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/55"
           onClick={() => setShowLikesSheet(false)}
         >
           <div
-            className="relative w-full max-w-md overflow-hidden rounded-3xl rounded-b-none border border-white/10 border-b-0 bg-[#060d16] pt-3 pb-4 shadow-xl max-h-[70vh] flex flex-col text-[#e8eef2]"
+            className="flex max-h-[78%] w-full max-w-md flex-col overflow-hidden rounded-t-3xl border border-b-0 border-white/[0.08] text-white"
+            style={{
+              background: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)',
+              paddingBottom: 'max(16px, env(safe-area-inset-bottom))',
+            }}
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Reactions"
           >
-            <DiscoverAmbientCanvas fixed={false} variant="passport" />
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col px-4">
-            <div className="flex items-center justify-center mb-3 flex-shrink-0">
-              <div className="w-10 h-1 rounded-full bg-white/30" />
-            </div>
-            <div className="flex items-center justify-between mb-3 flex-shrink-0">
-              <span className="text-xs uppercase tracking-[0.16em] text-white/55">
-                Likes and plays
-              </span>
-              <button
-                onClick={() => setShowLikesSheet(false)}
-                className="p-1.5 rounded-full hover:bg-white/10 text-white/55"
-                aria-label="Close"
-              >
-                <FiX className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between mb-4 text-sm text-[#e8eef2] flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <FiThumbsUp className="w-4 h-4 text-pink-400" />
-                <span className="text-xs text-white/55">Likes</span>
-                <span className="font-semibold text-sm">{sheetLikes.toLocaleString()}</span>
+            <div className="flex min-h-0 flex-1 flex-col px-4 pt-3">
+              <div className="mb-3 flex shrink-0 justify-center">
+                <div className="h-1 w-10 rounded-full bg-white/30" />
               </div>
-              <div className="flex items-center gap-2">
-                <FiEye className="w-4 h-4 text-blue-400" />
-                <span className="text-xs text-white/55">Views</span>
-                <span className="font-semibold text-sm">{sheetViews.toLocaleString()}</span>
+              <h2 className="mb-4 shrink-0 text-center text-[17px] font-semibold text-white">Reactions</h2>
+              <div className="mb-3.5 flex shrink-0 items-center justify-center gap-7 text-[15px] font-semibold text-[#F9FAFB]">
+                <span className="inline-flex items-center gap-1.5">
+                  <FiHeart className="h-[18px] w-[18px]" />
+                  {sheetLikes.toLocaleString()}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <FiEye className="h-[18px] w-[18px]" />
+                  {sheetViews.toLocaleString()}
+                </span>
               </div>
-            </div>
-
-            <div className="border-t border-white/10 -mx-4 mb-2 flex-shrink-0" />
-
-            <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
-              {likersLoading ? (
-                <div className="py-8 text-center text-xs text-white/45">Loading…</div>
-              ) : likers.length === 0 ? (
-                <div className="py-8 text-center text-xs text-white/45">
-                  No likes yet.
-                </div>
-              ) : (
-                likers.map((row) => {
-                  const isFollowing = likersFollowing.has(row.handle);
-                  return (
-                    <div
-                      key={row.handle}
-                      className="flex items-center justify-between gap-3 py-2"
-                    >
-                      <button
-                        type="button"
-                        className="flex items-center gap-3 min-w-0 text-left hover:opacity-80"
-                        onClick={() => {
-                          setShowLikesSheet(false);
-                          navigate(`/user/${encodeURIComponent(row.handle)}`);
-                        }}
+              <div className="-mx-4 mb-3.5 shrink-0 border-t border-white/10" />
+              <p className="mb-3 shrink-0 text-base font-semibold text-white">Liked by</p>
+              <label className="mb-2 flex h-10 shrink-0 items-center gap-2 rounded-xl bg-white/[0.08] px-3">
+                <FiSearch className="h-4 w-4 text-[#9CA3AF]" />
+                <input
+                  value={likerQuery}
+                  onChange={(e) => setLikerQuery(e.target.value)}
+                  placeholder="Search"
+                  className="w-full bg-transparent text-[15px] text-white outline-none placeholder:text-[#9CA3AF]"
+                  aria-label="Search likes"
+                />
+              </label>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {likersLoading ? (
+                  <div className="py-8 text-center text-xs text-[#9CA3AF]">Loading…</div>
+                ) : visibleLikers.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-[#9CA3AF]">
+                    {likerQuery.trim() ? 'No matches' : 'No likes yet.'}
+                  </div>
+                ) : (
+                  visibleLikers.map((row) => {
+                    const isFollowing = likersFollowing.has(row.handle);
+                    const subtitle =
+                      row.display_name && row.display_name.trim().toLowerCase() !== row.handle.toLowerCase()
+                        ? row.display_name
+                        : '';
+                    return (
+                      <div
+                        key={row.handle}
+                        className="flex items-center justify-between gap-3 py-2"
                       >
-                        <Avatar
-                          name={row.display_name || row.handle}
-                          src={row.avatar_url || getAvatarForHandle(row.handle)}
-                          size="sm"
-                        />
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-[#e8eef2] truncate">
-                            {row.display_name || row.handle}
-                          </div>
-                          {row.display_name ? (
-                            <div className="text-xs text-white/55 truncate">{row.handle}</div>
-                          ) : null}
-                        </div>
-                      </button>
-                      {user && user.handle !== row.handle && (
                         <button
                           type="button"
-                          onClick={() => void handleToggleFollowFromLikes(row.handle)}
-                          className={`px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide ${
-                            isFollowing
-                              ? 'bg-[rgba(15,36,48,0.72)] text-white/70 border border-white/15'
-                              : 'bg-[#3d9b8f]/35 text-white border border-[#3d9b8f]/55'
-                          }`}
+                          className="flex min-w-0 items-center gap-3 text-left"
+                          onClick={() => {
+                            setShowLikesSheet(false);
+                            navigate(`/user/${encodeURIComponent(row.handle)}`);
+                          }}
                         >
-                          {isFollowing ? 'Following' : 'Follow'}
+                          <Avatar
+                            name={row.display_name || row.handle}
+                            src={row.avatar_url || getAvatarForHandle(row.handle)}
+                            size={44}
+                            hideBorder
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate text-[15px] font-semibold text-white">
+                              {row.handle}
+                            </div>
+                            {subtitle ? (
+                              <div className="truncate text-[13px] text-[#9CA3AF]">{subtitle}</div>
+                            ) : null}
+                          </div>
                         </button>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
+                        {user && user.handle !== row.handle && (
+                          <button
+                            type="button"
+                            onClick={() => void handleToggleFollowFromLikes(row.handle)}
+                            className={`min-w-[96px] rounded-xl px-3.5 py-2 text-sm font-semibold text-white ${
+                              isFollowing
+                                ? 'border border-white/30 bg-transparent'
+                                : 'bg-[#3d9b8f]'
+                            }`}
+                          >
+                            {isFollowing ? 'Following' : 'Follow'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -7483,6 +7495,22 @@ function FeedPageWrapper() {
     });
   }
 
+  React.useEffect(() => {
+    return onFollowStatusChanged((payload) => {
+      const lower = String(payload.handle || '').trim().replace(/^@+/, '').toLowerCase();
+      if (!lower) return;
+      const isFollowing = payload.isFollowing === true;
+      setPages((cur) =>
+        cur.map((group) =>
+          group.map((p) => {
+            const handle = String(p.userHandle || '').trim().replace(/^@+/, '').toLowerCase();
+            return handle === lower ? { ...p, isFollowing } : p;
+          }),
+        ),
+      );
+    });
+  }, []);
+
   function updateOneAndSuggestedStrip(id: string, updater: (p: Post) => Post, onUpdated?: (newPages: Post[][]) => void) {
     updateOne(id, updater, onUpdated);
     const idStr = String(id);
@@ -8390,15 +8418,6 @@ function FeedPageWrapper() {
               const { createNotification } = await import('./api/notifications');
               const { getFollowedUsers } = await import('./api/posts');
               const profilePrivate = isProfilePrivate(p.userHandle);
-
-              if (profilePrivate) {
-                if (!wasFollowing) {
-                  setFollowState(userId, p.userHandle, false);
-                  updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: false }));
-                }
-                navigate(`/user/${p.userHandle}`);
-                return;
-              }
 
               // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
               const useLaravelApi =

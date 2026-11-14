@@ -1319,7 +1319,6 @@ export default function InboxPage() {
                     <div className="flex items-center gap-3 px-0.5">
                         {storyGroups.map((group) => (
                             (() => {
-                                const hasUnviewedStories = (group.stories || []).some((s) => !s.hasViewed);
                                 return (
                             <button
                                 key={group.userId || group.userHandle}
@@ -1354,11 +1353,7 @@ export default function InboxPage() {
                                 <div className="relative">
                                     {/* Story ring */}
                                     <div
-                                        className={`w-14 h-14 rounded-full p-[2px] ${
-                                            hasUnviewedStories
-                                                ? 'bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500'
-                                                : 'bg-white/20'
-                                        }`}
+                                        className="h-14 w-14 rounded-full bg-white p-px"
                                     >
                                         <div className="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
                                             <Avatar

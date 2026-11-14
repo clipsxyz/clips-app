@@ -1210,6 +1210,7 @@ export function setFollowState(userId: string, handle: string, isFollowing: bool
   const s = getState(uid);
   setFollowStateKey(s.follows, handle, isFollowing);
   saveFollowsToStorage(uid, s.follows);
+  emitFollowStatusChanged({ handle, isFollowing });
 }
 
 /** Set whether the user has reclipped a post (so decorateForUser shows green). Used for optimistic UI. */
@@ -1263,19 +1264,19 @@ export function getLocalPostById(postId: string | undefined | null): Post | unde
   return posts.find((p) => String(p.id) === idKey);
 }
 
-// Local follow map wins when present (including explicit unfollow). Otherwise fall back to API flag.
+// The server follow flag on a fetched post is the same graph the profile page uses.
+// A stale local unfollow must not keep the feed card on Follow, and a stale local
+// follow must not stick after the server says it is gone. That local map is also
+// what the Stories 24 rail uses to decide who appears.
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
   const fromLocal = getFollowState(s.follows, p.userHandle);
   const fromApi = p.isFollowing === true;
-  const explicit = hasExplicitFollowState(s.follows, p.userHandle);
-  // A stored follow that the server no longer has keeps the "Suggested by Gazetteer"
-  // card hidden and the follow button stuck. A fresh post with isFollowing false wins.
-  let isFollowing = explicit ? fromLocal : fromApi;
-  if (explicit && fromLocal && p.isFollowing === false && p.userHandle) {
-    isFollowing = false;
-    setFollowStateKey(s.follows, p.userHandle, false);
+  let isFollowing = fromApi;
+  if (p.userHandle && fromApi !== fromLocal) {
+    setFollowStateKey(s.follows, p.userHandle, fromApi);
     saveFollowsToStorage(userId, s.follows);
+    emitFollowStatusChanged({ handle: p.userHandle, isFollowing: fromApi });
   }
   const idKey = String(p.id);
   const localLiked = Object.prototype.hasOwnProperty.call(s.likes, idKey)

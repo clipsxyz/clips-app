@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
+import { BottomSheetFlatList, BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {
     fetchPostLikers,
@@ -8,20 +8,10 @@ import {
     type PostLiker,
 } from '../api/postLikers';
 import Avatar from './Avatar';
-import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
 import GazetteerBottomSheetModal, {
     GAZETTEER_SHEET_INBOX,
 } from './GazetteerBottomSheetModal.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
-
-const P = {
-    text: UCL_TEXT_PRIMARY,
-    muted: '#E2E8F0',
-    border: 'rgba(255,255,255,0.12)',
-    chipBg: 'rgba(15, 36, 48, 0.72)',
-    placeholder: UCL_TEXT_PLACEHOLDER,
-};
 
 type Props = {
     visible: boolean;
@@ -50,12 +40,14 @@ export default function FeedLikesSheet({
     const [sheetViews, setSheetViews] = useState(viewCount);
     const [following, setFollowing] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
+    const [query, setQuery] = useState('');
 
     useEffect(() => {
         if (!visible || likeCount <= 0) {
             setLikers([]);
             setFollowing(new Set());
             setLoading(false);
+            setQuery('');
             return;
         }
 
@@ -131,45 +123,24 @@ export default function FeedLikesSheet({
         [following, userId, viewerHandle],
     );
 
-    const listHeader = useMemo(
-        () => (
-            <View style={styles.sheetChrome}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Likes and plays</Text>
-                    <TouchableOpacity
-                        onPress={onClose}
-                        style={styles.closeBtn}
-                        hitSlop={8}
-                        accessibilityLabel="Close"
-                    >
-                        <Icon name="close" size={16} color={P.text} />
-                    </TouchableOpacity>
-                </View>
-
-                <View style={styles.statsRow}>
-                    <View style={styles.stat}>
-                        <FeedLikeThumbsIcon size={16} color="#F472B6" />
-                        <Text style={styles.statLabel}>Likes</Text>
-                        <Text style={styles.statValue}>{sheetLikes.toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.stat}>
-                        <Icon name="eye-outline" size={16} color="#60A5FA" />
-                        <Text style={styles.statLabel}>Views</Text>
-                        <Text style={styles.statValue}>{sheetViews.toLocaleString()}</Text>
-                    </View>
-                </View>
-
-                <View style={styles.listDivider} />
-            </View>
-        ),
-        [onClose, sheetLikes, sheetViews],
-    );
+    const visibleLikers = useMemo(() => {
+        const needle = query.trim().toLowerCase();
+        if (!needle) return likers;
+        return likers.filter((row) => {
+            const name = (row.display_name || '').toLowerCase();
+            return row.handle.toLowerCase().includes(needle) || name.includes(needle);
+        });
+    }, [likers, query]);
 
     const renderItem = useCallback(
         ({ item }: { item: PostLiker }) => {
             const isSelf =
                 !!viewerHandle && item.handle.toLowerCase() === viewerHandle.toLowerCase();
             const isFollowing = following.has(item.handle);
+            const subtitle =
+                item.display_name && item.display_name.trim().toLowerCase() !== item.handle.toLowerCase()
+                    ? item.display_name
+                    : '';
             return (
                 <View style={styles.row}>
                     <TouchableOpacity
@@ -184,15 +155,16 @@ export default function FeedLikesSheet({
                         <Avatar
                             src={item.avatar_url}
                             name={item.display_name || item.handle.split('@')[0]}
-                            size="sm"
+                            size={44}
+                            hideBorder
                         />
                         <View style={styles.nameCol}>
                             <Text style={styles.displayName} numberOfLines={1}>
-                                {item.display_name || item.handle}
+                                {item.handle}
                             </Text>
-                            {item.display_name ? (
+                            {subtitle ? (
                                 <Text style={styles.subHandle} numberOfLines={1}>
-                                    {item.handle}
+                                    {subtitle}
                                 </Text>
                             ) : null}
                         </View>
@@ -232,17 +204,44 @@ export default function FeedLikesSheet({
                   pinned while FlatList scrolls below — avoids FlatList painting over header.
                 */}
                 <View style={styles.body}>
-                    {listHeader}
+                    <View style={styles.sheetChrome}>
+                        <Text style={styles.title}>Reactions</Text>
+                        <View style={styles.statsRow}>
+                            <View style={styles.stat}>
+                                <Icon name="heart-outline" size={18} color="#FFFFFF" />
+                                <Text style={styles.statValue}>{sheetLikes.toLocaleString()}</Text>
+                            </View>
+                            <View style={styles.stat}>
+                                <Icon name="eye-outline" size={18} color="#FFFFFF" />
+                                <Text style={styles.statValue}>{sheetViews.toLocaleString()}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.listDivider} />
+                        <Text style={styles.sectionTitle}>Liked by</Text>
+                        <View style={styles.searchBox}>
+                            <Icon name="search" size={16} color="#9CA3AF" />
+                            <BottomSheetTextInput
+                                value={query}
+                                onChangeText={setQuery}
+                                placeholder="Search"
+                                placeholderTextColor="#9CA3AF"
+                                style={styles.searchInput}
+                                autoCorrect={false}
+                                autoCapitalize="none"
+                            />
+                        </View>
+                    </View>
                     <BottomSheetFlatList
                         style={styles.listFlex}
-                        data={loading ? [] : likers}
+                        data={loading ? [] : visibleLikers}
                         keyExtractor={(item, index) => `${item.handle}-${index}`}
                         renderItem={renderItem}
                         contentContainerStyle={styles.list}
+                        keyboardShouldPersistTaps="handled"
                         showsVerticalScrollIndicator={false}
                         ListEmptyComponent={
                             <Text style={styles.empty}>
-                                {loading ? 'Loading…' : 'No likes yet.'}
+                                {loading ? 'Loading…' : query.trim() ? 'No matches' : 'No likes yet.'}
                             </Text>
                         }
                     />
@@ -265,56 +264,63 @@ const styles = StyleSheet.create({
     sheetChrome: {
         zIndex: 2,
         paddingHorizontal: 16,
-        paddingTop: 4,
-        paddingBottom: 4,
-        // Slight wash so list items never read through the pinned chrome on overscroll.
-        backgroundColor: 'rgba(6, 13, 22, 0.94)',
+        paddingTop: 2,
+        paddingBottom: 8,
+        backgroundColor: '#03091B',
     },
     listFlex: {
         flex: 1,
     },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-    },
     title: {
-        fontSize: 12,
+        fontSize: 17,
         fontWeight: '600',
-        color: P.muted,
-        textTransform: 'uppercase',
-        letterSpacing: 2,
-    },
-    closeBtn: {
-        padding: 6,
-        borderRadius: 999,
+        color: '#FFFFFF',
+        textAlign: 'center',
+        marginBottom: 16,
     },
     statsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 16,
+        justifyContent: 'center',
+        gap: 28,
+        marginBottom: 14,
     },
     stat: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-    },
-    statLabel: {
-        fontSize: 12,
-        color: P.muted,
+        gap: 6,
     },
     statValue: {
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: '600',
-        color: P.text,
+        color: '#FFFFFF',
     },
     listDivider: {
         marginHorizontal: -16,
-        marginBottom: 4,
+        marginBottom: 14,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: P.border,
+        borderTopColor: 'rgba(255,255,255,0.12)',
+    },
+    sectionTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#FFFFFF',
+        marginBottom: 12,
+    },
+    searchBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        paddingHorizontal: 12,
+        height: 40,
+    },
+    searchInput: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 15,
+        paddingVertical: 0,
     },
     list: {
         paddingHorizontal: 16,
@@ -340,40 +346,40 @@ const styles = StyleSheet.create({
         minWidth: 0,
     },
     displayName: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: P.text,
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#FFFFFF',
     },
     subHandle: {
-        fontSize: 12,
-        color: P.muted,
+        marginTop: 1,
+        fontSize: 13,
+        color: '#9CA3AF',
     },
     followBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.12)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
+        minWidth: 96,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#3d9b8f',
+        alignItems: 'center',
     },
     followBtnActive: {
-        backgroundColor: P.chipBg,
-        borderColor: P.border,
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.28)',
     },
     followBtnText: {
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: '600',
-        color: P.text,
-        textTransform: 'uppercase',
-        letterSpacing: 0.8,
+        color: '#FFFFFF',
     },
     followBtnTextActive: {
-        color: P.muted,
+        color: '#FFFFFF',
     },
     empty: {
         textAlign: 'center',
         fontSize: 12,
-        color: P.placeholder,
+        color: '#9CA3AF',
         paddingVertical: 32,
     },
 });

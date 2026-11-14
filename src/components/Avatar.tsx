@@ -80,7 +80,7 @@ export default function Avatar({
     );
 
     const outerStyle = {
-        border: hideBorder ? 'none' : `2px solid ${borderColor}`,
+        border: hideBorder ? 'none' : `${hasStory ? 1 : 2}px solid ${borderColor}`,
         ...(isNumericSize ? { width: dim, height: dim } : {}),
         ...(outerRadius != null ? { borderRadius: outerRadius } : {}),
     };

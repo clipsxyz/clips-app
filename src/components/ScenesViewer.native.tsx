@@ -63,9 +63,7 @@ import {
     toggleFollowForPost,
     reclipPost,
     setReclipState,
-    getFollowedUsers,
     deletePost,
-    setFollowState,
 } from '../api/posts';
 import { blockUser } from '../api/messages';
 import {
@@ -81,8 +79,6 @@ import {
 } from '../utils/feedEngagementPrefsMobile';
 import { parseStoryMentionParts } from '../utils/storyMentionParts';
 import {
-    canSendMessage,
-    createFollowRequest,
     hasPendingFollowRequest,
     isProfilePrivate,
 } from '../api/privacy';
@@ -504,58 +500,6 @@ export default function ScenesViewer({
         });
         return () => sub.remove();
     }, [closeComments, commentsMounted, commentsOpen]);
-
-    const handleDirectMessage = useCallback(async () => {
-        if (!activePost?.userHandle || !viewerHandle || !viewerUserId) {
-            gazetteerAlert('Sign in required', 'Log in to send a direct message.');
-            return;
-        }
-        if (activePost.userHandle === viewerHandle) return;
-        if (!navigation) return;
-
-        const followedUsers = await getFollowedUsers(viewerUserId);
-        const profilePrivate = isProfilePrivate(activePost.userHandle);
-        const canMessage = canSendMessage(viewerHandle, activePost.userHandle, followedUsers);
-        const pending = hasPendingFollowRequest(viewerHandle, activePost.userHandle);
-
-        if (!canMessage && profilePrivate) {
-            if (pending) {
-                gazetteerAlert(
-                    'Follow Request Pending',
-                    "This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.",
-                );
-                return;
-            }
-
-            gazetteerAlert(
-                'Cannot Send Message',
-                'This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Request to Follow',
-                        onPress: () => {
-                            createFollowRequest(viewerHandle, activePost.userHandle);
-                            setFollowState(viewerUserId, activePost.userHandle, false);
-                            gazetteerAlert(
-                                'Follow Request Sent',
-                                'You will be notified when they accept your request.',
-                            );
-                        },
-                    },
-                ],
-            );
-            return;
-        }
-
-        if (!canMessage) {
-            gazetteerAlert('Cannot Message', 'You must follow this user to send a message.');
-            return;
-        }
-
-        navigation.navigate('Messages', { handle: activePost.userHandle });
-        handleBack();
-    }, [activePost, handleBack, navigation, viewerHandle, viewerUserId]);
 
     const handleLike = useCallback(async () => {
         if (!activePost) return;
@@ -1104,10 +1048,9 @@ export default function ScenesViewer({
             {!commentsMounted ? (
                 <ScenesFooterBar
                     bottomInset={insets.bottom}
-                    isOwnPost={isOwn}
                     onAddComment={openComments}
                     commentPrompt={commentAccess.canComment ? 'Add a comment…' : commentAccess.message}
-                    onDirectMessage={() => void handleDirectMessage()}
+                    onShare={() => setSharePost(activePost)}
                     onMore={() => setOverflowVisible(true)}
                 />
             ) : null}

@@ -62,7 +62,7 @@ import { getStoryViewedVersion, subscribeStoryViewed } from '../utils/storyViewe
 const CARD_W = 220;
 const CARD_H = 72;
 const CARD_RADIUS = 12;
-const CARD_RING_WIDTH = 2;
+const CARD_RING_WIDTH = 1;
 const CARD_RING_GAP = 2;
 const CARD_AVATAR_PHOTO = 36;
 const CARD_AVATAR_RING = CARD_AVATAR_PHOTO + (CARD_RING_WIDTH + CARD_RING_GAP) * 2;

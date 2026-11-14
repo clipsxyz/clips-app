@@ -88,7 +88,7 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, hasExplicitFollowState, setFollowState, getAccountTypeForHandle, toggleLike, reclipPost } from '../api/posts';
+import { getFollowedUsers, getPostById, getState, getFollowState, setFollowState, getAccountTypeForHandle, toggleLike, reclipPost } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { followOrRequest } from '../utils/followOrRequest';
 import { emitFollowStatusChanged, useFollowState } from '../hooks/useFollowState';
@@ -329,7 +329,6 @@ export default function StoriesScreen({ route, navigation }: any) {
         (currentGroup?.isFollowing === true ||
             currentGroup?.stories?.some((story) => story.isFollowing === true) === true);
     const localFollows = user?.id ? getState(user.id).follows || {} : {};
-    const explicitLocalFollow = hasExplicitFollowState(localFollows, currentGroup?.userHandle);
     const localFollowing = getFollowState(localFollows, currentGroup?.userHandle);
     const pendingFollowRequest = Boolean(
         !isViewingOwnStory &&
@@ -341,11 +340,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const liveFollow = useFollowState({
         userId: currentGroup?.userId,
         handle: currentGroup?.userHandle,
-        isFollowing: isViewingOwnStory
-            ? false
-            : explicitLocalFollow
-              ? localFollowing
-              : payloadFollowing || localFollowing,
+        isFollowing: isViewingOwnStory ? false : payloadFollowing || localFollowing,
         hasPendingRequest: pendingFollowRequest,
     });
 
@@ -392,7 +387,7 @@ export default function StoriesScreen({ route, navigation }: any) {
             setStoryFollowRequested(false);
             return;
         }
-        if (!explicitLocalFollow && payloadFollowing) {
+        if (payloadFollowing && !localFollowing) {
             setFollowState(user.id, currentGroup.userHandle, true);
         }
         setIsFollowingStoryUser(liveFollow.isFollowing);
@@ -402,7 +397,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         currentGroup?.userHandle,
         user?.id,
         isViewingOwnStory,
-        explicitLocalFollow,
+        localFollowing,
         payloadFollowing,
         liveFollow.isFollowing,
         liveFollow.hasPendingRequest,
