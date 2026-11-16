@@ -34,6 +34,7 @@ import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
+import SquircleActionItem, { formatRailCount } from './SquircleActionItem';
 import FeedShareModal from './FeedShareModal';
 import PostCommentsSheet from './PostCommentsSheet';
 import PostOverflowMenuModal from './PostOverflowMenuModal';
@@ -890,73 +891,52 @@ export default function ScenesViewer({
             ) : null}
 
             {!commentsMounted ? (
-            <View style={[styles.actionRail, { bottom: insets.bottom + 96 }]}>
-                <View style={styles.actionCol}>
-                    <View collapsable={false}>
-                        <Pressable
-                            style={styles.actionBtn}
-                            onPress={() => void handleLike()}
-                            accessibilityLabel={activePost.userLiked ? 'Unlike' : 'Like'}
-                        >
-                            <FeedLikeThumbsIcon
-                                size={26}
-                                color="#FFFFFF"
-                                filled={activePost.userLiked}
-                            />
-                        </Pressable>
-                    </View>
-                    <Text style={styles.actionCount}>{activePost.stats.likes}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={styles.actionBtn}
-                        onPress={openComments}
-                        accessibilityLabel="Comments"
-                    >
-                        <Icon name="chatbubble-outline" size={26} color="#FFFFFF" />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{activePost.stats.comments}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={styles.actionBtn}
-                        onPress={() => setSharePost(activePost)}
-                        accessibilityLabel="Share"
-                    >
-                        <Icon name="paper-plane-outline" size={26} color="#FFFFFF" />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{activePost.stats.shares}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={styles.actionBtn}
-                        onPress={() => setSaveModalOpen(true)}
-                        accessibilityLabel="Save to collection"
-                    >
-                        <Icon
-                            name={isSaved ? 'bookmark' : 'bookmark-outline'}
-                            size={26}
-                            color="#FFFFFF"
-                        />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{isSaved ? 'Saved' : 'Save'}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={[styles.actionBtn, !canReclip && styles.actionBtnDisabled]}
-                        onPress={() => void handleReclip()}
-                        accessibilityLabel={
-                            activePost.userReclipped ? 'Already reclipped' : 'Reclip'
-                        }
-                    >
-                        <Icon
-                            name="repeat"
-                            size={26}
-                            color={activePost.userReclipped ? '#4ADE80' : '#FFFFFF'}
-                        />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{activePost.stats.reclips}</Text>
-                </View>
+            <View style={styles.actionRail} pointerEvents="box-none">
+                <SquircleActionItem
+                    highlight
+                    accessibilityLabel={activePost.userLiked ? 'Unlike' : 'Like'}
+                    label={formatRailCount(activePost.stats.likes)}
+                    onPress={() => { void handleLike(); }}
+                >
+                    <FeedLikeThumbsIcon
+                        size={21}
+                        color={activePost.userLiked ? '#FF2D55' : '#0B0C0E'}
+                        filled={activePost.userLiked}
+                    />
+                </SquircleActionItem>
+                <SquircleActionItem
+                    accessibilityLabel="Comments"
+                    label={formatRailCount(activePost.stats.comments)}
+                    onPress={openComments}
+                >
+                    <Icon name="chatbubble" size={21} color="#0B0C0E" />
+                </SquircleActionItem>
+                <SquircleActionItem
+                    accessibilityLabel="Save to collection"
+                    label={formatRailCount(isSaved ? 1 : 0)}
+                    onPress={() => setSaveModalOpen(true)}
+                >
+                    <Icon name={isSaved ? 'bookmark' : 'bookmark-outline'} size={21} color="#0B0C0E" />
+                </SquircleActionItem>
+                <SquircleActionItem
+                    accessibilityLabel="Share"
+                    label="Share"
+                    onPress={() => setSharePost(activePost)}
+                >
+                    <Icon name="paper-plane" size={21} color="#0B0C0E" />
+                </SquircleActionItem>
+                <SquircleActionItem
+                    accessibilityLabel={activePost.userReclipped ? 'Already reclipped' : 'Reclip'}
+                    label={formatRailCount(activePost.stats.reclips)}
+                    disabled={!canReclip}
+                    onPress={() => { void handleReclip(); }}
+                >
+                    <Icon
+                        name="repeat"
+                        size={21}
+                        color={activePost.userReclipped ? '#4ADE80' : '#0B0C0E'}
+                    />
+                </SquircleActionItem>
             </View>
             ) : null}
 
@@ -1417,37 +1397,13 @@ const styles = StyleSheet.create({
     },
     actionRail: {
         position: 'absolute',
-        right: 6,
+        right: 14,
+        bottom: 105,
         zIndex: 28,
         alignItems: 'center',
         gap: 14,
         // Only the icon buttons capture taps — gaps stay swipeable for next post / slide.
         pointerEvents: 'box-none',
-    },
-    actionCol: {
-        alignItems: 'center',
-        gap: 3,
-        minWidth: 44,
-        pointerEvents: 'box-none',
-    },
-    actionBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-    },
-    actionBtnDisabled: {
-        opacity: 0.35,
-    },
-    actionCount: {
-        color: '#FFFFFF',
-        fontSize: 11,
-        fontWeight: '600',
-        textShadowColor: 'rgba(0,0,0,0.55)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 3,
     },
     bottomChrome: {
         position: 'absolute',

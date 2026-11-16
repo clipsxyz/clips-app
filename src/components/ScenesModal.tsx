@@ -1,7 +1,9 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiThumbsUp, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiChevronLeft, FiBookmark, FiMoreHorizontal, FiSend, FiSmile, FiPlus, FiPlay } from 'react-icons/fi';
+import { FiX, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiChevronUp, FiChevronDown, FiChevronLeft, FiMoreHorizontal, FiSend, FiSmile, FiPlus, FiPlay } from 'react-icons/fi';
+import { IoBookmark, IoBookmarkOutline, IoChatbubble, IoPaperPlane, IoRepeat, IoThumbsUp } from 'react-icons/io5';
+import SquircleActionItem, { formatRailCount } from './SquircleActionItem';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
 import CreateGroupModal from './CreateGroupModal';
@@ -2334,76 +2336,55 @@ export default function ScenesModal({
                                 </div>
 
                                 {/* Floating action rail (always visible) */}
-                                <div className="absolute bottom-24 right-1.5 z-20 flex flex-col items-center gap-3.5">
-                                    <div className="flex flex-col items-center gap-0.5">
-                                        <button
-                                            ref={likeButtonRef}
-                                            onClick={handleLike}
-                                            aria-label={liked ? 'Unlike' : 'Like'}
-                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
-                                        >
-                                            <FiThumbsUp className={`h-[26px] w-[26px] text-white ${liked ? 'fill-white' : ''}`} />
-                                        </button>
-                                        <span className="text-[11px] font-semibold text-white drop-shadow">{likes}</span>
-                                    </div>
-
-                                    <div className="flex flex-col items-center gap-0.5">
-                                        <button
-                                            onClick={openCommentsSheet}
-                                            aria-label="Open comments"
-                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
-                                        >
-                                            <FiMessageCircle className="h-[26px] w-[26px] text-white" />
-                                        </button>
-                                        <span className="text-[11px] font-semibold text-white drop-shadow">{comments}</span>
-                                    </div>
-
-                                    <div className="flex flex-col items-center gap-0.5">
-                                        <button
-                                            onClick={handleShare}
-                                            aria-label="Share"
-                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
-                                        >
-                                            <FiSend className="h-[26px] w-[26px] text-white" />
-                                        </button>
-                                        <span className="text-[11px] font-semibold text-white drop-shadow">{shares}</span>
-                                    </div>
-
-                                    <div className="flex flex-col items-center gap-0.5">
-                                        <button
-                                            onClick={() => setSaveModalOpen(true)}
-                                            aria-label="Save to collection"
-                                            className="flex h-11 w-11 items-center justify-center rounded-full text-white"
-                                        >
-                                            <FiBookmark className={`h-[26px] w-[26px] text-white ${isSaved ? 'fill-white' : ''}`} />
-                                        </button>
-                                        <span className="text-[11px] font-semibold text-white drop-shadow">{isSaved ? 'Saved' : 'Save'}</span>
-                                    </div>
-
-                                    <div className="flex flex-col items-center gap-0.5">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleReclip(e);
-                                            }}
-                                            disabled={post.userHandle === user?.handle || userReclipped || reclipBusy}
-                                            aria-label={
-                                                post.userHandle === user?.handle
-                                                    ? "Cannot reclip your own post"
-                                                    : userReclipped
-                                                        ? "Post already reclipped"
-                                                        : "Reclip"
-                                            }
-                                            className={`flex h-11 w-11 items-center justify-center rounded-full text-white ${
-                                                post.userHandle === user?.handle || reclipBusy
-                                                    ? 'opacity-40 cursor-not-allowed'
-                                                    : 'hover:scale-[1.02]'
-                                            }`}
-                                        >
-                                            <FiRepeat className={`h-[26px] w-[26px] ${userReclipped ? 'text-[#4ADE80]' : 'text-white'}`} />
-                                        </button>
-                                        <span className="text-[11px] font-semibold text-white drop-shadow">{reclips}</span>
-                                    </div>
+                                <div className="absolute bottom-[105px] right-[14px] z-20 flex flex-col items-center gap-[14px]">
+                                    <SquircleActionItem
+                                        buttonRef={likeButtonRef}
+                                        highlight
+                                        accessibilityLabel={liked ? 'Unlike' : 'Like'}
+                                        label={formatRailCount(likes)}
+                                        onPress={() => { void handleLike(); }}
+                                    >
+                                        <IoThumbsUp size={21} color={liked ? '#FF2D55' : '#0B0C0E'} />
+                                    </SquircleActionItem>
+                                    <SquircleActionItem
+                                        accessibilityLabel="Open comments"
+                                        label={formatRailCount(comments)}
+                                        onPress={() => openCommentsSheet()}
+                                    >
+                                        <IoChatbubble size={21} color="#0B0C0E" />
+                                    </SquircleActionItem>
+                                    <SquircleActionItem
+                                        accessibilityLabel="Save to collection"
+                                        label={formatRailCount(isSaved ? 1 : 0)}
+                                        onPress={() => setSaveModalOpen(true)}
+                                    >
+                                        {isSaved ? (
+                                            <IoBookmark size={21} color="#0B0C0E" />
+                                        ) : (
+                                            <IoBookmarkOutline size={21} color="#0B0C0E" />
+                                        )}
+                                    </SquircleActionItem>
+                                    <SquircleActionItem
+                                        accessibilityLabel="Share"
+                                        label="Share"
+                                        onPress={handleShare}
+                                    >
+                                        <IoPaperPlane size={21} color="#0B0C0E" />
+                                    </SquircleActionItem>
+                                    <SquircleActionItem
+                                        accessibilityLabel={
+                                            post.userHandle === user?.handle
+                                                ? 'Cannot reclip your own post'
+                                                : userReclipped
+                                                    ? 'Post already reclipped'
+                                                    : 'Reclip'
+                                        }
+                                        label={formatRailCount(reclips)}
+                                        disabled={post.userHandle === user?.handle || userReclipped || reclipBusy}
+                                        onPress={() => { void handleReclip(); }}
+                                    >
+                                        <IoRepeat size={21} color={userReclipped ? '#4ADE80' : '#0B0C0E'} />
+                                    </SquircleActionItem>
                                 </div>
 
                                 {/* Footer CTA row */}
