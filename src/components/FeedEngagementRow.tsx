@@ -4,10 +4,10 @@ import LinearGradient from 'react-native-linear-gradient';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
 import FeedMessageSquareIcon from './FeedMessageSquareIcon.native';
-import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import FeedRepeatIcon from './FeedRepeatIcon.native';
 import FeedBookmarkIcon from './FeedBookmarkIcon.native';
 import FeedLiveShareIcon from './FeedLiveShareIcon.native';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 const ACTION_ICON = FEED_UI.icon.action;
 const PILL_ACTION_ICON = 15;
@@ -138,7 +138,7 @@ export default function FeedEngagementRow({
                     disabled={!onShareToStories}
                     activeOpacity={0.7}
                 >
-                    <ShareToStoriesFeedIcon size={iconSize} color={iconColor} />
+                    <Icon name="sparkles-outline" size={iconSize} color={iconColor} />
                     <Text style={[countTextStyle, { color: countColor }]}>{shares}</Text>
                 </TouchableOpacity>
             ) : null}

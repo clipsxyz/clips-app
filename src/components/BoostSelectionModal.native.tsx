@@ -23,6 +23,7 @@ import { openStripeCheckout } from '../utils/stripeCheckoutNative';
 import { boostQuoteCents, BOOST_UNIT_PRICE_EUR } from '../utils/boostQuote';
 import { BOOST_ACTIVATED_EVENT } from './BoostActivatedModal.native';
 import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
+import Icon from 'react-native-vector-icons/Ionicons';
 import BoostWizardBottomSheet from './BoostWizardBottomSheet.native';
 
 export type BoostFeedType = 'local' | 'regional' | 'national';
@@ -323,13 +324,32 @@ export default function BoostSelectionModal({
         setRadiusKm((prev) => Math.max(0.5, Number((prev + delta).toFixed(1))));
     };
 
+    const goBack = () => {
+        if (activeStep === 1) {
+            onClose();
+            return;
+        }
+        setActiveStep((step) => (step > 1 ? ((step - 1) as 1 | 2 | 3) : step));
+    };
+
     return (
         <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
             <View style={styles.backdrop}>
                 <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
                 <View style={[styles.sheet, activeStep === 3 && styles.sheetCheckout]}>
                     <View style={styles.header}>
-                        <Text style={styles.title}>Boost post</Text>
+                        <View style={styles.headerTop}>
+                            <Pressable
+                                onPress={goBack}
+                                hitSlop={12}
+                                accessibilityLabel={activeStep === 1 ? 'Close boost' : 'Back'}
+                                style={styles.headerBack}
+                            >
+                                <Icon name="chevron-back" size={22} color="#FFFFFF" />
+                            </Pressable>
+                            <Text style={styles.title}>Boost post</Text>
+                            <View style={styles.headerBack} />
+                        </View>
                         <BoostWizardBottomSheet selectedPost={activePost} />
                         <Text style={styles.stepText}>Step {activeStep} of 3</Text>
                         <View style={styles.chips}>
@@ -501,9 +521,11 @@ export default function BoostSelectionModal({
                             <Pressable
                                 style={[styles.navBtn, activeStep === 1 && styles.navBtnDisabled]}
                                 disabled={activeStep === 1}
-                                onPress={() => setActiveStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}
+                                onPress={goBack}
                             >
-                                <Text style={styles.navBtnText}>Back</Text>
+                                <View style={styles.navBtnFill} collapsable={false}>
+                                    <Text style={styles.navBtnText}>Back</Text>
+                                </View>
                             </Pressable>
                             {activeStep < 3 ? (
                                 <Pressable style={styles.nextBtn} onPress={() => setActiveStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}>
@@ -566,6 +588,17 @@ const styles = StyleSheet.create({
         paddingBottom: 10,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255,255,255,0.1)',
+    },
+    headerTop: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    headerBack: {
+        width: 36,
+        height: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     title: { color: '#F9FAFB', fontSize: 18, fontWeight: '700' },
     stepText: { color: '#9CA3AF', fontSize: 11, marginTop: 10 },
@@ -691,11 +724,15 @@ const styles = StyleSheet.create({
     navBtn: {
         width: 84,
         height: 48,
-        alignItems: 'center',
-        justifyContent: 'center',
         borderRadius: 24,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
+        overflow: 'hidden',
+    },
+    navBtnFill: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     navBtnDisabled: { opacity: 0.45 },
     navBtnText: { color: '#E5E7EB', fontWeight: '700' },

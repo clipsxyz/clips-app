@@ -39,6 +39,7 @@ import {
 
 import BoostEmptyState from '../components/BoostEmptyState.native';
 import BoostInsightsSheet from '../components/BoostInsightsSheet.native';
+import ProfileGridPeekSheet, { type ProfileGridTapOrigin } from '../components/ProfileGridPeekSheet.native';
 import { ox } from '../constants/nativeOpticalScale';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
 import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
@@ -143,6 +144,7 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
     const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
     const [insightsPost, setInsightsPost] = useState<Post | null>(null);
     const [insightsVisible, setInsightsVisible] = useState(false);
+    const [gridTap, setGridTap] = useState<{ post: Post; origin: ProfileGridTapOrigin } | null>(null);
 
     // Latest request wins when the user switches tabs before the previous call returns.
     const requestGenRef = useRef(0);
@@ -442,9 +444,7 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                                         post={item}
                                         width={tileWidth}
                                         showBoostIcon
-                                        onPress={() => {
-                                            void openBoostModal(item);
-                                        }}
+                                        onPress={(origin) => setGridTap({ post: item, origin })}
                                     />
                                     <View style={styles.tileOverlayBadges} pointerEvents="none">
                                         <Text
@@ -481,6 +481,29 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                     setInsightsPost(null);
                 }}
             />
+            {gridTap ? (
+                <ProfileGridPeekSheet
+                    post={gridTap.post}
+                    origin={gridTap.origin}
+                    profileHandle={gridTap.post.userHandle || user?.handle || ''}
+                    onClose={() => setGridTap(null)}
+                    actions={[
+                        {
+                            label: 'Boost',
+                            icon: 'flame-outline',
+                            onPress: () => {
+                                const tapped = gridTap.post;
+                                setGridTap(null);
+                                // Let the clip-card modal leave before the boost sheet opens.
+                                // Android drops the back control when two modals swap in one frame.
+                                requestAnimationFrame(() => {
+                                    void openBoostModal(tapped);
+                                });
+                            },
+                        },
+                    ]}
+                />
+            ) : null}
             <BoostSelectionModal
                 isOpen={showBoostModal}
                 post={selectedPost}

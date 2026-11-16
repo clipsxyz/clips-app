@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Dimensions,
     Image,
@@ -113,15 +113,23 @@ function boostTileVideoUri(post: Post): string | undefined {
     return resolvePublicMediaUrl(raw) || raw;
 }
 
+export type BoostTileOrigin = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
+
 type Props = {
     post: Post;
     /** Tile width. Height follows {@link BOOST_POST_TILE_ASPECT_RATIO}. */
     width: number;
     showBoostIcon?: boolean;
-    onPress: () => void;
+    onPress: (origin: BoostTileOrigin) => void;
 };
 
 export default function BoostPostTile({ post, width, showBoostIcon = true, onPress }: Props) {
+    const measureRef = useRef<View>(null);
     const textOnly = isTextOnlyPost(post);
     const storedStill = boostTileImageUri(post);
     const videoUri = textOnly ? undefined : boostTileVideoUri(post);
@@ -179,11 +187,26 @@ export default function BoostPostTile({ post, width, showBoostIcon = true, onPre
 
     return (
         <Pressable
-            onPress={onPress}
+            onPress={() => {
+                const node = measureRef.current;
+                if (!node) {
+                    onPress({ x: 0, y: 0, width, height: tileHeight });
+                    return;
+                }
+                node.measureInWindow((x, y, measuredW, measuredH) => {
+                    onPress({
+                        x,
+                        y,
+                        width: measuredW || width,
+                        height: measuredH || tileHeight,
+                    });
+                });
+            }}
             style={[styles.tile, { width, height: tileHeight }]}
             accessibilityRole="button"
-            accessibilityLabel="Boost this post"
+            accessibilityLabel="Open post"
         >
+            <View ref={measureRef} collapsable={false} pointerEvents="none" style={StyleSheet.absoluteFill} />
             {textOnly ? (
                 <View
                     style={[

@@ -117,9 +117,11 @@ export async function openStripeCheckout(url: string): Promise<StripeCheckoutRes
 
         void browser.openAuth(url, redirectUrl, {
             ephemeralWebSession: false,
-            showTitle: false,
+            showTitle: true,
             enableUrlBarHiding: true,
             enableDefaultShare: false,
+            // Android custom tabs hide the back control unless this is set.
+            hasBackButton: true,
         }).then((result) => {
             if (isBoostCancelUrl(result?.url)) {
                 finish('cancel', result?.url);

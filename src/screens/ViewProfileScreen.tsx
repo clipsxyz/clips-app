@@ -71,6 +71,14 @@ import ViewProfileConnectionsModal, {
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import ProfileCoverActionsModal from '../components/ProfileCoverActionsModal.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import ProfileGridPeekSheet, {
+    openProfileGridInFullscreen,
+    ProfileGridTapCell,
+    type ProfileGridTapOrigin,
+} from '../components/ProfileGridPeekSheet.native';
+import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
+import FeedShareModal from '../components/FeedShareModal';
+import { postIsLiveOnStories, STORY_SHARE_STILL_LIVE_MESSAGE } from '../utils/sharePostToStories';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import { getEffectivePlacesTraveled, formatProfileStatCount } from '../utils/effectivePlacesTraveled';
 import { writePendingLocationFeed } from '../utils/pendingLocationNative';
@@ -898,15 +906,13 @@ const result = await followOrRequest({
         if (isOwnProfile) connectionCountDeltaRef.current.followers -= 1;
     };
 
-    const openPostDetail = useCallback(
-        (item: Post) => {
-            navigation.navigate('PostDetail', {
-                postId: item.id,
-                initialPost: item,
-            });
-        },
-        [navigation],
-    );
+    const [gridTap, setGridTap] = useState<{ post: Post; origin: ProfileGridTapOrigin } | null>(null);
+    const [gridStoryPost, setGridStoryPost] = useState<Post | null>(null);
+    const [gridSharePost, setGridSharePost] = useState<Post | null>(null);
+
+    const openGridTap = useCallback((item: Post, origin: ProfileGridTapOrigin) => {
+        setGridTap({ post: item, origin });
+    }, []);
 
     const loadMoreProfilePosts = async () => {
         if (!handle || profilePostsLoadingMore) return;
@@ -979,16 +985,11 @@ const result = await followOrRequest({
 
     const renderProfileGridItem = useCallback(
         ({ item }: { item: Post }) => (
-            <Pressable
-                onPress={() => openPostDetail(item)}
-                onLongPress={() => openPostDetail(item)}
-                delayLongPress={260}
-                style={styles.gridTile}
-            >
+            <ProfileGridTapCell post={item} style={styles.gridTile} onOpen={openGridTap}>
                 <ProfileGridThumb post={item} />
-            </Pressable>
+            </ProfileGridTapCell>
         ),
-        [openPostDetail],
+        [openGridTap],
     );
 
     const profileGridKeyExtractor = useCallback((item: Post) => String(item.id), []);
@@ -1589,6 +1590,43 @@ const result = await followOrRequest({
                 visible={showInviteToGroup}
                 onClose={() => setShowInviteToGroup(false)}
                 inviteeHandle={decodedHandle}
+            />
+
+            {gridTap ? (
+                <ProfileGridPeekSheet
+                    post={gridTap.post}
+                    origin={gridTap.origin}
+                    profileHandle={gridTap.post.userHandle || profileUser?.handle || decodedHandle}
+                    onClose={() => setGridTap(null)}
+                    onAddToStory={() => {
+                        const tapped = gridTap.post;
+                        setGridTap(null);
+                        if (postIsLiveOnStories(tapped.id)) {
+                            gazetteerAlert('Already on Stories', STORY_SHARE_STILL_LIVE_MESSAGE);
+                            return;
+                        }
+                        setGridStoryPost(tapped);
+                    }}
+                    onShare={() => {
+                        setGridSharePost(gridTap.post);
+                        setGridTap(null);
+                    }}
+                    onViewFullscreen={() => {
+                        const tapped = gridTap.post;
+                        setGridTap(null);
+                        openProfileGridInFullscreen(navigation, tapped, filteredPosts);
+                    }}
+                />
+            ) : null}
+            <ShareToStoriesModal
+                visible={gridStoryPost != null}
+                post={gridStoryPost}
+                onClose={() => setGridStoryPost(null)}
+            />
+            <FeedShareModal
+                isOpen={gridSharePost != null}
+                post={gridSharePost}
+                onClose={() => setGridSharePost(null)}
             />
 
             <GazetteerAlertSheet

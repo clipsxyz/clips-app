@@ -27,10 +27,17 @@ import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post, StoryViewerIdentity } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
-import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 
 /** Min time the Stories pop icon shows when opening from feed Stories 24 rail. */
 const STORIES24_LOADING_HOLD_MS = 2600;
+
+function storyOpenStill(raw?: string): string {
+    const value = (raw || '').trim();
+    if (!value || value === 'public' || value === 'close_friends' || value === 'only_me') return '';
+    if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(value)) return '';
+    return value.startsWith('data:') ? value : rewriteMediaUrlForClient(value);
+}
 
 /** Must match App.tsx `STORIES24_FROM_RAIL_HANDLE_KEY` — rail return + /feed navigation if `location.state` is dropped. */
 const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:stories24OpenedFromRailHandle';
@@ -298,6 +305,9 @@ export default function StoriesPage() {
         stories24OpenFromFeedRail &&
         openUserHandle &&
         (!stories24ContentReady || !stories24HoldMinReady);
+    const openingStill = storyOpenStill(
+        (location.state as { previewThumb?: string } | null)?.previewThumb,
+    );
 
     const [autoOpeningStory, setAutoOpeningStory] = React.useState<boolean>(!!openUserHandle);
     const [progress, setProgress] = React.useState(0);
@@ -1721,12 +1731,16 @@ export default function StoriesPage() {
     if (showStories24HoldScreen) {
         return (
             <div
-                className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
+                className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-black px-6"
                 role="status"
                 aria-live="polite"
                 aria-label="Opening stories"
             >
-                <DiscoverAmbientCanvas variant="passport" />
+                <div className="absolute inset-0 bg-gradient-to-b from-black to-[#23104F]" />
+                {openingStill ? (
+                    <img src={openingStill} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                ) : null}
+                <div className="absolute inset-0 bg-black/25" />
                 <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
                     <StoriesPopIcon size={80} />
                     <p className="mt-6 text-sm font-medium text-white/70">Opening stories…</p>
@@ -1739,12 +1753,16 @@ export default function StoriesPage() {
     if (loading && openUserHandle && !stories24OpenFromFeedRail) {
         return (
             <div
-                className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
+                className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-black px-6"
                 role="status"
                 aria-live="polite"
                 aria-label="Opening story"
             >
-                <DiscoverAmbientCanvas variant="passport" />
+                <div className="absolute inset-0 bg-gradient-to-b from-black to-[#23104F]" />
+                {openingStill ? (
+                    <img src={openingStill} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                ) : null}
+                <div className="absolute inset-0 bg-black/25" />
                 <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
                     <div className="w-10 h-10 border-2 border-[#3d9b8f] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                     <p className="text-sm font-medium text-white/70">Opening story...</p>

@@ -21,7 +21,14 @@ import { formatViewCount } from '../utils/feedPostNewsTicker';
 import { getPostBodyText, getTextOnlyBackgroundColor, getTextOnlyTextColor, isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
 import { nextHandleAfterNameChange, normalizeHandle as handleKey } from '../utils/gazetteerHandle';
-import { siblingJpegFromVideoUrl } from '../utils/postMedia';
+import { postHasVideoMedia, siblingJpegFromVideoUrl } from '../utils/postMedia';
+import ProfileGridTapCard, { type ProfileGridTapOrigin } from '../components/ProfileGridTapCard';
+import ShareToStoriesModal from '../components/ShareToStoriesModal';
+import ShareModal from '../components/ShareModal';
+import ScenesModal from '../components/ScenesModal';
+import ImageFullscreenViewer from '../components/ImageFullscreenViewer';
+import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
+import { postIsLiveOnStories, STORY_SHARE_STILL_LIVE_MESSAGE } from '../utils/sharePostToStories';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { showToast } from '../utils/toast';
@@ -654,6 +661,11 @@ export default function ProfilePage() {
   }, [selectedCard, user?.interests, user?.countryFlag]);
 
   const [profilePosts, setProfilePosts] = React.useState<Post[]>([]);
+  const [gridTap, setGridTap] = React.useState<{ post: Post; origin: ProfileGridTapOrigin } | null>(null);
+  const [gridStoryPost, setGridStoryPost] = React.useState<Post | null>(null);
+  const [gridSharePost, setGridSharePost] = React.useState<Post | null>(null);
+  const [gridScenesPost, setGridScenesPost] = React.useState<Post | null>(null);
+  const [gridImageFs, setGridImageFs] = React.useState<{ post: Post; origin: ProfileGridTapOrigin } | null>(null);
 
   React.useEffect(() => {
     if (!user?.handle && !user?.id) return;
@@ -2045,7 +2057,13 @@ export default function ProfilePage() {
                   <button
                     key={post.id}
                     type="button"
-                    onClick={() => nav(`/post/${encodeURIComponent(post.id)}`, { state: { post } })}
+                    onClick={(event) => {
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      setGridTap({
+                        post,
+                        origin: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+                      });
+                    }}
                     className="aspect-[3/4] p-[1.5px]"
                   >
                     <span className="relative flex h-full w-full overflow-hidden rounded-lg border border-white/10 bg-[#111827]">
@@ -3977,6 +3995,73 @@ export default function ProfilePage() {
             </div>
           </div>
         )}
+
+        {gridTap ? (
+          <ProfileGridTapCard
+            post={gridTap.post}
+            origin={gridTap.origin}
+            profileHandle={gridTap.post.userHandle || user?.handle || ''}
+            onClose={() => setGridTap(null)}
+            onAddToStory={() => {
+              const tapped = gridTap.post;
+              setGridTap(null);
+              if (postIsLiveOnStories(tapped.id)) {
+                setSafetyAlert({
+                  title: 'Already on Stories',
+                  message: STORY_SHARE_STILL_LIVE_MESSAGE,
+                  icon: 'info',
+                });
+                return;
+              }
+              setGridStoryPost(tapped);
+            }}
+            onShare={() => {
+              setGridSharePost(gridTap.post);
+              setGridTap(null);
+            }}
+            onViewFullscreen={(frame) => {
+              const tapped = gridTap.post;
+              setGridTap(null);
+              if (isVideoPost(tapped) || postHasVideoMedia(tapped)) {
+                setGridScenesPost(tapped);
+                return;
+              }
+              setGridImageFs({ post: tapped, origin: frame });
+            }}
+          />
+        ) : null}
+        {gridStoryPost ? (
+          <ShareToStoriesModal isOpen onClose={() => setGridStoryPost(null)} post={gridStoryPost} />
+        ) : null}
+        {gridSharePost ? (
+          <ShareModal isOpen onClose={() => setGridSharePost(null)} post={gridSharePost} />
+        ) : null}
+        {gridScenesPost ? (
+          <ScenesModal
+            post={gridScenesPost}
+            posts={(() => {
+              const videos = profilePosts.filter((item) => isVideoPost(item) || postHasVideoMedia(item));
+              return videos.some((item) => item.id === gridScenesPost.id) ? videos : [gridScenesPost, ...videos];
+            })()}
+            isOpen
+            initialMutedState={false}
+            feedLabel="Profile"
+            onClose={() => setGridScenesPost(null)}
+            onLike={async () => {}}
+            onFollow={async () => {}}
+            onShare={async () => setGridSharePost(gridScenesPost)}
+            onOpenComments={() => {}}
+            onReclip={async () => {}}
+          />
+        ) : null}
+        {gridImageFs ? (
+          <ImageFullscreenViewer
+            images={collectFeedImageUrls(gridImageFs.post).map((url) => ({ url: rewriteMediaUrlForClient(url) }))}
+            isOpen
+            originRect={gridImageFs.origin}
+            onClose={() => setGridImageFs(null)}
+          />
+        ) : null}
 
         <GazetteerAlertSheet
           visible={safetyAlert !== null}

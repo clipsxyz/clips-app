@@ -3,23 +3,40 @@ import { useNavigate } from 'react-router-dom';
 import { IoCameraOutline, IoImagesOutline, IoLinkOutline, IoVideocamOutline } from 'react-icons/io5';
 import GazetteerAlertSheet from './GazetteerAlertSheet';
 import GazetteerMenuSheet from './GazetteerMenuSheet';
+import { holdFeedAudio } from '../utils/feedAudioHold';
 
 type Props = {
     visible: boolean;
     onDismiss: () => void;
 };
 
-function openDeviceFileInput(input: HTMLInputElement | null) {
+function openDeviceFileInput(input: HTMLInputElement | null, capture = false) {
     if (!input) return;
-    try {
-        if (typeof input.showPicker === 'function') {
-            void input.showPicker();
+    // showPicker ignores `capture` and can reject the camera. The camera input must be clicked.
+    if (!capture && typeof input.showPicker === 'function') {
+        try {
+            const pending = input.showPicker();
+            void Promise.resolve(pending).catch(() => {
+                /* User dismissed the picker. */
+            });
             return;
+        } catch {
+            /* fall through to click() */
         }
-    } catch {
-        /* fall through to click() */
     }
     input.click();
+}
+
+function storyFileKind(file: File): 'image' | 'video' | null {
+    const type = (file.type || '').toLowerCase();
+    if (type.startsWith('image/')) return 'image';
+    if (type.startsWith('video/')) return 'video';
+    const name = (file.name || '').toLowerCase();
+    if (/\.(jpe?g|png|gif|webp|heic|heif|bmp|avif)$/.test(name)) return 'image';
+    if (/\.(mp4|webm|mov|m4v|3gp|3gpp)$/.test(name)) return 'video';
+    // Phone cameras often hand back a still with an empty type and a blank name.
+    if (!type && file.size > 0) return 'image';
+    return null;
 }
 
 /** Same “Add to your story” card as Create, shown over the current screen. */
@@ -28,7 +45,76 @@ export default function AddToStorySheet({ visible, onDismiss }: Props) {
     const libraryRef = React.useRef<HTMLInputElement | null>(null);
     const photoRef = React.useRef<HTMLInputElement | null>(null);
     const videoRef = React.useRef<HTMLInputElement | null>(null);
+    const visibleRef = React.useRef(visible);
+    const pickerPendingRef = React.useRef(false);
+    const choseFileRef = React.useRef(false);
+    const releaseAudioRef = React.useRef<(() => void) | null>(null);
     const [alert, setAlert] = React.useState<{ title: string; message: string } | null>(null);
+
+    const releaseFeedAudio = React.useCallback(() => {
+        releaseAudioRef.current?.();
+        releaseAudioRef.current = null;
+    }, []);
+
+    const holdFeed = React.useCallback(() => {
+        if (!releaseAudioRef.current) releaseAudioRef.current = holdFeedAudio();
+    }, []);
+
+    React.useEffect(() => {
+        visibleRef.current = visible;
+        if (visible) {
+            holdFeed();
+            return;
+        }
+        if (!pickerPendingRef.current) releaseFeedAudio();
+    }, [visible, holdFeed, releaseFeedAudio]);
+
+    React.useEffect(() => () => releaseFeedAudio(), [releaseFeedAudio]);
+
+    React.useEffect(() => {
+        const coveredRef = { current: false };
+        const resumeIfPickerCancelled = () => {
+            if (!coveredRef.current) return;
+            coveredRef.current = false;
+            window.setTimeout(() => {
+                if (document.visibilityState === 'hidden') return;
+                if (!pickerPendingRef.current || choseFileRef.current) return;
+                pickerPendingRef.current = false;
+                if (!visibleRef.current) releaseFeedAudio();
+            }, 400);
+        };
+        const markCovered = () => {
+            if (pickerPendingRef.current) coveredRef.current = true;
+        };
+        const onVisibility = () => {
+            if (document.visibilityState === 'hidden') {
+                markCovered();
+                return;
+            }
+            resumeIfPickerCancelled();
+        };
+        window.addEventListener('blur', markCovered);
+        window.addEventListener('focus', resumeIfPickerCancelled);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            window.removeEventListener('blur', markCovered);
+            window.removeEventListener('focus', resumeIfPickerCancelled);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [releaseFeedAudio]);
+
+    const finishPicker = (choseFile: boolean) => {
+        choseFileRef.current = choseFile;
+        pickerPendingRef.current = false;
+        if (!choseFile && !visibleRef.current) releaseFeedAudio();
+    };
+
+    const openPicker = (input: HTMLInputElement | null, capture = false) => {
+        choseFileRef.current = false;
+        pickerPendingRef.current = true;
+        holdFeed();
+        openDeviceFileInput(input, capture);
+    };
 
     const resetInputs = () => {
         if (libraryRef.current) libraryRef.current.value = '';
@@ -37,20 +123,22 @@ export default function AddToStorySheet({ visible, onDismiss }: Props) {
     };
 
     const ingestStoryFiles = async (files: FileList | null) => {
-        if (!files || files.length === 0) return;
-        const file = Array.from(files).find(
-            (item) => item.type.startsWith('image/') || item.type.startsWith('video/'),
-        );
+        if (!files || files.length === 0) {
+            finishPicker(false);
+            return;
+        }
+        const file = Array.from(files).find((item) => storyFileKind(item) !== null);
         if (!file) {
             setAlert({
                 title: 'No Supported Files',
                 message: 'Please select images or videos from your gallery.',
             });
             resetInputs();
+            finishPicker(false);
             return;
         }
 
-        const mediaType = file.type.startsWith('video/') ? 'video' : 'image';
+        const mediaType = storyFileKind(file) === 'video' ? 'video' : 'image';
         const mediaUrl = URL.createObjectURL(file);
         let videoDuration: number | undefined;
         if (mediaType === 'video') {
@@ -97,17 +185,17 @@ export default function AddToStorySheet({ visible, onDismiss }: Props) {
                     {
                         label: 'Photo library',
                         icon: <IoImagesOutline size={20} color="#FFFFFF" />,
-                        onPress: () => openDeviceFileInput(libraryRef.current),
+                        onPress: () => openPicker(libraryRef.current),
                     },
                     {
                         label: 'Take photo',
                         icon: <IoCameraOutline size={20} color="#FFFFFF" />,
-                        onPress: () => openDeviceFileInput(photoRef.current),
+                        onPress: () => openPicker(photoRef.current, true),
                     },
                     {
                         label: 'Record video',
                         icon: <IoVideocamOutline size={20} color="#FFFFFF" />,
-                        onPress: () => openDeviceFileInput(videoRef.current),
+                        onPress: () => openPicker(videoRef.current, true),
                     },
                     {
                         label: 'Paste a link',
@@ -129,31 +217,37 @@ export default function AddToStorySheet({ visible, onDismiss }: Props) {
             <input
                 ref={libraryRef}
                 type="file"
-                accept="image/*,video/*"
-                className="hidden"
+                accept="image/*,video/*,.heic,.heif"
+                className="fixed left-0 top-0 h-px w-px opacity-0"
                 onChange={(event) => {
+                    finishPicker(true);
                     void ingestStoryFiles(event.target.files);
                 }}
+                onCancel={() => finishPicker(false)}
             />
             <input
                 ref={photoRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 capture="environment"
-                className="hidden"
+                className="fixed left-0 top-0 h-px w-px opacity-0"
                 onChange={(event) => {
+                    finishPicker(true);
                     void ingestStoryFiles(event.target.files);
                 }}
+                onCancel={() => finishPicker(false)}
             />
             <input
                 ref={videoRef}
                 type="file"
                 accept="video/*"
                 capture="environment"
-                className="hidden"
+                className="fixed left-0 top-0 h-px w-px opacity-0"
                 onChange={(event) => {
+                    finishPicker(true);
                     void ingestStoryFiles(event.target.files);
                 }}
+                onCancel={() => finishPicker(false)}
             />
         </>
     );

@@ -1188,6 +1188,24 @@ export async function createStory(
         return buildMockStory();
     }
 
+    // Camera-roll picks are blob: URLs. The API only accepts a public http(s) media_url.
+    if (mediaUrl && (mediaType === 'image' || mediaType === 'video')) {
+        const raw = mediaUrl.trim();
+        const needsUpload = /^(blob:|data:|file:)/i.test(raw) || !/^https?:\/\//i.test(raw);
+        if (needsUpload) {
+            const { prepareMediaForPost } = await import('../utils/prepareMediaForPost');
+            const prepared = await prepareMediaForPost({
+                mediaUrl: raw,
+                mediaType,
+                generatePoster: mediaType === 'video' && !videoPosterUrl,
+            });
+            mediaUrl = prepared.mediaUrl;
+            if (!videoPosterUrl && prepared.videoPosterUrl) {
+                videoPosterUrl = prepared.videoPosterUrl;
+            }
+        }
+    }
+
     // Use real Laravel API
     const { apiRequest } = await import('./client');
 

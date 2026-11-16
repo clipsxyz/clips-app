@@ -62,6 +62,8 @@ import { getStoryViewedVersion, subscribeStoryViewed } from '../utils/storyViewe
 const CARD_W = 220;
 const CARD_H = 72;
 const CARD_RADIUS = 12;
+/** Green, yellow, and pink. Only the card you have pulled to the front uses it. */
+const STORY_RAIL_LIT_BORDER = ['#22C55E', '#FFD400', '#FF4D9A'] as const;
 const CARD_RING_WIDTH = 1;
 const CARD_RING_GAP = 2;
 const CARD_AVATAR_PHOTO = 36;
@@ -213,6 +215,12 @@ function StoryCard({
     if (isAddYours) {
         return (
             <View ref={setCardRef} collapsable={false} style={morphHidden ? styles.cardMorphHidden : undefined}>
+                <LinearGradient
+                    colors={['#2A2A3C', '#2A2A3C']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.cardFrame}
+                >
                 <TouchableOpacity
                     style={[styles.card, styles.addYoursCard]}
                     onPress={measureAndPress}
@@ -225,14 +233,21 @@ function StoryCard({
                         Add yours
                     </Text>
                 </TouchableOpacity>
+                </LinearGradient>
             </View>
         );
     }
 
     return (
         <View ref={setCardRef} collapsable={false} style={morphHidden ? styles.cardMorphHidden : undefined}>
+            <LinearGradient
+                colors={lit ? [...STORY_RAIL_LIT_BORDER] : ['#2A2A3C', '#2A2A3C']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.cardFrame}
+            >
             <TouchableOpacity
-                style={[styles.card, lit && styles.cardLit]}
+                style={styles.card}
                 onPress={measureAndPress}
                 activeOpacity={0.9}
             >
@@ -296,6 +311,7 @@ function StoryCard({
                     ) : null}
                 </View>
             </TouchableOpacity>
+            </LinearGradient>
         </View>
     );
 }
@@ -856,8 +872,18 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                 })}
                 {hasMoreStories ? (
                     <View style={styles.cardWithRank}>
+                        <LinearGradient
+                            colors={
+                                displayCards.length === litCardIndex
+                                    ? [...STORY_RAIL_LIT_BORDER]
+                                    : ['#2A2A3C', '#2A2A3C']
+                            }
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.cardFrame}
+                        >
                         <TouchableOpacity
-                            style={[styles.card, displayCards.length === litCardIndex && styles.cardLit]}
+                            style={styles.card}
                             onPress={openViewAll}
                             activeOpacity={0.9}
                             accessibilityRole="button"
@@ -872,6 +898,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                             />
                             <Text style={styles.viewAllLabel}>View all</Text>
                         </TouchableOpacity>
+                        </LinearGradient>
                     </View>
                 ) : null}
             </ScrollView>
@@ -962,21 +989,21 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         textAlign: 'center',
     },
-    card: {
+    cardFrame: {
         width: CARD_W,
         height: CARD_H,
         borderRadius: CARD_RADIUS,
+        padding: 2,
+    },
+    card: {
+        flex: 1,
+        borderRadius: CARD_RADIUS - 1,
         overflow: 'hidden',
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 10,
         paddingVertical: 8,
         backgroundColor: '#03091B',
-        borderWidth: 1,
-        borderColor: '#2A2A3C',
-    },
-    cardLit: {
-        borderColor: '#FFFFFF',
     },
     cardWash: {
         position: 'absolute',

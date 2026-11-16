@@ -1,419 +1,506 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Image,
+    Animated,
+    Easing,
     Modal,
+    Platform,
     Pressable,
-    ScrollView,
+    Share,
     StyleSheet,
     Text,
-    TouchableOpacity,
     View,
     useWindowDimensions,
+    type StyleProp,
+    type ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
-import Avatar from './Avatar.native';
-import FeedPostMedia from './FeedPostMedia.native';
 import type { Post } from '../types';
-import { getAvatarForHandle } from '../api/users';
+import CachedImage from './CachedImage.native';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
+import { resolvePostThumbnail } from '../api/collections';
 import {
+    isVideoMediaUri,
+    postHasVideoMedia,
+    resolvePostPlaybackUri,
+    siblingJpegFromVideoUrl,
+} from '../utils/postMedia';
+import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
+import {
+    getPostBodyText,
     getTextOnlyBackgroundColor,
-    isTextOnlyPost,
+    getTextOnlyTextColor,
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
-import { getEffectiveTextStyleForPost } from '../utils/effectiveTextPostStyle';
 import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
 import { formatProfileDisplayHandle } from '../utils/profileShareUrl';
-import { FEED_CARD_MEDIA_BG } from './FeedPageLayout.native';
+import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { setImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
+import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
+import { setScenesViewerActive } from '../utils/scenesViewerActiveNative';
+import { buildShareablePostUrl } from '../utils/shareUrls';
 
-/** Compact press-preview card radius (smaller than the feed card shell — it is a modal peek). */
-const PEEK_SHEET_RADIUS = 14;
+export type ProfileGridTapOrigin = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
 
-type PeekAction = {
-    id: string;
+type Frame = {
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+};
+
+type Nav = {
+    navigate: (name: string, params?: object) => void;
+};
+
+const ACTIONS_ROW = 52;
+const STACK_GAP = 12;
+const ACTION_BORDER = 2;
+
+export type ProfileGridTapAction = {
     label: string;
     icon: string;
     onPress: () => void;
-    disabled?: boolean;
-    destructive?: boolean;
 };
 
-function TextCardPeek({
+/** First real MP4. Profile rows sometimes keep a JPEG in mediaUrl and the file in mediaItems. */
+function cardPlaybackUri(post: Post): string | undefined {
+    const items = post.mediaItems || [];
+    const videoItem = items.find(
+        (item) => item?.type === 'video' || isVideoMediaUri(item?.url),
+    );
+    const fromItem = videoItem
+        ? resolvePostPlaybackUri(post, videoItem) || videoItem.url
+        : undefined;
+    const raw = fromItem && isVideoMediaUri(fromItem) ? fromItem : resolvePostPlaybackUri(post);
+    return raw && isVideoMediaUri(raw) ? raw : fromItem || raw;
+}
+
+function stillUri(post: Post): string | undefined {
+    const thumb = resolvePostThumbnail(post);
+    if (thumb && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(thumb)) return thumb;
+    const item = (post.mediaItems || []).find((entry) => entry?.url);
+    const jpeg = siblingJpegFromVideoUrl(item?.url || post.mediaUrl);
+    return jpeg || post.videoPosterUrl || undefined;
+}
+
+function cardFrame(
+    screenW: number,
+    screenH: number,
+    topInset: number,
+    bottomInset: number,
+    actionCount: number,
+): Frame {
+    const actionsHeight = ACTIONS_ROW * Math.max(1, actionCount) + ACTION_BORDER * 2;
+    const cardW = Math.round(Math.min(screenW * 0.78, 340));
+    const available = screenH - topInset - bottomInset - actionsHeight - STACK_GAP - 28;
+    const cardH = Math.max(220, Math.min(Math.round(cardW * (16 / 9)), available));
+    const stackH = cardH + STACK_GAP + actionsHeight;
+    const top = Math.max(topInset + 8, Math.round((screenH - stackH) / 2));
+    const left = Math.round((screenW - cardW) / 2);
+    return { top, left, width: cardW, height: cardH };
+}
+
+/** Open the existing fullscreen viewer for a profile-grid clip. */
+export function openProfileGridInFullscreen(navigation: Nav, post: Post, peers: Post[]): void {
+    if (isVideoPost(post) || postHasVideoMedia(post)) {
+        const videos = peers.filter((item) => isVideoPost(item) || postHasVideoMedia(item));
+        const list = videos.some((item) => String(item.id) === String(post.id)) ? videos : [post, ...videos];
+        setScenesViewerActive(true);
+        setScenesLaunchPayload({
+            initialPostId: String(post.id),
+            posts: list.length ? list : [post],
+            initialMuted: false,
+            feedLabel: 'Profile',
+        });
+        navigation.navigate('Scenes', {
+            initialPostId: String(post.id),
+            initialMuted: false,
+            feedLabel: 'Profile',
+        });
+        return;
+    }
+    setImageFullscreenLaunch({
+        post,
+        startIndex: 0,
+        handlers: {
+            onShare: () => {
+                const url = buildShareablePostUrl(post);
+                void Share.share({ message: url, url });
+            },
+        },
+    });
+    navigation.navigate('ImageFullscreenModal', { postId: String(post.id) });
+}
+
+export function ProfileGridTapCell({
     post,
-    caption,
-    height,
-    fallbackColor,
-    fontSize,
+    style,
+    children,
+    onOpen,
 }: {
     post: Post;
-    caption: string;
-    height: number;
-    fallbackColor?: string;
-    fontSize: number;
+    style?: StyleProp<ViewStyle>;
+    children: React.ReactNode;
+    onOpen: (post: Post, origin: ProfileGridTapOrigin) => void;
 }) {
-    const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
-    const text = (
-        <Text
-            style={[
-                styles.textPreviewBody,
-                { color: card?.textColor || fallbackColor || '#111827', fontSize },
-            ]}
-            numberOfLines={8}
-        >
-            {caption || 'Post'}
-        </Text>
-    );
-    const frame = [
-        styles.textPreview,
-        { minHeight: height },
-        card?.bordered ? { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' } : null,
-    ];
-    if (card && card.colors.length >= 2) {
-        return (
-            <LinearGradient colors={card.colors as [string, string, ...string[]]} style={frame}>
-                {text}
-            </LinearGradient>
-        );
-    }
+    const ref = useRef<View>(null);
     return (
-        <View style={[...frame, { backgroundColor: card?.colors[0] || getTextOnlyBackgroundColor(post) }]}>
-            {text}
-        </View>
+        <Pressable
+            style={style}
+            onPress={() => {
+                const node = ref.current;
+                if (!node) {
+                    onOpen(post, { x: 0, y: 0, width: 0, height: 0 });
+                    return;
+                }
+                node.measureInWindow((x, y, width, height) => {
+                    onOpen(post, { x, y, width, height });
+                });
+            }}
+        >
+            <View ref={ref} collapsable={false} style={styles.cellFill}>
+                {children}
+            </View>
+        </Pressable>
     );
 }
 
 type Props = {
-    visible: boolean;
-    post: Post | null;
+    post: Post;
+    origin: ProfileGridTapOrigin;
     profileHandle: string;
-    profileName: string;
-    profileAvatarUrl?: string;
-    isOwnProfile: boolean;
     onClose: () => void;
-    onLike: () => void;
-    onComment: () => void;
-    onReclip: () => void;
-    onShare: () => void;
-    onReport: () => void;
+    onAddToStory?: () => void;
+    onShare?: () => void;
+    onViewFullscreen?: () => void;
+    /** Replaces Add to Story, Share, and View in fullscreen. */
+    actions?: ProfileGridTapAction[];
 };
 
 export default function ProfileGridPeekSheet({
-    visible,
     post,
+    origin,
     profileHandle,
-    profileName,
-    profileAvatarUrl,
-    isOwnProfile,
     onClose,
-    onLike,
-    onComment,
-    onReclip,
+    onAddToStory,
     onShare,
-    onReport,
+    onViewFullscreen,
+    actions,
 }: Props) {
-    const { width } = useWindowDimensions();
-    const [videoMuted, setVideoMuted] = useState(true);
-    const previewWidth = Math.min(width - 32, 360);
-    const previewMediaHeight = Math.min(Math.round(width * 0.34), 200);
+    const { width, height } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
+    const progress = useRef(new Animated.Value(0)).current;
+    const [ready, setReady] = useState(false);
+    const [videoFrameReady, setVideoFrameReady] = useState(false);
+    const [cardMuted, setCardMuted] = useState(true);
+    const actionRows = actions ?? [
+        { label: 'Add to Story', icon: 'sparkles-outline', onPress: () => onAddToStory?.() },
+        { label: 'Share', icon: 'paper-plane-outline', onPress: () => onShare?.() },
+        { label: 'View in fullscreen', icon: 'expand-outline', onPress: () => onViewFullscreen?.() },
+    ];
+    const target = useMemo(
+        () => cardFrame(width, height, insets.top, insets.bottom, actionRows.length),
+        [actionRows.length, height, insets.bottom, insets.top, width],
+    );
+    const from = origin.width > 8 ? origin : { x: target.left, y: target.top, width: target.width, height: target.height };
 
-    const textStyle = useMemo(() => (post ? getEffectiveTextStyleForPost(post) : undefined), [post]);
+    useEffect(() => {
+        progress.setValue(0);
+        setReady(false);
+        setVideoFrameReady(false);
+        setCardMuted(true);
+        Animated.timing(progress, {
+            toValue: 1,
+            duration: 420,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+        }).start(({ finished }) => {
+            if (finished) setReady(true);
+        });
+    }, [post.id, progress]);
 
-    const actions: PeekAction[] = useMemo(
-        () => [
-            {
-                id: 'like',
-                label: 'Like',
-                icon: post?.userLiked ? 'heart' : 'heart-outline',
-                onPress: onLike,
-            },
-            {
-                id: 'comment',
-                label: 'Comment',
-                icon: 'chatbubble-outline',
-                onPress: onComment,
-            },
-            {
-                id: 'reclip',
-                label: 'Repost',
-                icon: 'repeat-outline',
-                onPress: onReclip,
-                disabled: isOwnProfile,
-            },
-            {
-                id: 'share',
-                label: 'Share',
-                icon: 'share-social-outline',
-                onPress: onShare,
-            },
-            {
-                id: 'report',
-                label: 'Report',
-                icon: 'alert-circle-outline',
-                onPress: onReport,
-                destructive: true,
-            },
-        ],
-        [isOwnProfile, onComment, onLike, onReclip, onReport, onShare, post?.userLiked]
+    const close = () => {
+        setReady(false);
+        Animated.timing(progress, {
+            toValue: 0,
+            duration: 260,
+            easing: Easing.in(Easing.cubic),
+            useNativeDriver: false,
+        }).start(({ finished }) => {
+            if (finished) onClose();
+        });
+    };
+
+    const shellStyle = {
+        left: progress.interpolate({ inputRange: [0, 1], outputRange: [from.x, target.left] }),
+        top: progress.interpolate({ inputRange: [0, 1], outputRange: [from.y, target.top] }),
+        width: progress.interpolate({ inputRange: [0, 1], outputRange: [from.width, target.width] }),
+        height: progress.interpolate({ inputRange: [0, 1], outputRange: [from.height, target.height] }),
+        borderRadius: progress.interpolate({ inputRange: [0, 1], outputRange: [8, 18] }),
+    };
+    const fadeIn = {
+        opacity: progress.interpolate({ inputRange: [0.62, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
+    };
+    const backdropOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+
+    const video = isVideoPost(post) || postHasVideoMedia(post);
+    const playbackRaw = video ? cardPlaybackUri(post) : undefined;
+    const playback = playbackRaw ? resolvePublicMediaUrl(playbackRaw) || playbackRaw : undefined;
+    const posterRaw = stillUri(post);
+    const poster = posterRaw ? resolvePublicMediaUrl(posterRaw) || posterRaw : undefined;
+    const imageRaw = !video ? stillUri(post) || post.mediaUrl : undefined;
+    const imageUri = imageRaw ? resolvePublicMediaUrl(imageRaw) || imageRaw : undefined;
+    const caption = getPostBodyText(post);
+    const handleLabel = formatProfileDisplayHandle(profileHandle || post.userHandle);
+    const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
+
+    const textBody = (
+        <Text
+            style={[styles.textBody, { color: card?.textColor || getTextOnlyTextColor(post) }]}
+            numberOfLines={10}
+        >
+            {caption || 'Post'}
+        </Text>
     );
 
-    if (!post) return null;
-
-    const caption = post.text || post.caption || post.imageText || '';
-    const handleLabel = formatProfileDisplayHandle(profileHandle || post.userHandle);
-
     return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-            <Pressable style={styles.overlay} onPress={onClose}>
-                <Pressable
-                    style={[styles.sheet, { width: previewWidth }]}
-                    onPress={(e) => e.stopPropagation()}
+        <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={close}>
+            <View style={styles.root}>
+                <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close" />
+                </Animated.View>
+
+                {ready ? (
+                <View
+                    style={[
+                        styles.mediaCard,
+                        video && playback ? styles.videoCard : null,
+                        {
+                            left: target.left,
+                            top: target.top,
+                            width: target.width,
+                            height: target.height,
+                            borderRadius: 18,
+                        },
+                    ]}
                 >
-                    <View style={styles.handle} />
-                    <ScrollView bounces={false} showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
-                        <View style={styles.previewCard}>
-                            <View style={styles.previewHeader}>
-                                <Avatar
-                                    src={profileAvatarUrl || getAvatarForHandle(profileHandle || post.userHandle)}
-                                    name={profileName}
-                                    size="sm"
+                    {video && playback ? (
+                        <>
+                            {poster ? (
+                                <CachedImage
+                                    source={{ uri: poster }}
+                                    style={[StyleSheet.absoluteFill, videoFrameReady ? styles.posterHidden : null]}
+                                    resizeMode="cover"
                                 />
-                                <Text style={styles.previewHandle} numberOfLines={1}>
-                                    {handleLabel}
-                                </Text>
-                            </View>
-
-                            <View style={[styles.previewMedia, { height: previewMediaHeight }]}>
-                                {isTextOnlyPost(post) ? (
-                                    <TextCardPeek
-                                        post={post}
-                                        caption={caption}
-                                        height={previewMediaHeight}
-                                        fallbackColor={textStyle?.color}
-                                        fontSize={
-                                            textStyle?.size === 'large'
-                                                ? 22
-                                                : textStyle?.size === 'small'
-                                                  ? 14
-                                                  : 18
-                                        }
-                                    />
-                                ) : post.mediaUrl ? (
-                                    <>
-                                        {isVideoPost(post) ? (
-                                            <FeedPostMedia
-                                                post={post}
-                                                width={previewWidth}
-                                                height={previewMediaHeight}
-                                                mode="feed"
-                                                muted={videoMuted}
-                                                isActive
-                                                immediateVideoSurface
-                                            />
-                                        ) : (
-                                            <Image
-                                                source={{ uri: post.mediaUrl }}
-                                                style={styles.imagePreview}
-                                                resizeMode="contain"
-                                            />
-                                        )}
-                                        {isVideoPost(post) ? (
-                                            <TouchableOpacity
-                                                style={styles.muteButton}
-                                                onPress={() => setVideoMuted((m) => !m)}
-                                                accessibilityLabel={videoMuted ? 'Unmute' : 'Mute'}
-                                            >
-                                                <Icon
-                                                    name={videoMuted ? 'volume-mute' : 'volume-high'}
-                                                    size={16}
-                                                    color="#FFFFFF"
-                                                />
-                                            </TouchableOpacity>
-                                        ) : null}
-                                        {caption ? (
-                                            <View style={styles.captionOverlay}>
-                                                <Text style={styles.captionText} numberOfLines={2}>
-                                                    {caption}
-                                                </Text>
-                                            </View>
-                                        ) : null}
-                                    </>
-                                ) : (
-                                    <View style={styles.textPreview}>
-                                        <Text style={styles.textPreviewBody} numberOfLines={8}>
-                                            {caption || 'Post'}
-                                        </Text>
-                                    </View>
-                                )}
-                            </View>
-                        </View>
-
-                        <View style={styles.actionsRow}>
-                            {actions.map((action) => (
-                                <Pressable
-                                    key={action.id}
-                                    style={({ pressed }) => [
-                                        styles.actionCell,
-                                        action.disabled && styles.actionRowDisabled,
-                                        pressed && !action.disabled && styles.actionRowPressed,
-                                    ]}
-                                    onPress={() => {
-                                        if (action.disabled) return;
-                                        action.onPress();
-                                    }}
-                                    disabled={action.disabled}
-                                    android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: true }}
+                            ) : null}
+                            {ready ? (
+                                <View
+                                    style={{ width: target.width, height: target.height }}
+                                    collapsable={false}
                                 >
-                                    <Icon name={action.icon} size={22} color="#FFFFFF" />
-                                    <Text style={styles.actionLabel} numberOfLines={1}>
-                                        {action.label}
-                                    </Text>
-                                </Pressable>
-                            ))}
+                                    <Video
+                                        source={withFeedVideoCache({ uri: playback })}
+                                        style={{ width: target.width, height: target.height }}
+                                        resizeMode="cover"
+                                        muted={cardMuted}
+                                        repeat
+                                        paused={false}
+                                        playInBackground={false}
+                                        playWhenInactive={false}
+                                        ignoreSilentSwitch="ignore"
+                                        useTextureView
+                                        pointerEvents="none"
+                                        onReadyForDisplay={() => setVideoFrameReady(true)}
+                                        {...androidListSafeVideoProps()}
+                                    />
+                                </View>
+                            ) : null}
+                        </>
+                    ) : imageUri ? (
+                        <CachedImage source={{ uri: imageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    ) : card && card.colors.length >= 2 ? (
+                        <LinearGradient colors={card.colors as [string, string, ...string[]]} style={styles.textFill}>
+                            {textBody}
+                        </LinearGradient>
+                    ) : (
+                        <View style={[styles.textFill, { backgroundColor: card?.colors[0] || getTextOnlyBackgroundColor(post) }]}>
+                            {textBody}
                         </View>
-                    </ScrollView>
-                </Pressable>
-            </Pressable>
+                    )}
+                    <Animated.View style={[styles.handleBar, fadeIn]} pointerEvents="none">
+                        <Text style={styles.handleText} numberOfLines={1}>
+                            {handleLabel}
+                        </Text>
+                    </Animated.View>
+                    {video && playback ? (
+                        <Pressable
+                            style={styles.muteButton}
+                            onPress={() => setCardMuted((current) => !current)}
+                            accessibilityLabel={cardMuted ? 'Unmute video' : 'Mute video'}
+                        >
+                            <Icon
+                                name={cardMuted ? 'volume-mute' : 'volume-high'}
+                                size={13}
+                                color="#FFFFFF"
+                            />
+                        </Pressable>
+                    ) : null}
+                </View>
+                ) : (
+                <Animated.View style={[styles.mediaCard, shellStyle]}>
+                    {poster || imageUri ? (
+                        <CachedImage
+                            source={{ uri: (video ? poster : imageUri) || imageUri || poster || '' }}
+                            style={StyleSheet.absoluteFill}
+                            resizeMode="cover"
+                        />
+                    ) : (
+                        <View style={[styles.textFill, { backgroundColor: card?.colors[0] || getTextOnlyBackgroundColor(post) }]}>
+                            {textBody}
+                        </View>
+                    )}
+                </Animated.View>
+                )}
+
+                <Animated.View
+                    pointerEvents={ready ? 'auto' : 'none'}
+                    style={[
+                        styles.actionsFrame,
+                        fadeIn,
+                        { top: target.top + target.height + STACK_GAP, left: target.left, width: target.width },
+                    ]}
+                >
+                    <LinearGradient
+                        colors={['#22C55E', '#FFD400', '#FF4D9A']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.actionsGradient}
+                    >
+                    <View style={styles.actions}>
+                    {actionRows.map((action, index) => (
+                        <View key={action.label}>
+                            {index > 0 ? <View style={styles.divider} /> : null}
+                            <Pressable style={styles.actionRow} onPress={action.onPress}>
+                                <Text style={styles.actionLabel}>{action.label}</Text>
+                                <Icon name={action.icon} size={20} color="#FFFFFF" />
+                            </Pressable>
+                        </View>
+                    ))}
+                    </View>
+                    </LinearGradient>
+                </Animated.View>
+            </View>
         </Modal>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
+    root: {
         flex: 1,
-        backgroundColor: 'rgba(3, 9, 27, 0.72)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 16,
     },
-    sheet: {
-        maxHeight: '92%',
-        borderRadius: 20,
+    backdrop: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.72)',
+    },
+    cellFill: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+    },
+    mediaCard: {
+        position: 'absolute',
         overflow: 'hidden',
-        backgroundColor: 'rgba(10, 10, 20, 0.92)',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.15)',
+        backgroundColor: '#111111',
     },
-    handle: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255, 255, 255, 0.35)',
-        marginTop: 10,
-        marginBottom: 8,
+    /** TextureView on Android does not draw inside an overflow-hidden parent. */
+    videoCard: {
+        overflow: 'visible',
     },
-    sheetContent: {
-        gap: 10,
-        paddingHorizontal: 10,
-        paddingBottom: 12,
+    posterHidden: {
+        opacity: 0,
     },
-    previewCard: {
-        borderRadius: PEEK_SHEET_RADIUS,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.15)',
-        backgroundColor: '#0B1021',
-    },
-    previewHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.15)',
-        backgroundColor: 'rgba(10, 10, 20, 0.85)',
-    },
-    previewHandle: {
+    textFill: {
         flex: 1,
-        color: '#FFFFFF',
-        fontSize: 15,
-        fontWeight: '600',
-    },
-    previewMedia: {
-        backgroundColor: FEED_CARD_MEDIA_BG,
-        justifyContent: 'center',
-        alignItems: 'center',
-        overflow: 'hidden',
-    },
-    imagePreview: {
-        width: '100%',
-        height: '100%',
-    },
-    textPreview: {
-        flex: 1,
-        width: '100%',
         alignItems: 'center',
         justifyContent: 'center',
         padding: 20,
-        backgroundColor: '#FFFFFF',
     },
-    textPreviewBody: {
+    textBody: {
         textAlign: 'center',
-        lineHeight: 24,
-        fontWeight: '600',
+        fontSize: 22,
+        lineHeight: 28,
+        fontWeight: '700',
     },
-    muteButton: {
-        position: 'absolute',
-        bottom: 12,
-        right: 12,
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: 'rgba(10, 10, 20, 0.72)',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.15)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    captionOverlay: {
+    handleBar: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        paddingHorizontal: 12,
-        paddingTop: 28,
-        paddingBottom: 12,
-        backgroundColor: 'rgba(0,0,0,0.55)',
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        backgroundColor: 'rgba(88, 82, 76, 0.88)',
     },
-    captionText: {
+    handleText: {
         color: '#FFFFFF',
-        fontSize: 13,
-        lineHeight: 18,
-        fontWeight: '500',
+        fontSize: 16,
+        fontWeight: '700',
     },
-    actionsRow: {
-        flexDirection: 'row',
-        alignItems: 'stretch',
-        justifyContent: 'space-between',
-        borderRadius: PEEK_SHEET_RADIUS,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.15)',
-        backgroundColor: 'rgba(10, 10, 20, 0.85)',
-        paddingHorizontal: 6,
-        paddingVertical: 10,
-    },
-    actionCell: {
-        flex: 1,
-        minWidth: 0,
+    muteButton: {
+        position: 'absolute',
+        right: 12,
+        bottom: 56,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 2,
-        borderRadius: 12,
-        gap: 6,
+        backgroundColor: 'rgba(0, 0, 0, 0.72)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.55)',
+        zIndex: 80,
+        elevation: Platform.OS === 'android' ? 80 : 0,
     },
-    actionRowPressed: {
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    actionsFrame: {
+        position: 'absolute',
     },
-    actionRowDisabled: {
-        opacity: 0.4,
+    actionsGradient: {
+        borderRadius: 16,
+        padding: ACTION_BORDER,
+    },
+    actions: {
+        borderRadius: 14,
+        backgroundColor: '#000000',
+        overflow: 'hidden',
+    },
+    actionRow: {
+        minHeight: ACTIONS_ROW,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
     },
     actionLabel: {
         color: '#FFFFFF',
-        fontSize: 11,
+        fontSize: 16,
         fontWeight: '600',
-        textAlign: 'center',
-        width: '100%',
+    },
+    divider: {
+        height: StyleSheet.hairlineWidth,
+        marginLeft: 16,
+        backgroundColor: 'rgba(255,255,255,0.14)',
     },
 });

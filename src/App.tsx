@@ -6,8 +6,8 @@ import { FiHome, FiUser, FiUserPlus, FiUserX, FiUserMinus, FiPlayCircle, FiPlusS
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
-import ShareToStoriesFeedIcon from './components/ShareToStoriesFeedIcon';
 import AddToStorySheet from './components/AddToStorySheet';
+import ProfileGridTapCard, { type ProfileGridTapOrigin } from './components/ProfileGridTapCard';
 import FeedPostNewsTicker from './components/FeedPostNewsTicker';
 import FeedTextOnlyCard from './components/FeedTextOnlyCard';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
@@ -122,7 +122,9 @@ import {
   resolveTextCardTailFill,
 } from './utils/feedTextBubble';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from './utils/globalVideoMute';
-import { postHasVideoMedia } from './utils/postMedia';
+import { FEED_AUDIO_HOLD_EVENT, isFeedAudioHeld } from './utils/feedAudioHold';
+import { postHasVideoMedia, siblingJpegFromVideoUrl } from './utils/postMedia';
+import { isVideoUrl, pickStoryPosterUri, resolveStoryMediaUrl } from './utils/storyMediaNative';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -2933,7 +2935,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           const checkAndPlay = () => {
             try {
               const v2 = videoRef.current;
-              if (v2?.paused) {
+              if (v2?.paused && !isFeedAudioHeld()) {
                 const rect = v2.getBoundingClientRect();
                 const isInView = rect.top < window.innerHeight && rect.bottom > 0;
                 if (isInView) {
@@ -3024,6 +3026,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     if (active) videoRef.current = active;
     pauseCarouselExcept(activeIndex);
     if (!feedVideoInViewRef.current || items[activeIndex]?.type !== 'video' || !active) return;
+    if (isFeedAudioHeld()) {
+      active.pause();
+      setIsPlaying(false);
+      return;
+    }
     const allowAutoplay = autoplayPref === 'always' || (autoplayPref === 'wifi' && !lowBandwidthMode);
     if (!allowAutoplay) return;
     active.muted = isMuted;
@@ -3074,6 +3081,12 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                       autoplayTimerRef.current = null;
                     }
                     autoplayTimerRef.current = setTimeout(() => {
+                      if (isFeedAudioHeld()) {
+                        v.pause();
+                        setIsPlaying(false);
+                        autoplayTimerRef.current = null;
+                        return;
+                      }
                       window.dispatchEvent(new CustomEvent(FEED_ACTIVE_VIDEO_EVENT, { detail: { postId } }));
                       v.play().catch((err) => {
                         // NotSupportedError = no/invalid src; expected for placeholder or failed loads
@@ -3126,6 +3139,33 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       }
     };
   }, [hasFeedVideo, hasMultipleItems, items, postId, lowBandwidthMode, autoplayPref, pauseCarouselExcept]);
+
+  // Add yours / camera roll sits over the feed. Keep the clip quiet until that picker closes.
+  React.useEffect(() => {
+    if (currentItem?.type !== 'video') return;
+    const onHold = (event: Event) => {
+      const held = (event as CustomEvent<{ held?: boolean }>).detail?.held === true;
+      if (held) {
+        if (autoplayTimerRef.current) {
+          clearTimeout(autoplayTimerRef.current);
+          autoplayTimerRef.current = null;
+        }
+        carouselVideoRefs.current.forEach((el) => {
+          try {
+            el?.pause();
+          } catch {
+            /* ignore */
+          }
+        });
+        videoRef.current?.pause();
+        setIsPlaying(false);
+        return;
+      }
+      if (feedVideoInViewRef.current) playActiveFeedVideo();
+    };
+    window.addEventListener(FEED_AUDIO_HOLD_EVENT, onHold as EventListener);
+    return () => window.removeEventListener(FEED_AUDIO_HOLD_EVENT, onHold as EventListener);
+  }, [currentItem?.type, playActiveFeedVideo]);
 
   // Swiping a carousel moves the playable file. Play the slide in view and stop the others.
   React.useEffect(() => {
@@ -4461,7 +4501,7 @@ function EngagementBar({
             aria-label="Share post to stories"
             title="Share post to stories"
           >
-            <ShareToStoriesFeedIcon className={`${iconSize} text-white`} />
+            <span aria-hidden className="inline-flex h-6 w-6 items-center justify-center text-[22px] leading-none text-white">✦</span>
             <span className="text-xs text-white tabular-nums">{shares}</span>
           </button>
 
@@ -4861,7 +4901,7 @@ function PostAnalyticsCard({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, onShareSuccess, priority = false, engagementVariant = 'default', knownBoosted, onMuteAuthor, onBlockAuthor, onHidePost, onNotInterestedPost }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onBoostTileOpen, onDelete, onOpenDM, onShareSuccess, priority = false, engagementVariant = 'default', knownBoosted, onMuteAuthor, onBlockAuthor, onHidePost, onNotInterestedPost }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -4872,6 +4912,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   onOpenScenes: () => void;
   showBoostIcon?: boolean;
   onBoost?: () => Promise<void>;
+  /** Boost grid: open the clip card instead of starting boost immediately. */
+  onBoostTileOpen?: (origin: { top: number; left: number; width: number; height: number }) => void;
   onDelete?: () => Promise<void>;
   /** Open in-feed DM compose sheet (mutual follow only). */
   onOpenDM?: (handle: string) => void;
@@ -5185,7 +5227,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       aria-labelledby={titleId}
       className={`animate-[cardBounce_0.6s_ease-out] relative ${
         isTileBoostMode
-          ? 'mx-0 w-full overflow-hidden aspect-square rounded-xl mb-0 border-0'
+          ? `mx-0 w-full overflow-hidden aspect-[9/16] rounded-[20px] mb-0 border-2 ${
+              isBoosted || knownBoosted ? 'border-white' : 'border-transparent'
+            }`
           : 'mx-4 my-2 overflow-visible rounded-[20px] border border-white/15'
       }`}
       style={{ backgroundColor: '#000000' }}
@@ -5209,33 +5253,48 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       >
         {/* Boost icon corner (boost feed tile mode) */}
         {showBoostIcon && isTileBoostMode && (
-          <div className="absolute top-3 right-3 z-30 pointer-events-none">
+          <div className="absolute top-2 right-2 z-30 pointer-events-none">
             <div
-              className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white shadow-[0_6px_18px_rgba(212,175,55,0.45)]"
+              className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white shadow-[0_6px_18px_rgba(212,175,55,0.45)]"
               style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
             >
-              <LuFlame className="text-[#111111]" size={22} strokeWidth={2.4} aria-hidden />
+              <LuFlame className="text-[#111111]" size={18} strokeWidth={2.4} aria-hidden />
             </div>
           </div>
         )}
 
         {/* In boost tile mode the whole tile is the action (so tapping it opens Boost modal). */}
-        {isTileBoostMode && onBoost && (
+        {isTileBoostMode && (onBoostTileOpen || onBoost) && (
           <button
             type="button"
             className="absolute inset-0 z-20 bg-transparent"
-            aria-label="Boost this post"
+            aria-label={onBoostTileOpen ? 'Open post' : 'Boost this post'}
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
-              void onBoost();
+              if (onBoostTileOpen) {
+                const rect = articleRef.current?.getBoundingClientRect();
+                onBoostTileOpen(
+                  rect
+                    ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+                    : { top: 0, left: 0, width: 0, height: 0 },
+                );
+                return;
+              }
+              void onBoost?.();
             }}
           />
         )}
         {isTileBoostMode && (
-          <div className="absolute left-1.5 right-1.5 bottom-1.5 z-30 pointer-events-none flex flex-wrap gap-1">
-            <span className="inline-flex items-center rounded-full border border-white/30 bg-black/70 px-2 py-1 text-[10px] font-bold text-white">
-              Tap to boost
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center px-2">
+            <span
+              className={`inline-flex items-center rounded-lg border px-2 py-1 text-[10px] font-bold text-white ${
+                isBoosted || knownBoosted
+                  ? 'border-white/75 bg-white/20'
+                  : 'border-white/30 bg-black/70'
+              }`}
+            >
+              {isBoosted || knownBoosted ? 'Boosting' : 'Tap to boost'}
             </span>
           </div>
         )}
@@ -5932,7 +5991,11 @@ function Stories24RailCollapseOverlay() {
   return null;
 }
 
-/** Horizontal Stories 24 strip — short cards and a white border on the front card. */
+/** Green, yellow, and pink. Only the card in front uses it. */
+const STORIES24_LIT_BORDER =
+  'linear-gradient(#03091B, #03091B) padding-box, linear-gradient(135deg, #22C55E, #FFD400, #FF4D9A) border-box';
+
+/** Horizontal Stories 24 strip — short cards and a spectrum border on the front card. */
 function Stories24FeedRail({
   stories24Items,
   navigate,
@@ -6082,17 +6145,27 @@ function Stories24FeedRail({
               : `@${item.handle.replace(/^@/, '')}`;
             const cardLabel = caption || displayHandle;
             const cardMeta = caption ? item.subtitle || displayHandle : '';
-            const stillRaw = item.thumb && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(item.thumb) ? item.thumb : '';
-            const still = stillRaw ? rewriteMediaUrlForClient(stillRaw) : '';
+            const stillRaw = (item.thumb || '').trim();
+            const still =
+              stillRaw &&
+              stillRaw !== 'public' &&
+              stillRaw !== 'close_friends' &&
+              stillRaw !== 'only_me' &&
+              !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(stillRaw)
+                ? stillRaw.startsWith('data:')
+                  ? stillRaw
+                  : rewriteMediaUrlForClient(stillRaw)
+                : '';
             return (
               <div key={item.handle} className="flex shrink-0 items-center">
                 <button
                   type="button"
                   data-stories24-card={encodeURIComponent(item.handle)}
                   onClick={(e) => handleStoryCardTap(e, item)}
-                  className={`relative flex h-[72px] w-[220px] items-center overflow-hidden rounded-xl border bg-[#03091B] px-2.5 py-2 text-left ${
-                    slot === litCardIndex ? 'border-white' : 'border-[#2A2A3C]'
+                  className={`relative flex h-[72px] w-[220px] items-center overflow-hidden rounded-xl border-2 bg-[#03091B] px-2.5 py-2 text-left ${
+                    slot === litCardIndex ? 'border-transparent' : 'border-[#2A2A3C]'
                   }`}
+                  style={slot === litCardIndex ? { background: STORIES24_LIT_BORDER } : undefined}
                 >
                   <span
                     className="pointer-events-none absolute inset-0"
@@ -6104,6 +6177,9 @@ function Stories24FeedRail({
                       src={still}
                       alt=""
                       className="pointer-events-none absolute inset-y-0 right-0 w-[108px] object-cover opacity-90"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
                     />
                   ) : null}
                   <span
@@ -6136,9 +6212,12 @@ function Stories24FeedRail({
               <button
                 type="button"
                 onClick={openViewAll}
-                className={`flex h-[72px] w-[220px] items-center justify-center overflow-hidden rounded-xl border bg-[#03091B] text-[15px] font-bold text-white ${
-                  displayCards.length === litCardIndex ? 'border-white' : 'border-[#2A2A3C]'
+                className={`flex h-[72px] w-[220px] items-center justify-center overflow-hidden rounded-xl border-2 bg-[#03091B] text-[15px] font-bold text-white ${
+                  displayCards.length === litCardIndex ? 'border-transparent' : 'border-[#2A2A3C]'
                 }`}
+                style={
+                  displayCards.length === litCardIndex ? { background: STORIES24_LIT_BORDER } : undefined
+                }
               >
                 View all
               </button>
@@ -6150,7 +6229,7 @@ function Stories24FeedRail({
         createPortal(
           <div className="fixed inset-0 z-[140] pointer-events-none">
             <div
-              className="absolute overflow-hidden bg-[#101b2f] shadow-[0_20px_60px_rgba(0,0,0,0.45)] transition-[top,left,width,height,border-radius,box-shadow] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[top,left,width,height,border-radius]"
+              className="absolute overflow-hidden bg-black shadow-[0_20px_60px_rgba(0,0,0,0.45)] transition-[top,left,width,height,border-radius,box-shadow] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[top,left,width,height,border-radius]"
               style={{
                 transitionDuration: `${STORIES24_EXPAND_MS}ms`,
                 top: expandingStory.phase === 'start' ? expandingStory.rect.top : 0,
@@ -6160,15 +6239,28 @@ function Stories24FeedRail({
                 borderRadius: expandingStory.phase === 'start' ? 16 : 0,
               }}
             >
-              <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/20 via-sky-500/20 to-fuchsia-500/20" />
-              {/* Do not use a video element here â€” mobile compositors break parent expand animation. */}
-              {expandingStory.item.thumb ? (
-                <img
-                  src={expandingStory.item.thumb}
-                  alt={`${expandingStory.item.handle} story`}
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
-              ) : null}
+              <div className="absolute inset-0 bg-gradient-to-b from-black to-[#23104F]" />
+              {/* Do not use a video element here — mobile compositors break parent expand animation. */}
+              {(() => {
+                const raw = (expandingStory.item.thumb || '').trim();
+                const openStill =
+                  raw &&
+                  raw !== 'public' &&
+                  raw !== 'close_friends' &&
+                  raw !== 'only_me' &&
+                  !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(raw)
+                    ? raw.startsWith('data:')
+                      ? raw
+                      : rewriteMediaUrlForClient(raw)
+                    : '';
+                return openStill ? (
+                  <img
+                    src={openStill}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                ) : null;
+              })()}
               <div className="absolute inset-0 bg-black/20" />
             </div>
           </div>,
@@ -8289,12 +8381,26 @@ function FeedPageWrapper() {
           const latest = sortedStories[0];
           if (!latest) continue;
 
-          const latestMediaUrl = latest.mediaUrl;
+          const latestMediaUrl = resolveStoryMediaUrl(latest.mediaUrl) || latest.mediaUrl;
           const latestMediaType = latest.mediaType;
-          const firstImage = sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl;
-          const poster = (latest.videoPosterUrl || '').trim();
-          const posterStill = poster && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(poster) ? poster : undefined;
-          let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined) || posterStill;
+          const firstImage = resolveStoryMediaUrl(
+            sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl,
+          );
+          const posterRaw = pickStoryPosterUri(latest) || '';
+          const posterStill =
+            posterRaw &&
+            posterRaw !== 'public' &&
+            posterRaw !== 'close_friends' &&
+            posterRaw !== 'only_me' &&
+            !isVideoUrl(posterRaw)
+              ? posterRaw
+              : undefined;
+          const siblingStill = siblingJpegFromVideoUrl(latestMediaUrl);
+          let thumb =
+            posterStill ||
+            firstImage ||
+            siblingStill ||
+            (latestMediaType !== 'video' && !isVideoUrl(latestMediaUrl) ? latestMediaUrl : undefined);
           const text =
             (latest.text || (latest as any).text_content || '').trim()
             || (latest.sharedFromPost ? 'Shared a post' : 'New story');
@@ -9765,6 +9871,7 @@ function BoostPageWrapper() {
   }, [selectedPostForScenes]);
   const [boostModalOpen, setBoostModalOpen] = React.useState(false);
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
+  const [boostTap, setBoostTap] = React.useState<{ post: Post; origin: ProfileGridTapOrigin } | null>(null);
   const selectedPostForBoostRef = React.useRef<Post | null>(null);
   React.useEffect(() => {
     selectedPostForBoostRef.current = selectedPostForBoost;
@@ -10108,6 +10215,21 @@ function BoostPageWrapper() {
     }
   }, [getBoostInsightsCached, insightsRange, sparklineBars]);
 
+  const beginBoost = React.useCallback(async (post: Post) => {
+    setBoostTap(null);
+    setSelectedPostForBoost(post);
+    setBoostModalOpen(true);
+    const existing = await getActiveBoost(post.id);
+    if (!existing?.isActive) return;
+    setBoostModalOpen(false);
+    setSelectedPostForBoost(null);
+    await Swal.fire(bottomSheet({
+      title: 'Already boosted',
+      message: 'This post is already boosted. It will expire in 6 hours.',
+      icon: 'alert',
+    }));
+  }, []);
+
   // Not logged in
   if (!user) {
     return <Navigate to="/landing" replace />;
@@ -10225,7 +10347,7 @@ function BoostPageWrapper() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-x-[6px] gap-y-2.5 px-2 pb-2 sm:grid-cols-3 md:grid-cols-4">
+        <div className="grid grid-cols-3 gap-2 px-4 pb-6">
           {sortedBoostPosts.map(p => {
             return (
               <div key={p.id} className="min-w-0">
@@ -10234,21 +10356,7 @@ function BoostPageWrapper() {
                 showBoostIcon={true}
                 engagementVariant="boost"
                 knownBoosted={recentlyBoostedPostId === p.id || !!p.isBoosted}
-                onBoost={async () => {
-                  // Open immediately for snappy tile-tap UX, then validate in background.
-                  setSelectedPostForBoost(p);
-                  setBoostModalOpen(true);
-                  const existing = await getActiveBoost(p.id);
-                  if (existing?.isActive) {
-                    setBoostModalOpen(false);
-                    setSelectedPostForBoost(null);
-                    Swal.fire(bottomSheet({
-                      title: 'Already boosted',
-                      message: 'This post is already boosted. It will expire in 6 hours.',
-                      icon: 'alert',
-                    }));
-                  }
-                }}
+                onBoostTileOpen={(origin) => setBoostTap({ post: p, origin })}
                 onLike={async () => {
                   if (!online) {
                     updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
@@ -10354,6 +10462,24 @@ function BoostPageWrapper() {
         </div>
       )}
       </div>
+
+      {boostTap ? (
+        <ProfileGridTapCard
+          post={boostTap.post}
+          origin={boostTap.origin}
+          profileHandle={boostTap.post.userHandle || user.handle || ''}
+          onClose={() => setBoostTap(null)}
+          actions={[
+            {
+              label: 'Boost',
+              icon: <LuFlame size={20} />,
+              onPress: () => {
+                void beginBoost(boostTap.post);
+              },
+            },
+          ]}
+        />
+      ) : null}
 
       {/* Modals */}
       {commentsModalOpen && selectedPostId && (
