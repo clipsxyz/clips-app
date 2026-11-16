@@ -4,6 +4,18 @@ import { resolve } from 'path'
 import { noCache } from './vite-plugin-no-cache'
 import { firebaseSwPlugin } from './vite-plugin-firebase-sw'
 
+/** Tell Laravel which host the browser used, so media URLs are not stuck on localhost:8000. */
+function forwardBrowserHost(proxy) {
+  proxy.on('proxyReq', (proxyReq, req) => {
+    const host = req.headers.host
+    if (!host) return
+    proxyReq.setHeader('X-Forwarded-Host', host)
+    proxyReq.setHeader('X-Forwarded-Proto', 'http')
+    const port = String(host).split(':')[1]
+    if (port) proxyReq.setHeader('X-Forwarded-Port', port)
+  })
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), noCache(), firebaseSwPlugin()],
@@ -83,11 +95,13 @@ export default defineConfig({
         changeOrigin: true,
         secure: false, // Allow self-signed certificates
         rewrite: (path) => path.replace(/^\/api/, '/api'),
+        configure: forwardBrowserHost,
       },
       '/storage': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
+        configure: forwardBrowserHost,
       },
     },
   },

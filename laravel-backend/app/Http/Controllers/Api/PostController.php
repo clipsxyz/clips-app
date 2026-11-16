@@ -14,6 +14,7 @@ use App\Services\LinkPreviewService;
 use App\Services\VideoThumbnailService;
 use App\Support\DominantColor;
 use App\Support\LocationHierarchy;
+use App\Support\PublicMediaUrl;
 use App\Support\VideoDimensions;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -336,7 +337,7 @@ class PostController extends Controller
             $postData['comment_audience'] = $audience;
         }
 
-        return $postData;
+        return PublicMediaUrl::rewritePayloadMedia($postData);
     }
 
     /**
@@ -593,9 +594,9 @@ class PostController extends Controller
             'text_content' => $post->text_content,
             'caption' => $post->caption,
             'image_text' => $post->image_text,
-            'media_url' => $post->media_url,
+            'media_url' => PublicMediaUrl::forClient($post->media_url) ?? $post->media_url,
             'media_type' => $post->media_type,
-            'media_items' => $post->media_items,
+            'media_items' => PublicMediaUrl::rewritePayloadMedia(['media_items' => $post->media_items])['media_items'],
             'location_label' => $post->location_label,
             'venue' => $post->venue,
             'landmark' => $post->landmark,

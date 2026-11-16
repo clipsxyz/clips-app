@@ -78,7 +78,6 @@ import {
 } from './utils/feedContentPrefsWeb';
 import { normalizeFeedHandle } from './utils/feedContentPrefsCore';
 import { timeAgo } from './utils/timeAgo';
-import { captureVideoFrameDataUrl } from './utils/captureVideoFrame';
 import {
   findPlaceMatchedPosts,
   suggestedPlacesBundleKey,
@@ -133,6 +132,8 @@ const FEED_ACTIVE_VIDEO_EVENT = 'feedActiveVideoChanged';
 const FEED_AUTOPLAY_PREF_KEY = 'clips:feedAutoplayPref';
 const FEED_AUTOPLAY_PREF_EVENT = 'feedAutoplayPrefChanged';
 let lastFeedAutoplayAtMs = 0;
+/** How much of each feed video is inside the feed scroller. Only the most visible one plays. */
+const feedVideoVisibility = new Map<string, number>();
 
 type Tab = string; // Dynamic based on user location
 
@@ -2674,19 +2675,12 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
 
 
-  // Rewrite localhost media URLs for network access (e.g. phone at 192.168.1.7:5173)
+  // Old clips are stored as http://192.168.x.x:8000 or localhost:8000. The phone
+  // page is on :5173, and that port is the one that can fetch the file.
   const rewriteMediaUrl = React.useCallback((u: string): string => {
     if (!u || typeof u !== 'string') return u;
-    const h = typeof window !== 'undefined' ? window.location.hostname : '';
     if (u.startsWith('blob:')) return resolveMockFeedVideoUrl(u);
-    let out = u;
-    if (h !== 'localhost' && h !== '127.0.0.1') {
-      out = u
-        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
-    }
-    return resolveMockFeedVideoUrl(out);
+    return resolveMockFeedVideoUrl(rewriteMediaUrlForClient(u));
   }, []);
 
   // Determine if we have multiple media items (carousel); rewrite URLs for network (e.g. phone)
@@ -3033,8 +3027,20 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
     const allowAutoplay = autoplayPref === 'always' || (autoplayPref === 'wifi' && !lowBandwidthMode);
     if (!allowAutoplay) return;
+    active.preload = 'auto';
     active.muted = isMuted;
-    active.play().catch((err) => {
+    const resumeMuted = () => {
+      if (active.muted) return;
+      active.muted = true;
+      active.play().catch(() => {});
+    };
+    active.play().then(() => {
+      if (active.paused) resumeMuted();
+    }).catch((err) => {
+      if (err?.name === 'NotAllowedError') {
+        resumeMuted();
+        return;
+      }
       if (err?.name !== 'NotSupportedError' && !String(err?.message || '').includes('no supported source')) {
         console.warn('Video play failed:', err);
       }
@@ -3047,11 +3053,26 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     const root = mediaContainerRef.current;
     if (!hasFeedVideo || !root) return;
     try {
+      const scrollRoot = root.closest('.overflow-y-auto') as HTMLElement | null;
       observerRef.current = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
             try {
-              if (entry.isIntersecting) {
+              if (postId) {
+                if (entry.isIntersecting) feedVideoVisibility.set(postId, entry.intersectionRatio);
+                else feedVideoVisibility.delete(postId);
+              }
+              let bestId = '';
+              let bestRatio = 0;
+              feedVideoVisibility.forEach((ratio, id) => {
+                if (ratio > bestRatio) {
+                  bestRatio = ratio;
+                  bestId = id;
+                }
+              });
+              const minRatio = lowBandwidthMode ? 0.5 : 0.2;
+              const isMostVisible = !!postId && bestId === postId && bestRatio >= minRatio;
+              if (isMostVisible) {
                 feedVideoInViewRef.current = true;
                 const activeIndex = currentIndexRef.current;
                 const v = hasMultipleItems
@@ -3069,8 +3090,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   }
                   const allowAutoplay =
                     autoplayPref === 'always' || (autoplayPref === 'wifi' && !lowBandwidthMode);
-                  const visibilityGate = lowBandwidthMode ? entry.intersectionRatio >= 0.9 : true;
+                  const visibilityGate = true;
                   pauseCarouselExcept(activeIndex);
+                  if (v) v.preload = 'auto';
                   if (allowAutoplay && visibilityGate) {
                     const now = Date.now();
                     const sinceLast = now - lastFeedAutoplayAtMs;
@@ -3088,7 +3110,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                         return;
                       }
                       window.dispatchEvent(new CustomEvent(FEED_ACTIVE_VIDEO_EVENT, { detail: { postId } }));
+                      v.preload = 'auto';
                       v.play().catch((err) => {
+                        if (err?.name === 'NotAllowedError' && !v.muted) {
+                          v.muted = true;
+                          v.play().catch(() => {});
+                          return;
+                        }
                         // NotSupportedError = no/invalid src; expected for placeholder or failed loads
                         if (err?.name !== 'NotSupportedError' && !String(err?.message || '').includes('no supported source')) {
                           console.warn('Video play failed:', err);
@@ -3122,7 +3150,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             }
           });
         },
-        { threshold: lowBandwidthMode ? [0.5, 0.9] : 0.5 }
+        { root: scrollRoot || null, threshold: [0.2, 0.5, 0.9] }
       );
       observerRef.current.observe(root);
     } catch (err) {
@@ -3130,6 +3158,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
 
     return () => {
+      if (postId) feedVideoVisibility.delete(postId);
       if (observerRef.current) {
         observerRef.current.disconnect();
       }
@@ -3422,12 +3451,19 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     if (hasMultipleItems) return;
     setAspectRatio(null);
     if (currentItem?.type === 'video' && videoRef.current) {
-      setIsLoading(true);
+      const video = videoRef.current;
       setIsPlaying(false);
       setIsPaused(false);
       setShowControls(false);
       setProgress(0);
-      videoRef.current.load();
+      // Do not call load() here. That aborted the fetch, and with the spinner
+      // waiting on loaded data the card stayed on the spinner.
+      if (video.readyState >= 1 && !video.error) {
+        setIsLoading(false);
+        setHasError(false);
+      } else {
+        setIsLoading(true);
+      }
     } else if (currentItem?.type === 'image') {
       const url = currentItem.url;
       if (hasMultipleItems && url && loadedMediaUrlsRef.current.has(url)) {
@@ -3693,11 +3729,21 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   draggable={false}
                   onContextMenu={(e) => e.preventDefault()}
                   controlsList="nodownload noremoteplayback"
+                  onLoadedMetadata={() => {
+                    if (slideIndex !== currentIndexRef.current) return;
+                    handleVideoLoad();
+                  }}
                   onLoadedData={(e) => {
                     if (slideIndex !== currentIndexRef.current) return;
                     handleVideoLoad();
-                    if (feedVideoInViewRef.current) {
-                      e.currentTarget.play().catch(() => {});
+                    if (feedVideoInViewRef.current && e.currentTarget.paused) {
+                      playActiveFeedVideo();
+                    }
+                  }}
+                  onCanPlay={(e) => {
+                    if (slideIndex !== currentIndexRef.current) return;
+                    if (feedVideoInViewRef.current && e.currentTarget.paused) {
+                      playActiveFeedVideo();
                     }
                   }}
                   onError={handleVideoError}
@@ -3833,7 +3879,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               draggable={false}
               onContextMenu={(e) => e.preventDefault()}
               controlsList="nodownload noremoteplayback"
-              onLoadedData={handleVideoLoad}
+              onLoadedMetadata={handleVideoLoad}
+              onLoadedData={(e) => {
+                handleVideoLoad();
+                if (feedVideoInViewRef.current && e.currentTarget.paused) {
+                  playActiveFeedVideo();
+                }
+              }}
+              onCanPlay={(e) => {
+                if (feedVideoInViewRef.current && e.currentTarget.paused) {
+                  playActiveFeedVideo();
+                }
+              }}
               onError={handleVideoError}
               onPlay={handleVideoPlay}
               onPause={handleVideoPause}
@@ -4957,15 +5014,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const carouselThumbRailRef = React.useRef<HTMLDivElement | null>(null);
   const rewriteMediaUrlForThumbs = React.useCallback((u?: string): string => {
     if (!u || typeof u !== 'string') return '';
-    const h = typeof window !== 'undefined' ? window.location.hostname : '';
-    let out = u;
-    if (h !== 'localhost' && h !== '127.0.0.1' && !u.startsWith('blob:')) {
-      out = u
-        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
-    }
-    return resolveMockFeedVideoUrl(out);
+    if (u.startsWith('blob:')) return resolveMockFeedVideoUrl(u);
+    return resolveMockFeedVideoUrl(rewriteMediaUrlForClient(u));
   }, []);
   const carouselThumbItems = React.useMemo(
     () =>
@@ -6830,6 +6880,7 @@ function FeedPageWrapper() {
   const feedEndSentinelRef = React.useRef<HTMLDivElement | null>(null);
   const feedPagingRef = React.useRef(false);
   const [feedScrolling, setFeedScrolling] = React.useState(false);
+  const [feedAddStoryOpen, setFeedAddStoryOpen] = React.useState(false);
   const feedScrollIdleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [feedTabVisible, setFeedTabVisible] = React.useState(
     () => typeof document === 'undefined' || document.visibilityState === 'visible',
@@ -7359,7 +7410,8 @@ function FeedPageWrapper() {
     const root = feedScrollRef.current;
     if (!root) return;
     const remain = root.scrollHeight - root.scrollTop - root.clientHeight;
-    if (remain > 640) return;
+    const lead = Math.max(root.clientHeight * 2, 1400);
+    if (remain > lead) return;
     void loadMore(true);
   };
 
@@ -8419,10 +8471,6 @@ function FeedPageWrapper() {
             });
           }
 
-          // Collapse-back overlay uses a static <img> only; video URLs are not drawn during the transform animation.
-          if (!thumb && latestMediaType === 'video' && latestMediaUrl) {
-            thumb = await captureVideoFrameDataUrl(rewriteMediaUrlForClient(latestMediaUrl));
-          }
           if (thumb && !thumb.startsWith('data:')) {
             thumb = rewriteMediaUrlForClient(thumb);
           }
@@ -8504,10 +8552,16 @@ function FeedPageWrapper() {
     return orderStories24RailItems(ordered, user?.handle).slice(0, 41);
   }, [storiesRailItems, user?.handle]);
 
-  const openStories24FromHeader = React.useCallback(() => {
+  const openStories24FromHeader = React.useCallback((opts?: { skipRailReturn?: boolean }) => {
+    const skipRailReturn = opts?.skipRailReturn === true;
     const target = resolveStories24OpenTarget(stories24Items);
     if (!target) {
-      navigate('/stories');
+      navigate('/stories', {
+        state: {
+          fromStories24Rail: true,
+          ...(skipRailReturn ? { skipStories24RailReturn: true } : {}),
+        },
+      });
       return;
     }
     snapshotStories24FeedScrollForRail();
@@ -8523,6 +8577,7 @@ function FeedPageWrapper() {
         fromStories24Rail: true,
         previewVideoUrl: target.item.previewVideoUrl,
         previewThumb: target.item.thumb,
+        ...(skipRailReturn ? { skipStories24RailReturn: true } : {}),
       },
     });
   }, [stories24Items, navigate, snapshotStories24FeedScrollForRail]);
@@ -9096,7 +9151,8 @@ function FeedPageWrapper() {
             return null;
           }
           postCounter += 1;
-          const showStories24AfterThisPost = false;
+          const showViewStoriesCard =
+            postCounter >= 8 && (postCounter - 8) % 10 === 0;
           const showPreviewBusinessAfterThisPost =
             suggestedCardsV2Enabled &&
             previewSuggestedCardsFromQuery &&
@@ -9267,13 +9323,36 @@ function FeedPageWrapper() {
             } : undefined}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
-              {showStories24AfterThisPost && (
-                <Stories24FeedRail
-                  stories24Items={stories24Items}
-                  navigate={navigate}
-                  onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
-                  previewVideosPaused={feedScrolling || !feedTabVisible}
-                />
+              {showViewStoriesCard && (
+                <div
+                  className="mx-4 my-3 flex w-[calc(100%-2rem)] items-center gap-3 rounded-2xl border-2 border-transparent px-4 py-3.5"
+                  style={{
+                    background:
+                      'linear-gradient(#000000, #000000) padding-box, linear-gradient(135deg, #22C55E, #FFD400, #FF4D9A) border-box',
+                  }}
+                >
+                  <Avatar
+                    src={user?.avatarUrl || getAvatarForHandle(user?.handle)}
+                    name={(user?.handle || '').replace(/^@/, '').split('@')[0] || 'You'}
+                    size={36}
+                    hideBorder
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setFeedAddStoryOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/45 bg-white/[0.08] px-3 py-1.5 text-[13px] font-semibold text-white"
+                  >
+                    <FiPlus className="h-3 w-3" />
+                    <span>Add yours</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openStories24FromHeader({ skipRailReturn: true })}
+                    className="ml-auto text-base font-semibold text-white"
+                  >
+                    View stories
+                  </button>
+                </div>
               )}
               {showPreviewBusinessAfterThisPost && (
                 <LocalBusinessSuggestionCard
@@ -9419,6 +9498,8 @@ function FeedPageWrapper() {
       )}
 
       </div>
+
+      <AddToStorySheet visible={feedAddStoryOpen} onDismiss={() => setFeedAddStoryOpen(false)} />
 
       {/* In-feed DM sheet: outside scroll so position:fixed works reliably on iOS */}
       {dmSheetOpen && dmSheetRecipientHandle && user?.handle && (

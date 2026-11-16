@@ -29,6 +29,8 @@ return [
             // served via the `public/storage` symlink (`php artisan storage:link`).
             'driver' => 'local',
             'root' => storage_path('app/public'),
+            // Fallback only. AlignPublicUrlsWithRequest replaces this with the
+            // incoming request host so Storage::url() is not stuck on APP_URL.
             'url' => rtrim(env('APP_URL', 'http://localhost:8000'), '/').'/storage',
             'visibility' => 'public',
             'throw' => false,

@@ -21,6 +21,7 @@ import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
 import { storyHasRenderableMedia } from '../utils/storyMediaNative';
+import { siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
@@ -29,14 +30,48 @@ import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } fr
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 
-/** Min time the Stories pop icon shows when opening from feed Stories 24 rail. */
-const STORIES24_LOADING_HOLD_MS = 2600;
-
 function storyOpenStill(raw?: string): string {
     const value = (raw || '').trim();
     if (!value || value === 'public' || value === 'close_friends' || value === 'only_me') return '';
     if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(value)) return '';
     return value.startsWith('data:') ? value : rewriteMediaUrlForClient(value);
+}
+
+/** Play story files through this page's origin. Stored links often point at :8000, which the browser will not play. */
+function storyPlaybackUrl(raw?: string | null): string {
+    const value = (raw || '').trim();
+    if (!value || value === 'public' || value === 'close_friends' || value === 'only_me') return '';
+    if (value.startsWith('data:') || value.startsWith('blob:')) return value;
+    return rewriteMediaUrlForClient(value);
+}
+
+function isVideoPlaybackUrl(raw?: string | null): boolean {
+    return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test((raw || '').trim());
+}
+
+/** Still behind a shared-post card. Never a video URL — a second player leaves the card blank. */
+function sharedPostStillUrl(post?: {
+    mediaUrl?: string;
+    videoPosterUrl?: string;
+    thumbnailUrl?: string;
+    mediaItems?: Array<{ url?: string; posterUrl?: string; thumbnailUrl?: string; thumbnail_url?: string }>;
+} | null): string {
+    if (!post) return '';
+    const item = post.mediaItems?.[0];
+    const candidates = [
+        post.videoPosterUrl,
+        post.thumbnailUrl,
+        item?.posterUrl,
+        item?.thumbnailUrl,
+        item?.thumbnail_url,
+        siblingJpegFromVideoUrl(post.mediaUrl || item?.url),
+    ];
+    for (const raw of candidates) {
+        const url = storyPlaybackUrl(raw);
+        if (!url || isVideoPlaybackUrl(url)) continue;
+        return url;
+    }
+    return '';
 }
 
 /** Must match App.tsx `STORIES24_FROM_RAIL_HANDLE_KEY` — rail return + /feed navigation if `location.state` is dropped. */
@@ -277,6 +312,7 @@ export default function StoriesPage() {
     const [currentStoryIndex, setCurrentStoryIndex] = React.useState(0);
     const currentGroupIndexRef = React.useRef(0);
     const currentStoryIndexRef = React.useRef(0);
+    const storyGroupsRef = React.useRef<StoryGroup[]>([]);
     
     // Keep refs in sync with state
     React.useEffect(() => {
@@ -286,25 +322,20 @@ export default function StoriesPage() {
     React.useEffect(() => {
         currentStoryIndexRef.current = currentStoryIndex;
     }, [currentStoryIndex]);
-    const [loading, setLoading] = React.useState(true);
-    const [viewingStories, setViewingStories] = React.useState(false);
-    const [stories24HoldMinReady, setStories24HoldMinReady] = React.useState(false);
 
     React.useEffect(() => {
-        if (!stories24OpenFromFeedRail || !openUserHandle) {
-            setStories24HoldMinReady(false);
-            return;
-        }
-        setStories24HoldMinReady(false);
-        const t = window.setTimeout(() => setStories24HoldMinReady(true), STORIES24_LOADING_HOLD_MS);
-        return () => window.clearTimeout(t);
-    }, [stories24OpenFromFeedRail, openUserHandle, location.key]);
+        storyGroupsRef.current = storyGroups;
+    }, [storyGroups]);
+    const [loading, setLoading] = React.useState(true);
+    const [viewingStories, setViewingStories] = React.useState(false);
 
     const stories24ContentReady = !loading && viewingStories;
+    // Open the story as soon as it is ready. The extra wait left the phone on
+    // "Opening stories" and the next-story taps never reached the viewer.
     const showStories24HoldScreen =
         stories24OpenFromFeedRail &&
         openUserHandle &&
-        (!stories24ContentReady || !stories24HoldMinReady);
+        !stories24ContentReady;
     const openingStill = storyOpenStill(
         (location.state as { previewThumb?: string } | null)?.previewThumb,
     );
@@ -388,6 +419,8 @@ export default function StoriesPage() {
     const nextStoryTimeoutRef = React.useRef<number | null>(null);
     const lastStoryIdRef = React.useRef<string | null>(null); // Track last story ID to preserve timer
     const hasEnteredStoryViewerRef = React.useRef(false);
+    /** Open each requested person once. Re-running on every story list refresh reset the top bar to 0. */
+    const autoOpenedStoryKeyRef = React.useRef('');
     const lastMuteToggleAtRef = React.useRef<number>(0);
     const lastLikeTapAtRef = React.useRef<number>(0);
 
@@ -398,6 +431,8 @@ export default function StoriesPage() {
     const mentionTouchMovedRef = React.useRef(false);
     const holdPauseTimerRef = React.useRef<number | null>(null);
     const holdPauseActiveRef = React.useRef(false);
+    /** Finger-up after a hold or a swipe must not also count as a next/previous tap. */
+    const suppressStoryTapUntilRef = React.useRef(0);
 
     // Keep ref in sync with state
     React.useEffect(() => {
@@ -406,44 +441,34 @@ export default function StoriesPage() {
 
     React.useEffect(() => {
         let cancelled = false;
-        const run = async () => {
-            const story = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
-            if (!viewingStories || !story?.sharedFromPost || !originalPost) {
-                setSharedStoryBackdrop({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
-                return;
-            }
-
-            const mediaUrl = originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url;
-            if (!mediaUrl) {
-                setSharedStoryBackdrop({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
-                return;
-            }
-
-            const mediaIsVideo = originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video';
-            let paletteSource = mediaUrl;
-            if (mediaIsVideo) {
-                const frame = await captureVideoFrameDataUrl(mediaUrl);
-                if (frame) paletteSource = frame;
-            }
-            const palette = await extractPaletteFromImageUrl(paletteSource);
+        const story = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+        if (!viewingStories || !story?.sharedFromPost || !originalPost) {
+            setSharedStoryBackdrop({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
+            return;
+        }
+        const still = sharedPostStillUrl(originalPost);
+        if (!still) {
+            setSharedStoryBackdrop({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
+            return;
+        }
+        void extractPaletteFromImageUrl(still).then((palette) => {
             if (cancelled) return;
             if (!palette) {
                 setSharedStoryBackdrop({
                     gradient: SHARED_STORY_DEFAULT_GRADIENT,
-                    imageUrl: mediaUrl,
+                    imageUrl: still,
                 });
                 return;
             }
             setSharedStoryBackdrop({
                 gradient: `linear-gradient(135deg, ${palette.c1} 0%, ${palette.c2} 100%)`,
-                imageUrl: mediaUrl,
+                imageUrl: still,
             });
-        };
-        void run();
+        });
         return () => {
             cancelled = true;
         };
-    }, [viewingStories, storyGroups, currentGroupIndex, currentStoryIndex, originalPost?.id, originalPost?.mediaUrl, originalPost?.mediaItems]);
+    }, [viewingStories, storyGroups, currentGroupIndex, currentStoryIndex, originalPost?.id, originalPost?.mediaUrl, originalPost?.mediaItems, originalPost?.videoPosterUrl, originalPost?.thumbnailUrl]);
 
     React.useEffect(() => {
         const onGlobalMutedChanged = (event: Event) => {
@@ -667,16 +692,22 @@ export default function StoriesPage() {
 
     // Auto-open specific user's stories if requested
     React.useEffect(() => {
-        if (openUserHandle && storyGroups.length > 0) {
-            const target = openUserHandle.trim().toLowerCase();
-            const targetGroup = storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target);
-            if (targetGroup) {
-                startViewingStories(targetGroup, openStoryId);
-                return;
-            }
-            // If handle is missing, allow fallback to story list UI.
-            setAutoOpeningStory(false);
+        if (!openUserHandle) {
+            autoOpenedStoryKeyRef.current = '';
+            return;
         }
+        if (storyGroups.length === 0) return;
+        const key = `${openUserHandle.trim().toLowerCase()}|${openStoryId || ''}`;
+        if (autoOpenedStoryKeyRef.current === key) return;
+        const target = openUserHandle.trim().toLowerCase();
+        const targetGroup = storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target);
+        if (targetGroup) {
+            autoOpenedStoryKeyRef.current = key;
+            startViewingStories(targetGroup, openStoryId);
+            return;
+        }
+        // If handle is missing, allow fallback to story list UI.
+        setAutoOpeningStory(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openUserHandle, openStoryId, storyGroups]);
 
@@ -711,6 +742,45 @@ export default function StoriesPage() {
             return;
         }
 
+        const openGroupNow = (stories: Story[]) => {
+            if (!stories.length) return false;
+            const initialStoryIndex = preferredStoryId
+                ? Math.max(0, stories.findIndex((story) => story.id === preferredStoryId))
+                : 0;
+            setStoryGroups((prev) => {
+                let groupIndex = prev.findIndex(
+                    (g) => g.userId === group.userId || g.userHandle === group.userHandle,
+                );
+                if (groupIndex === -1) {
+                    const updated = [...prev, { ...group, stories, avatarUrl: group.avatarUrl }];
+                    groupIndex = updated.length - 1;
+                    currentGroupIndexRef.current = groupIndex;
+                    currentStoryIndexRef.current = initialStoryIndex;
+                    return updated;
+                }
+                const updated = [...prev];
+                updated[groupIndex] = { ...group, stories, avatarUrl: group.avatarUrl };
+                currentGroupIndexRef.current = groupIndex;
+                currentStoryIndexRef.current = initialStoryIndex;
+                return updated;
+            });
+            setCurrentGroupIndex(currentGroupIndexRef.current);
+            setCurrentStoryIndex(currentStoryIndexRef.current);
+            setViewingStories(true);
+            setAutoOpeningStory(false);
+            setProgress(0);
+            setPaused(false);
+            pausedRef.current = false;
+            setIsMuted(getGlobalVideoMuted());
+            elapsedTimeRef.current = 0;
+            return true;
+        };
+
+        const readyNow = (group.stories || []).filter(storyHasRenderableMedia);
+        if (readyNow.length > 0) {
+            openGroupNow(group.stories || []);
+        }
+
         const followedUserHandles = await getFollowedUsers(user.id);
         const fetchedStories = await fetchUserStories(
             user.id,
@@ -730,55 +800,17 @@ export default function StoriesPage() {
                     : group.stories || [];
         if (!stories || stories.length === 0) return;
 
-        // Find the group index in the original array, or add it if not found
-        setStoryGroups(prev => {
-            let groupIndex = prev.findIndex(
-                (g) => g.userId === group.userId || g.userHandle === group.userHandle,
-            );
-            const initialStoryIndex = preferredStoryId
-                ? Math.max(0, stories.findIndex((story) => story.id === preferredStoryId))
-                : 0;
-            
-            if (groupIndex === -1) {
-                // Group not found, add it to the array
-                const updated = [...prev, { ...group, stories, avatarUrl: group.avatarUrl }];
-                groupIndex = updated.length - 1;
-                
-                // Set the index after state update
-                setTimeout(() => {
-                    setCurrentGroupIndex(groupIndex);
-                    currentGroupIndexRef.current = groupIndex;
-                    setCurrentStoryIndex(initialStoryIndex);
-                    currentStoryIndexRef.current = initialStoryIndex;
-                    setViewingStories(true);
-                    setAutoOpeningStory(false);
-                    setProgress(0);
-                    setPaused(false);
-                    setIsMuted(getGlobalVideoMuted());
-                    elapsedTimeRef.current = 0;
-                }, 0);
-                
-                return updated;
-            } else {
-                // Group found, update it
-                const updated = [...prev];
-                updated[groupIndex] = { ...group, stories, avatarUrl: group.avatarUrl };
-                
-                // Set the index immediately
-                setCurrentGroupIndex(groupIndex);
-                currentGroupIndexRef.current = groupIndex;
-                setCurrentStoryIndex(initialStoryIndex);
-                currentStoryIndexRef.current = initialStoryIndex;
-                setViewingStories(true);
-                setAutoOpeningStory(false);
-                setProgress(0);
-                setPaused(false);
-                setIsMuted(getGlobalVideoMuted());
-                elapsedTimeRef.current = 0;
-                
-                return updated;
-            }
-        });
+        const currentId = storyGroupsRef.current[currentGroupIndexRef.current]?.stories?.[currentStoryIndexRef.current]?.id;
+        const alreadyWatching = readyNow.length > 0 && !!currentId && stories.some((story) => story.id === currentId);
+        if (alreadyWatching) {
+            setStoryGroups((prev) => prev.map((existing) => (
+                existing.userId === group.userId || existing.userHandle === group.userHandle
+                    ? { ...existing, stories, avatarUrl: group.avatarUrl || existing.avatarUrl }
+                    : existing
+            )));
+            return;
+        }
+        openGroupNow(stories);
     }
 
     // Close story viewer
@@ -823,75 +855,43 @@ export default function StoriesPage() {
         }
     }
 
-    // Handle moving to next user's stories
-    function handleNextUserStories(currentGroups: StoryGroup[], currentIdx: number) {
-        const currentGroup = currentGroups[currentIdx];
-        const isViewingOwnStories = !!currentGroup && (currentGroup.userId === user?.id || currentGroup.userHandle === user?.handle);
-        const total = currentGroups.length;
-        if (total <= 1) {
+    function resetStoryPlayback() {
+        setProgress(0);
+        setIsMuted(getGlobalVideoMuted());
+        elapsedTimeRef.current = 0;
+        setPaused(false);
+        pausedRef.current = false;
+    }
+
+    // Next story in this person's set, then the next person, then close.
+    function nextStory() {
+        if (fromDmViewStory) {
             closeStories();
             return;
         }
+        const groups = storyGroupsRef.current;
+        const groupIndex = currentGroupIndexRef.current;
+        const storyIndex = currentStoryIndexRef.current;
+        const currentGroup = groups[groupIndex];
+        if (!currentGroup?.stories?.length) return;
 
-        for (let step = 1; step < total; step++) {
-            const idx = (currentIdx + step) % total;
-            const candidate = currentGroups[idx];
-            if (!candidate || !candidate.stories || candidate.stories.length === 0) continue;
-            if (isViewingOwnStories && (candidate.userId === user?.id || candidate.userHandle === user?.handle)) continue;
-
-            setCurrentGroupIndex(idx);
-            currentGroupIndexRef.current = idx;
-            setCurrentStoryIndex(0);
-            currentStoryIndexRef.current = 0;
-            setProgress(0);
-            setIsMuted(getGlobalVideoMuted());
-            elapsedTimeRef.current = 0;
-            setPaused(false);
-            pausedRef.current = false;
+        if (storyIndex < currentGroup.stories.length - 1) {
+            const nextIndex = storyIndex + 1;
+            currentStoryIndexRef.current = nextIndex;
+            setCurrentStoryIndex(nextIndex);
+            resetStoryPlayback();
             return;
         }
-
+        if (groupIndex < groups.length - 1) {
+            const nextGroup = groupIndex + 1;
+            currentGroupIndexRef.current = nextGroup;
+            currentStoryIndexRef.current = 0;
+            setCurrentGroupIndex(nextGroup);
+            setCurrentStoryIndex(0);
+            resetStoryPlayback();
+            return;
+        }
         closeStories();
-    }
-
-    // Navigate to next story
-    function nextStory() {
-        // Use refs to get latest values (avoid stale closures)
-        const currentIdx = currentGroupIndexRef.current;
-        const currentStoryIdx = currentStoryIndexRef.current;
-        
-        setStoryGroups(currentGroups => {
-            const currentGroup = currentGroups[currentIdx];
-            if (!currentGroup || !currentGroup.stories || currentGroup.stories.length === 0) {
-                console.warn('Cannot navigate: currentGroup or stories is invalid', { currentGroupIndex: currentIdx, storyGroupsLength: currentGroups.length });
-                return currentGroups;
-            }
-
-            // DM "View story" should behave like a focused preview: do not auto-chain to more stories.
-            if (fromDmViewStory) {
-                closeStories();
-                return currentGroups;
-            }
-
-            if (currentStoryIdx < currentGroup.stories.length - 1) {
-                // Move to next story within same user
-                const nextStoryIdx = currentStoryIdx + 1;
-                setCurrentStoryIndex(nextStoryIdx);
-                currentStoryIndexRef.current = nextStoryIdx;
-                setProgress(0);
-                setIsMuted(getGlobalVideoMuted());
-                elapsedTimeRef.current = 0;
-                setPaused(false);
-                pausedRef.current = false;
-                return currentGroups;
-            } else {
-                // Move to next user's stories - call handler with latest groups and indices
-                console.log('Moving to next user. Current index:', currentIdx, 'Total groups:', currentGroups.length);
-                console.log('Current group:', currentGroup.userHandle, 'Stories:', currentGroup.stories.length);
-                handleNextUserStories(currentGroups, currentIdx);
-                return currentGroups;
-            }
-        });
     }
 
     // Swipe gesture handlers (horizontal drag to change story)
@@ -900,7 +900,8 @@ export default function StoriesPage() {
     function handleSwipeStart(e: React.TouchEvent | React.MouseEvent) {
         if (!viewingStories) return;
         const target = e.target as HTMLElement;
-        const isInteractiveArea = target.closest(
+        const isEdgeTap = !!target.closest('[data-story-edge]');
+        const isInteractiveArea = !isEdgeTap && !!target.closest(
             '[data-story-interactive],button,input,textarea,select,a,[role="button"],[contenteditable="true"]'
         );
         if (isInteractiveArea) {
@@ -927,6 +928,7 @@ export default function StoriesPage() {
             return;
         }
 
+        suppressStoryTap();
         if (dx < 0) {
             // Swipe left -> next story (within same user, or next user if at end)
             nextStory();
@@ -936,6 +938,22 @@ export default function StoriesPage() {
         }
     }
 
+    function suppressStoryTap(ms = 320) {
+        suppressStoryTapUntilRef.current = Date.now() + ms;
+    }
+
+    function storyTapSuppressed() {
+        return holdPauseActiveRef.current || Date.now() < suppressStoryTapUntilRef.current;
+    }
+
+    function handleStoryEdgeTap(direction: 'next' | 'prev', e: React.MouseEvent) {
+        e.stopPropagation();
+        e.preventDefault();
+        if (storyTapSuppressed()) return;
+        if (direction === 'next') nextStory();
+        else previousStory();
+    }
+
     function handleSwipeCancel() {
         swipeStartXRef.current = null;
         swipeStartYRef.current = null;
@@ -943,7 +961,7 @@ export default function StoriesPage() {
 
     function handleHoldPauseStart(e?: React.PointerEvent) {
         const target = e?.target as HTMLElement | null;
-        if (target?.closest('[data-story-interactive]')) return;
+        if (target?.closest('[data-story-interactive], [data-story-edge], button, a, input, textarea')) return;
         if (holdPauseTimerRef.current != null) window.clearTimeout(holdPauseTimerRef.current);
         holdPauseTimerRef.current = window.setTimeout(() => {
             holdPauseActiveRef.current = true;
@@ -952,18 +970,17 @@ export default function StoriesPage() {
         }, 180);
     }
 
-    function handleHoldPauseEnd(e?: React.PointerEvent) {
-        const target = e?.target as HTMLElement | null;
-        if (target?.closest('[data-story-interactive]')) return;
+    function handleHoldPauseEnd() {
         if (holdPauseTimerRef.current != null) {
             window.clearTimeout(holdPauseTimerRef.current);
             holdPauseTimerRef.current = null;
         }
-        if (holdPauseActiveRef.current) {
-            holdPauseActiveRef.current = false;
-            setPaused(false);
-            pausedRef.current = false;
-        }
+        if (!holdPauseActiveRef.current) return;
+        holdPauseActiveRef.current = false;
+        suppressStoryTap();
+        if (showReplyComposer || showInsightsSheet || deliveryFx || showStoryProfileCard) return;
+        setPaused(false);
+        pausedRef.current = false;
     }
 
     function stopStoryControlPropagation(e: React.SyntheticEvent) {
@@ -1075,25 +1092,26 @@ export default function StoriesPage() {
 
     // Navigate to previous story (within same user)
     function previousStory() {
-        if (currentStoryIndex > 0) {
-            setCurrentStoryIndex(currentStoryIndex - 1);
-            setProgress(0);
-            setIsMuted(getGlobalVideoMuted());
-            elapsedTimeRef.current = 0;
-            setPaused(false);
-            pausedRef.current = false;
-        } else {
-            // Move to previous user's stories
-            if (currentGroupIndex > 0) {
-                setCurrentGroupIndex(currentGroupIndex - 1);
-                const prevGroup = storyGroups[currentGroupIndex - 1];
-                setCurrentStoryIndex(prevGroup?.stories.length - 1 || 0);
-                setProgress(0);
-                setIsMuted(getGlobalVideoMuted());
-                elapsedTimeRef.current = 0;
-                setPaused(false);
-                pausedRef.current = false;
-            }
+        const groups = storyGroupsRef.current;
+        const groupIndex = currentGroupIndexRef.current;
+        const storyIndex = currentStoryIndexRef.current;
+
+        if (storyIndex > 0) {
+            const prevIndex = storyIndex - 1;
+            currentStoryIndexRef.current = prevIndex;
+            setCurrentStoryIndex(prevIndex);
+            resetStoryPlayback();
+            return;
+        }
+        if (groupIndex > 0) {
+            const prevGroupIndex = groupIndex - 1;
+            const prevGroup = groups[prevGroupIndex];
+            const prevIndex = Math.max(0, (prevGroup?.stories?.length || 1) - 1);
+            currentGroupIndexRef.current = prevGroupIndex;
+            currentStoryIndexRef.current = prevIndex;
+            setCurrentGroupIndex(prevGroupIndex);
+            setCurrentStoryIndex(prevIndex);
+            resetStoryPlayback();
         }
     }
 
@@ -1339,29 +1357,24 @@ export default function StoriesPage() {
         }
     }, [currentGroupIndex, currentStoryIndex, storyGroups]);
 
-    // Track story view progress
+    const progressStoryId = viewingStories
+        ? storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex]?.id
+        : undefined;
+
+    // Track story view progress. Keyed on the story id so a list refresh does not restart the bar.
     React.useEffect(() => {
-        if (!viewingStories || !user?.id || showScenesModal || showSharedPostModal) return; // Don't run progress when modals are open
+        if (!viewingStories || !progressStoryId || showScenesModal || showSharedPostModal) return;
 
-        const currentGroup = storyGroups[currentGroupIndex];
-        if (!currentGroup || !currentGroup.stories) return;
-
-        const currentStory = currentGroup.stories[currentStoryIndex];
+        const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
         if (!currentStory) return;
 
-        // Only reset elapsed time if this is a new story
-        const storyId = currentStory.id;
-        
-        if (lastStoryIdRef.current !== storyId) {
-            // New story - reset timer
-        elapsedTimeRef.current = 0;
-        setProgress(0);
-            lastStoryIdRef.current = storyId;
+        if (lastStoryIdRef.current !== progressStoryId) {
+            elapsedTimeRef.current = 0;
+            setProgress(0);
+            lastStoryIdRef.current = progressStoryId;
         }
-        // If same story, preserve elapsedTimeRef
 
-        // Mark story as viewed for real user stories only (skip Gazetteer mock stories)
-        if (currentStory.userId !== GAZETTEER_WORLD_USER_ID) {
+        if (user?.id && currentStory.userId !== GAZETTEER_WORLD_USER_ID) {
             markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
             incrementStoryViews(currentStory.id).catch(console.error);
         }
@@ -1402,7 +1415,28 @@ export default function StoriesPage() {
         }, interval);
 
         return () => clearInterval(timer);
-    }, [viewingStories, currentGroupIndex, currentStoryIndex, storyGroups, user?.id, showScenesModal, showSharedPostModal]);
+    }, [viewingStories, progressStoryId, user?.id, showScenesModal, showSharedPostModal]);
+
+    React.useEffect(() => {
+        if (!viewingStories) return;
+        const endHold = () => {
+            if (holdPauseTimerRef.current != null) {
+                window.clearTimeout(holdPauseTimerRef.current);
+                holdPauseTimerRef.current = null;
+            }
+            if (!holdPauseActiveRef.current) return;
+            holdPauseActiveRef.current = false;
+            suppressStoryTapUntilRef.current = Date.now() + 320;
+            pausedRef.current = false;
+            setPaused(false);
+        };
+        window.addEventListener('pointerup', endHold);
+        window.addEventListener('pointercancel', endHold);
+        return () => {
+            window.removeEventListener('pointerup', endHold);
+            window.removeEventListener('pointercancel', endHold);
+        };
+    }, [viewingStories]);
 
     // Auto-hide controls on inactivity
     React.useEffect(() => {
@@ -1473,6 +1507,13 @@ export default function StoriesPage() {
                 -webkit-touch-callout: none !important;
                 user-select: none !important;
                 -webkit-user-select: none !important;
+            }
+            .stories-media-surface [data-story-interactive],
+            .stories-media-surface button,
+            .stories-media-surface a,
+            .stories-media-surface input,
+            .stories-media-surface textarea {
+                pointer-events: auto;
             }
         `;
         document.head.appendChild(style);
@@ -1837,29 +1878,14 @@ export default function StoriesPage() {
                     {/* Progress bars for each story - Instagram style */}
                     <div className="absolute top-0 left-0 right-0 z-50 px-2 pt-2 pb-1">
                         <div className="flex gap-1">
-                            {currentGroup.stories.map((story, idx) => (
-                                <div key={story.id} className="flex-1 h-0.5 bg-white/30 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full bg-white rounded-full transition-all ease-linear"
-                                        style={
-                                            idx < currentStoryIndex
-                                                ? {
-                                                    width: '100%',
-                                                    transitionDuration: '100ms'
-                                                }
-                                                : idx === currentStoryIndex && !paused && progress > 0
-                                                    ? {
-                                                        width: `${progress}%`,
-                                                        transitionDuration: '50ms'
-                                                    }
-                                                    : {
-                                                        width: idx === currentStoryIndex ? `${progress}%` : '0%',
-                                                        transitionDuration: '100ms'
-                                                    }
-                                        }
-                                    />
-                                </div>
-                            ))}
+                            {currentGroup.stories.map((story, idx) => {
+                                const width = idx < currentStoryIndex ? 100 : idx === currentStoryIndex ? progress : 0;
+                                return (
+                                    <div key={story.id} className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/30">
+                                        <div className="h-full bg-white" style={{ width: `${width}%` }} />
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
 
@@ -1884,7 +1910,21 @@ export default function StoriesPage() {
                             WebkitTouchCallout: 'none',
                         }}
                     >
-                        <div className="relative w-full h-full flex items-center justify-center stories-media-surface">
+                        <button
+                            type="button"
+                            data-story-edge="prev"
+                            aria-label="Previous story"
+                            className="absolute inset-y-0 left-0 z-30 w-[30%] cursor-pointer bg-transparent"
+                            onClick={(e) => handleStoryEdgeTap('prev', e)}
+                        />
+                        <button
+                            type="button"
+                            data-story-edge="next"
+                            aria-label="Next story"
+                            className="absolute inset-y-0 right-0 z-30 w-[30%] cursor-pointer bg-transparent"
+                            onClick={(e) => handleStoryEdgeTap('next', e)}
+                        />
+                        <div className="pointer-events-none relative z-20 w-full h-full flex items-center justify-center stories-media-surface">
                             <div className="relative w-full h-full overflow-hidden bg-black">
                                 {(() => {
                                     if (currentStory?.sharedFromPost && !originalPost && !sharedPostFetchFailed) {
@@ -1898,58 +1938,52 @@ export default function StoriesPage() {
                                     
                                     // Fallback: shared post but fetch failed or post not found – show story's own media (video/image we stored when creating the story)
                                     if (currentStory?.sharedFromPost && !originalPost && sharedPostFetchFailed && currentStory.mediaUrl) {
-                                        const isVideo = currentStory.mediaType === 'video';
+                                        const isVideo = currentStory.mediaType === 'video' || isVideoPlaybackUrl(currentStory.mediaUrl);
+                                        const playback = storyPlaybackUrl(currentStory.mediaUrl);
+                                        const still = isVideo ? storyPlaybackUrl(siblingJpegFromVideoUrl(currentStory.mediaUrl)) : playback;
                                         return (
                                             <div
-                                                className="w-full h-full flex flex-col items-center justify-center relative p-6"
+                                                className="relative flex h-full w-full items-center justify-center px-7"
                                                 style={{
                                                     background: sharedStoryBackdrop.gradient || SHARED_STORY_DEFAULT_GRADIENT,
                                                 }}
                                             >
-                                                {isVideo ? (
-                                                    <video
-                                                        src={currentStory.mediaUrl}
-                                                        className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
-                                                        autoPlay
-                                                        muted
-                                                        loop
-                                                        playsInline
-                                                    />
-                                                ) : (
+                                                {still ? (
                                                     <img
-                                                        src={sharedStoryBackdrop.imageUrl || currentStory.mediaUrl}
+                                                        src={still}
                                                         alt=""
                                                         aria-hidden
-                                                        className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
+                                                        className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-60"
                                                     />
-                                                )}
-                                                <div className="absolute inset-0 bg-black/35 pointer-events-none" />
-                                                <div className="relative z-10 w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] border-2 border-white/20">
-                                                    {isVideo ? (
-                                                        <video
-                                                            ref={videoRef}
-                                                            src={currentStory.mediaUrl}
-                                                            className="w-full h-auto object-cover"
-                                                            autoPlay
-                                                            loop
-                                                            muted={isMuted}
-                                                            playsInline
-                                                            onLoadedData={() => {
-                                                                if (videoRef.current) {
-                                                                    videoRef.current.muted = isMuted;
-                                                                    if (!isMuted && videoRef.current.paused) {
-                                                                        videoRef.current.play().catch(() => {});
-                                                                    }
-                                                                }
-                                                            }}
-                                                        />
-                                                    ) : (
-                                                        <img
-                                                            src={currentStory.mediaUrl}
-                                                            alt="Shared clip"
-                                                            className="w-full h-auto object-cover"
-                                                        />
-                                                    )}
+                                                ) : null}
+                                                <div className="pointer-events-none absolute inset-0 bg-black/35" />
+                                                <div className="relative z-10 w-full max-w-[300px] overflow-hidden rounded-xl bg-white shadow-[0_10px_28px_rgba(0,0,0,0.35)]">
+                                                    <div className="relative aspect-[4/5] w-full overflow-hidden bg-neutral-900">
+                                                        {isVideo ? (
+                                                            <video
+                                                                ref={videoRef}
+                                                                src={playback}
+                                                                poster={still || undefined}
+                                                                className="absolute inset-0 h-full w-full object-cover"
+                                                                autoPlay
+                                                                loop
+                                                                muted={isMuted}
+                                                                playsInline
+                                                                onLoadedData={() => {
+                                                                    const video = videoRef.current;
+                                                                    if (!video) return;
+                                                                    video.muted = isMuted;
+                                                                    if (video.paused) video.play().catch(() => {});
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <img
+                                                                src={playback}
+                                                                alt="Shared clip"
+                                                                className="absolute inset-0 h-full w-full object-cover"
+                                                            />
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         );
@@ -1961,163 +1995,90 @@ export default function StoriesPage() {
                                         const hasRealMedia = Boolean((originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '') || (originalPost.mediaItems && originalPost.mediaItems.length > 0));
                                         
                                         if (hasRealMedia) {
-                                            // Shared post with media - centered post card with dimmed backdrop
-                                            const mediaIsVideo = originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video';
-                                            const mediaUrl = originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url;
+                                            const mediaIsVideo = originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video' || isVideoPlaybackUrl(originalPost.mediaUrl);
+                                            const mediaUrl = storyPlaybackUrl(originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url);
+                                            const still = sharedPostStillUrl(originalPost);
                                             const sharedCaptionSnippet = (
                                                 originalPost.caption ||
                                                 originalPost.text ||
                                                 (originalPost as any).captionText ||
                                                 ''
                                             ).trim();
-                                            
+
                                             return (
                                                 <div
-                                                    className="w-full h-full flex flex-col items-center justify-center relative p-6"
+                                                    className="relative flex h-full w-full items-center justify-center px-7"
                                                     style={{
                                                         background: sharedStoryBackdrop.gradient || SHARED_STORY_DEFAULT_GRADIENT,
                                                     }}
                                                 >
-                                                    {mediaIsVideo ? (
-                                                        <video
-                                                            src={mediaUrl}
-                                                            className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
-                                                            autoPlay
-                                                            muted
-                                                            loop
-                                                            playsInline
-                                                        />
-                                                    ) : sharedStoryBackdrop.imageUrl ? (
+                                                    {still ? (
                                                         <img
-                                                            src={sharedStoryBackdrop.imageUrl}
+                                                            src={still}
                                                             alt=""
                                                             aria-hidden
-                                                            className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
+                                                            className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-60"
                                                         />
                                                     ) : null}
-                                                    <div className="absolute inset-0 bg-black/35 pointer-events-none" />
-                                                    
-                                                    {/* Container for card and attribution - centered column */}
-                                                    <div className="relative z-10 flex flex-col items-center">
-                                                        {/* Nested story card - embedded post with Instagram-style handle + caption snippet */}
-                                                        <div 
-                                                            className="relative w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_10px_34px_rgba(0,0,0,0.45)] cursor-pointer transform transition-transform hover:scale-[1.02] active:scale-[0.98] border border-white/70"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setShowSharedPostModal(true);
-                                                            }}
-                                                            style={{
-                                                                maxHeight: '60vh',
-                                                                boxShadow: '0 12px 36px rgba(0, 0, 0, 0.52), 0 0 0 1px rgba(255, 255, 255, 0.55)'
-                                                            }}
-                                                        >
+                                                    <div className="pointer-events-none absolute inset-0 bg-black/35" />
+                                                    <div
+                                                        className="pointer-events-auto relative z-10 w-full max-w-[300px] cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-white shadow-[0_10px_28px_rgba(0,0,0,0.35)]"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setShowSharedPostModal(true);
+                                                        }}
+                                                    >
+                                                        <div className="flex items-center gap-2 bg-white px-3 py-2">
+                                                            <Avatar
+                                                                src={getAvatarForHandle(originalPost.userHandle)}
+                                                                name={originalPost.userHandle.split('@')[0]}
+                                                                size={28}
+                                                            />
+                                                            <span className="truncate text-[13px] font-medium text-gray-900">
+                                                                {originalPost.userHandle}
+                                                            </span>
+                                                        </div>
+                                                        <div className="relative aspect-[4/5] w-full overflow-hidden bg-neutral-900">
                                                             {mediaIsVideo ? (
                                                                 <video
                                                                     ref={videoRef}
                                                                     src={mediaUrl}
-                                                                    className="w-full h-auto object-cover"
+                                                                    poster={still || undefined}
+                                                                    className="absolute inset-0 h-full w-full object-cover"
                                                                     autoPlay
                                                                     loop
                                                                     muted={isMuted}
                                                                     playsInline
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setShowSharedPostModal(true);
-                                                                    }}
-                                                                    style={{
-                                                                        display: 'block'
-                                                                    }}
                                                                     onLoadedData={() => {
-                                                                        if (videoRef.current) {
-                                                                            const video = videoRef.current;
-                                                                            video.muted = isMuted;
-                                                                            if (!isMuted) {
-                                                                                video.muted = false;
-                                                                                if (video.paused) {
-                                                                                    Promise
-                                                                                        .resolve(video.play())
-                                                                                        .catch(() => { /* ignore */ });
-                                                                                }
-                                                                            }
-                                                                        }
+                                                                        const video = videoRef.current;
+                                                                        if (!video) return;
+                                                                        video.muted = isMuted;
+                                                                        if (video.paused) video.play().catch(() => {});
                                                                     }}
                                                                     onCanPlay={() => {
-                                                                        if (videoRef.current) {
-                                                                            const video = videoRef.current;
-                                                                            video.muted = isMuted;
-                                                                            if (!isMuted) {
-                                                                                video.muted = false;
-                                                                                if (video.paused) {
-                                                                                    video.play().catch(console.error);
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }}
-                                                                    onPlay={() => {
-                                                                        if (videoRef.current && !isMuted) {
-                                                                            videoRef.current.muted = false;
-                                                                        }
+                                                                        const video = videoRef.current;
+                                                                        if (!video) return;
+                                                                        video.muted = isMuted;
+                                                                        if (video.paused) video.play().catch(() => {});
                                                                     }}
                                                                 />
                                                             ) : (
                                                                 <img
                                                                     src={mediaUrl}
                                                                     alt="Shared post"
-                                                                    className="w-full h-auto object-cover"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setShowSharedPostModal(true);
-                                                                    }}
-                                                                    style={{
-                                                                        display: 'block'
-                                                                    }}
+                                                                    className="absolute inset-0 h-full w-full object-cover"
                                                                 />
                                                             )}
-
-                                                            {/* Top creator chip inside card */}
-                                                            <div className="absolute left-3 top-3 right-3 z-10 pointer-events-none">
-                                                                <div className="inline-flex max-w-full items-center gap-2 rounded-full bg-white px-2.5 py-1.5 shadow-[0_2px_10px_rgba(0,0,0,0.18)] border border-black/5">
-                                                                    <Avatar
-                                                                        src={getAvatarForHandle(originalPost.userHandle)}
-                                                                        name={originalPost.userHandle.split('@')[0]}
-                                                                        size={22}
-                                                                    />
-                                                                    <span className="truncate text-[12px] font-semibold text-gray-900 leading-none">
-                                                                        {originalPost.userHandle}
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-
-                                                            {/* Bottom caption snippet panel inside card */}
-                                                            {sharedCaptionSnippet ? (
-                                                                <div className="absolute left-0 right-0 bottom-0 z-10 pointer-events-none bg-white px-3 py-2.5 border-t border-gray-200/90">
-                                                                    <p className="text-[12px] text-gray-900 leading-[1.25rem] line-clamp-2 break-words">
-                                                                        <span className="font-semibold mr-1 text-gray-950">{originalPost.userHandle}</span>
-                                                                        {sharedCaptionSnippet}
-                                                                    </p>
-                                                                </div>
-                                                            ) : null}
                                                         </div>
-                                                        
-                                                        {/* Original creator attribution - centered directly below the card */}
-                                                        <div 
-                                                            className="mt-3 flex items-center justify-center"
-                                                        >
-                                                            <div 
-                                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md cursor-pointer hover:bg-black/80 transition-colors"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setViewingStories(false);
-                                                                    setTimeout(() => {
-                                                                        navigate(`/user/${encodeURIComponent(originalPost.userHandle)}`);
-                                                                    }, 100);
-                                                                }}
-                                                            >
-                                                                <span className="text-white text-sm font-semibold">
-                                                                    @{originalPost.userHandle}
-                                                                </span>
+                                                        {sharedCaptionSnippet ? (
+                                                            <div className="bg-white px-3 pb-2.5 pt-2">
+                                                                <p className="line-clamp-3 text-[12px] leading-4 text-gray-900">
+                                                                    <span className="font-bold">{originalPost.userHandle}</span>
+                                                                    {' '}
+                                                                    {sharedCaptionSnippet}
+                                                                </p>
                                                             </div>
-                                                        </div>
+                                                        ) : null}
                                                     </div>
                                                 </div>
                                             );
@@ -2146,7 +2107,7 @@ export default function StoriesPage() {
                                                             <span className="font-semibold">@{originalPost.userHandle}</span>
                                                         </div>
                                                         <div
-                                                            className="relative w-full max-w-xs cursor-pointer overflow-hidden rounded-2xl border-2 border-white/20 bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                                                            className="pointer-events-auto relative w-full max-w-xs cursor-pointer overflow-hidden rounded-2xl border-2 border-white/20 bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 setShowSharedPostModal(true);
@@ -2262,41 +2223,23 @@ export default function StoriesPage() {
                                         return currentStory.mediaType === 'video' ? (
                                             <video
                                                 ref={videoRef}
-                                                src={currentStory.mediaUrl}
+                                                src={storyPlaybackUrl(currentStory.mediaUrl)}
                                                 className="w-full h-full object-cover"
                                                 autoPlay
                                                 loop
                                                 muted={isMuted}
                                                 playsInline
                                                 onLoadedData={() => {
-                                                    // Ensure muted state is synced when video loads
-                                                    if (videoRef.current) {
-                                                        const video = videoRef.current;
-                                                        video.muted = isMuted;
-                                                        
-                                                        // If unmuted, ensure video plays and audio is enabled
-                                                        if (!isMuted) {
-                                                            video.muted = false;
-                                                            if (video.paused) {
-                                                                video.play().catch(console.error);
-                                                            }
-                                                        }
-                                                    }
+                                                    const video = videoRef.current;
+                                                    if (!video) return;
+                                                    video.muted = isMuted;
+                                                    if (video.paused) video.play().catch(() => {});
                                                 }}
                                                 onCanPlay={() => {
-                                                    // Sync muted state when video can play
-                                                    if (videoRef.current) {
-                                                        const video = videoRef.current;
-                                                        video.muted = isMuted;
-                                                        
-                                                        // If unmuted, ensure video plays and audio is enabled
-                                                        if (!isMuted) {
-                                                            video.muted = false;
-                                                            if (video.paused) {
-                                                                video.play().catch(console.error);
-                                                            }
-                                                        }
-                                                    }
+                                                    const video = videoRef.current;
+                                                    if (!video) return;
+                                                    video.muted = isMuted;
+                                                    if (video.paused) video.play().catch(() => {});
                                                 }}
                                                 onPlay={() => {
                                                     // Ensure muted state is correct when video plays
@@ -2307,7 +2250,7 @@ export default function StoriesPage() {
                                             />
                                         ) : (
                                             <img
-                                                src={currentStory.mediaUrl}
+                                                src={storyPlaybackUrl(currentStory.mediaUrl)}
                                                 alt=""
                                                 className="w-full h-full object-cover select-none"
                                                 draggable={false}
@@ -3498,7 +3441,7 @@ export default function StoriesPage() {
                             <div className="flex items-center gap-3 mb-4 mt-4 px-4">
                                 {(currentStory.mediaUrl || '').trim() && currentStory.mediaType !== 'video' ? (
                                     <img
-                                        src={currentStory.mediaUrl}
+                                        src={storyPlaybackUrl(currentStory.mediaUrl)}
                                         alt=""
                                         className="w-14 h-14 rounded-lg object-cover bg-white/10 shrink-0"
                                     />
@@ -3911,7 +3854,7 @@ export default function StoriesPage() {
                                                         current.createdAt > latest.createdAt ? current : latest
                                                     );
                                                     // Use the same StoryThumbnail component logic
-                                                    const thumbnailUrl = latestStory.mediaUrl;
+                                                    const thumbnailUrl = storyPlaybackUrl(latestStory.mediaUrl);
                                                     if (thumbnailUrl) {
                                                         return latestStory.mediaType === 'video' ? (
                                                             <video
@@ -4139,7 +4082,7 @@ export default function StoriesPage() {
                                     // Shared post with media
                                     return originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video' ? (
                                         <video
-                                            src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                            src={storyPlaybackUrl(originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url)}
                                             className="w-full h-full object-cover"
                                             muted
                                             playsInline
@@ -4147,7 +4090,7 @@ export default function StoriesPage() {
                                         />
                                     ) : (
                                         <img
-                                            src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                            src={storyPlaybackUrl(originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url)}
                                             alt="Shared post"
                                             className="w-full h-full object-cover"
                                             loading="lazy"
@@ -4181,7 +4124,7 @@ export default function StoriesPage() {
                             }
                             
                             // Not a shared post - show regular story thumbnail
-                            const thumbnailUrl = story.mediaUrl;
+                            const thumbnailUrl = storyPlaybackUrl(story.mediaUrl);
                             
                             if (thumbnailUrl) {
                                 return story.mediaType === 'video' ? (

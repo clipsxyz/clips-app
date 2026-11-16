@@ -71,4 +71,43 @@ class PublicMediaUrl
 
         return $origin.$path.$query;
     }
+
+    /**
+     * Rewrite every stored media field on a post payload so a previous
+     * localhost or LAN address does not stay baked into the response.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public static function rewritePayloadMedia(array $payload): array
+    {
+        foreach (['media_url', 'final_video_url', 'thumbnail_url', 'video_poster_url', 'poster_url', 'avatar_url'] as $key) {
+            if (! isset($payload[$key]) || ! is_string($payload[$key])) {
+                continue;
+            }
+            $payload[$key] = self::forClient($payload[$key]) ?? $payload[$key];
+        }
+
+        if (isset($payload['media_items']) && is_array($payload['media_items'])) {
+            $payload['media_items'] = array_map(function ($item) {
+                if (! is_array($item)) {
+                    return $item;
+                }
+                foreach (['url', 'media_url', 'video_url', 'poster_url', 'thumbnail_url', 'posterUrl', 'thumbnailUrl'] as $key) {
+                    if (! isset($item[$key]) || ! is_string($item[$key])) {
+                        continue;
+                    }
+                    $item[$key] = self::forClient($item[$key]) ?? $item[$key];
+                }
+
+                return $item;
+            }, $payload['media_items']);
+        }
+
+        if (isset($payload['user']) && is_array($payload['user']) && isset($payload['user']['avatar_url']) && is_string($payload['user']['avatar_url'])) {
+            $payload['user']['avatar_url'] = self::forClient($payload['user']['avatar_url']) ?? $payload['user']['avatar_url'];
+        }
+
+        return $payload;
+    }
 }

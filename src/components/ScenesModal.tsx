@@ -599,10 +599,10 @@ export default function ScenesModal({
             const pauseTimer = setTimeout(() => {
             const allVideos = document.querySelectorAll('video');
             allVideos.forEach((video) => {
-                    // Don't pause the Scenes video itself
-                    if (video !== videoRef.current && !video.paused) {
-                    video.pause();
-                }
+                    // Keep every clip inside this viewer playing. Pausing it here
+                    // left the last feed video as a black frame.
+                    if (video.closest('[aria-label="Scenes fullscreen viewer"]')) return;
+                    if (!video.paused) video.pause();
             });
             }, 150); // 150ms delay for smooth transition - matches Media component delay
             
@@ -681,18 +681,31 @@ export default function ScenesModal({
             syncVideoTime();
         };
 
+        const startPlayback = () => {
+            const video = videoRef.current;
+            if (!video || isPaused) return;
+            video.muted = isMuted;
+            video.play().catch(() => {
+                video.muted = true;
+                video.play().catch(() => {});
+            });
+        };
+
         videoRef.current.addEventListener('loadeddata', handleLoadedData);
         videoRef.current.addEventListener('canplay', handleCanPlay);
         videoRef.current.addEventListener('loadedmetadata', handleLoadedMetadata);
+        videoRef.current.addEventListener('canplay', startPlayback);
+        startPlayback();
 
         return () => {
             if (videoRef.current) {
                 videoRef.current.removeEventListener('loadeddata', handleLoadedData);
                 videoRef.current.removeEventListener('canplay', handleCanPlay);
                 videoRef.current.removeEventListener('loadedmetadata', handleLoadedMetadata);
+                videoRef.current.removeEventListener('canplay', startPlayback);
             }
         };
-    }, [isOpen, currentItem?.type, initialVideoTime]);
+    }, [isOpen, currentItem?.type, currentItem?.url, initialVideoTime, isMuted, isPaused]);
 
     // Cleanup animation states when modal closes
     React.useEffect(() => {

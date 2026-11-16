@@ -231,7 +231,7 @@ import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
 import Stories24FeedRail, { type Stories24FeedRailHandle } from '../components/Stories24FeedRail.native';
 import AddToStorySheet from '../components/AddToStorySheet.native';
-import StoriesPromoCard from '../components/StoriesPromoCard.native';
+import Avatar from '../components/Avatar';
 import { getInboxUnreadPollMs, getStoriesRailPollMs } from '../utils/backgroundPollMs';
 import {
     buildStories24RailItems,
@@ -372,11 +372,54 @@ import { ox } from '../constants/nativeOpticalScale';
  */
 const TAB_BAR_CLEARANCE = FEED_TAB_BAR_CLEARANCE;
 
-/**
- * Inline Stories promo cadence. The rail now owns index 0, so the old header pill is
- * re-surfaced in-feed as a full-width promo every N posts instead of every post.
- */
-const STORIES24_PROMO_EVERY_POSTS = 10;
+/** View stories card after the 8th post, then every 10 posts. The rail stays at the top. */
+const VIEW_STORIES_FIRST_AFTER_POSTS = 8;
+const VIEW_STORIES_REPEAT_EVERY = 10;
+const VIEW_STORIES_BORDER = ['#22C55E', '#FFD400', '#FF4D9A'] as const;
+
+function ViewStoriesFeedCard({
+    avatarUrl,
+    name,
+    onViewStories,
+    onAddYours,
+}: {
+    avatarUrl?: string;
+    name?: string;
+    onViewStories: () => void;
+    onAddYours: () => void;
+}) {
+    return (
+        <LinearGradient
+            colors={[...VIEW_STORIES_BORDER]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.viewStoriesFrame}
+        >
+            <View style={styles.viewStoriesInner}>
+                <Avatar src={avatarUrl} name={name || 'You'} size={36} hideBorder />
+                <TouchableOpacity
+                    onPress={onAddYours}
+                    activeOpacity={0.85}
+                    style={styles.viewStoriesAddPill}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add yours"
+                >
+                    <Icon name="add" size={14} color="#FFFFFF" />
+                    <Text style={styles.viewStoriesAddText}>Add yours</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={onViewStories}
+                    activeOpacity={0.85}
+                    style={styles.viewStoriesLink}
+                    accessibilityRole="button"
+                    accessibilityLabel="View stories"
+                >
+                    <Text style={styles.viewStoriesText}>View stories</Text>
+                </TouchableOpacity>
+            </View>
+        </LinearGradient>
+    );
+}
 
 type Tab = string;
 
@@ -4440,13 +4483,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (item.type === 'post') {
                 out.push({ kind: 'post', post: item.item });
                 postCount += 1;
-                // Inline Stories promo replaces the old header pill: every 10 posts.
                 if (
-                    !customLocation &&
-                    postCount > STORIES24_PROMO_EVERY_POSTS &&
-                    postCount % STORIES24_PROMO_EVERY_POSTS === 0
+                    postCount >= VIEW_STORIES_FIRST_AFTER_POSTS &&
+                    (postCount - VIEW_STORIES_FIRST_AFTER_POSTS) % VIEW_STORIES_REPEAT_EVERY === 0
                 ) {
-                    out.push({ kind: 'stories_promo', id: `stories-promo-${postCount}` });
+                    out.push({ kind: 'stories_promo', id: `view-stories-after-${postCount}` });
                 }
                 if (!followerInserted && showSuggestedFollowerCard && suggestedFollowerSuggestion && postCount === 3) {
                     out.push({ kind: 'suggested_follower', suggestion: suggestedFollowerSuggestion });
@@ -5000,17 +5041,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 );
             }
             if (item.kind === 'stories_promo') {
+                const viewerName = (user?.handle || '').replace(/^@/, '').split('@')[0] || 'You';
                 return wrapRow(
-                    <StoriesPromoCard
-                        onPress={() => {
-                            // Stay on this card. A rail return scrolls the top Stories 24
-                            // strip into view for the shrink, then jumps back down here.
+                    <ViewStoriesFeedCard
+                        avatarUrl={user?.avatarUrl}
+                        name={viewerName}
+                        onViewStories={() => {
                             void openStories24FromHeader({ skipRailReturn: true });
                         }}
-                        storyCount={stories24Items.length}
-                        stories={stories24Items.filter(
-                            (s) => !isStories24AddYoursHandle(s.handle),
-                        )}
+                        onAddYours={() => setAddToStoryOpen(true)}
                     />,
                 );
             }
@@ -6562,6 +6601,46 @@ const styles = StyleSheet.create({
     feedListRowStoriesDivider: {
         marginBottom: 16,
         overflow: 'visible',
+    },
+    viewStoriesFrame: {
+        marginHorizontal: 16,
+        marginVertical: 12,
+        borderRadius: 16,
+        padding: 2,
+    },
+    viewStoriesInner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        backgroundColor: '#000000',
+        borderRadius: 14,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+    },
+    viewStoriesAddPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.45)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    viewStoriesAddText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    viewStoriesLink: {
+        marginLeft: 'auto',
+        paddingVertical: 4,
+    },
+    viewStoriesText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '600',
     },
     storiesRailSeparator: {
         alignSelf: 'stretch',

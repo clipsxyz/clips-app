@@ -14,6 +14,16 @@ class TrustProxies extends Middleware
      */
     protected $proxies;
 
+    public function handle(Request $request, \Closure $next)
+    {
+        // Vite on this machine forwards the phone's host. Trust that only in local dev.
+        if (app()->environment('local')) {
+            $this->proxies = '*';
+        }
+
+        return parent::handle($request, $next);
+    }
+
     /**
      * The headers that should be used to detect proxies.
      *
