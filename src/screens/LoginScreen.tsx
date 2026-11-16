@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import {
     View,
@@ -10,7 +10,9 @@ import {
     Modal,
     Platform,
     Linking,
+    Keyboard,
     KeyboardAvoidingView,
+    type KeyboardEvent,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -29,6 +31,7 @@ import { loginUser, registerUser, checkSignupAvailability, mapLaravelUserToAppFi
 import { persistAuthToken } from '../utils/authTokenBridge';
 import { resetRootToScreen, rootNavigationRef } from '../navigation/rootNavigationRef';
 import { buildGazetteerHandle, businessUsernameFromName, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
+import { signupPasswordIssue } from '../utils/signupPassword';
 import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import Avatar from '../components/Avatar';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
@@ -113,7 +116,7 @@ export default function LoginScreen({ navigation, route }: any) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
-    const [accountType, setAccountType] = useState<'personal' | 'business' | ''>('personal');
+    const [accountType, setAccountType] = useState<'personal' | 'business' | ''>('');
     const [businessAddress, setBusinessAddress] = useState('');
     const [businessLatitude, setBusinessLatitude] = useState<number | null>(null);
     const [businessLongitude, setBusinessLongitude] = useState<number | null>(null);
@@ -125,6 +128,7 @@ export default function LoginScreen({ navigation, route }: any) {
     const [national, setNational] = useState('');
     const [homeLocationQuery, setHomeLocationQuery] = useState('');
     const [locationEntryMode, setLocationEntryMode] = useState<'search' | 'manual'>('search');
+    const [showManualPlace, setShowManualPlace] = useState(false);
     const [birthMonth, setBirthMonth] = useState('');
     const [birthDay, setBirthDay] = useState('');
     const [birthYear, setBirthYear] = useState('');
@@ -138,6 +142,32 @@ export default function LoginScreen({ navigation, route }: any) {
     useEffect(() => {
         // A prior feed/upload failure can mark Laravel unreachable for the JS session.
         clearLaravelUnreachable();
+    }, []);
+
+    const [keyboardPad, setKeyboardPad] = useState(0);
+    const signupDockRef = useRef<View>(null);
+    useEffect(() => {
+        if (Platform.OS !== 'android') return;
+        const onShow = (e: KeyboardEvent) => {
+            const keyboardTop = e.endCoordinates?.screenY;
+            const dock = signupDockRef.current;
+            if (keyboardTop == null || !dock) {
+                setKeyboardPad(e.endCoordinates?.height ?? 0);
+                return;
+            }
+            dock.measureInWindow((_x, y, _width, height) => {
+                const overlap = y + height - keyboardTop;
+                if (Math.abs(overlap) < 2) return;
+                setKeyboardPad((current) => Math.max(0, current + overlap));
+            });
+        };
+        const onHide = () => setKeyboardPad(0);
+        const showSub = Keyboard.addListener('keyboardDidShow', onShow);
+        const hideSub = Keyboard.addListener('keyboardDidHide', onHide);
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
     }, []);
 
     useEffect(() => {
@@ -214,17 +244,29 @@ export default function LoginScreen({ navigation, route }: any) {
     };
 
     const isBusinessAccount = accountType === 'business';
+    const signupScreens = isBusinessAccount
+        ? (['type', 'email', 'password', 'name', 'birthday', 'place', 'photo'] as const)
+        : (['type', 'email', 'password', 'name', 'birthday', 'place', 'username', 'photo'] as const);
+    const signupScreen = signupScreens[Math.min(Math.max(step, 1), signupScreens.length) - 1];
     const nameFieldLabel = isBusinessAccount ? 'Business name' : 'Full name';
     const signupStepTitle =
-        step === 1
+        signupScreen === 'type'
             ? 'Create your account'
-            : step === 2
-              ? isBusinessAccount
-                  ? 'About your business'
-                  : 'About you'
-              : step === 3
-                ? 'Choose your news feeds'
-                : 'Add a photo';
+            : signupScreen === 'email'
+              ? 'Email'
+              : signupScreen === 'password'
+                ? 'Password'
+                : signupScreen === 'name'
+                  ? nameFieldLabel
+                  : signupScreen === 'birthday'
+                    ? 'Date of birth'
+                    : signupScreen === 'place'
+                      ? isBusinessAccount
+                          ? 'Where is the business?'
+                          : 'Where are you?'
+                      : signupScreen === 'username'
+                        ? 'Username'
+                        : 'Add a photo';
 
     function getAgeFromBirthday(): number | null {
         const m = parseInt(birthMonth, 10);
@@ -316,6 +358,7 @@ export default function LoginScreen({ navigation, route }: any) {
         setRegional('');
         setNational('');
         setHomeLocationQuery('');
+        setShowManualPlace(false);
     }
 
     function switchLocationEntryMode(next: 'search' | 'manual') {
@@ -577,6 +620,151 @@ export default function LoginScreen({ navigation, route }: any) {
             goToFeed();
         } finally {
             setBusy(false);
+        }
+    };
+
+    const goSignupNext = async () => {
+        setErrorText('');
+        setFieldErrors({});
+        if (signupScreen === 'photo') {
+            await handleProfilePictureSubmit();
+            return;
+        }
+        if (signupScreen === 'type') {
+            if (!accountType) {
+                setErrorText('Choose Personal or Business.');
+                return;
+            }
+            setStep(step + 1);
+            return;
+        }
+        if (signupScreen === 'email') {
+            if (!email.trim()) {
+                setFieldErrors({ email: 'Email is required.' });
+                setErrorText('Enter your email.');
+                return;
+            }
+            setBusy(true);
+            try {
+                const availability = await checkSignupAvailability({ email: email.trim() });
+                if (availability.email_taken) {
+                    setFieldErrors({ email: 'This email is already taken. Try logging in instead.' });
+                    setErrorText('This email is already registered.');
+                    return;
+                }
+                if (availability.errors?.email?.[0]) {
+                    setFieldErrors({ email: availability.errors.email[0] });
+                    setErrorText('Please fix the highlighted fields.');
+                    return;
+                }
+                setStep(step + 1);
+            } catch (err: any) {
+                const msg = String(err?.message || '');
+                const isConnection = err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+                setErrorText(isConnection ? 'Cannot reach the server. Check Laravel is running and try again.' : msg || 'Could not verify email. Try again.');
+            } finally {
+                setBusy(false);
+            }
+            return;
+        }
+        if (signupScreen === 'password') {
+            const issue = signupPasswordIssue(password);
+            if (issue) {
+                setFieldErrors({ password: issue });
+                setErrorText(issue);
+                return;
+            }
+            setConfirmPassword(password);
+            setStep(step + 1);
+            return;
+        }
+        if (signupScreen === 'name') {
+            if (!name.trim()) {
+                setFieldErrors({ name: isBusinessAccount ? 'Business name is required.' : 'Full name is required.' });
+                setErrorText('Enter a name.');
+                return;
+            }
+            if (isBusinessAccount && businessUsername.length < 3) {
+                setFieldErrors({ name: 'Use a business name with at least 3 letters or numbers.' });
+                setErrorText('Use a business name with at least 3 letters or numbers.');
+                return;
+            }
+            if (!isBusinessAccount) {
+                setStep(step + 1);
+                return;
+            }
+            setBusy(true);
+            try {
+                const availability = await checkSignupAvailability({ username: businessUsername });
+                if (availability.username_taken) {
+                    setFieldErrors({ name: 'This name is already taken. Try another.' });
+                    setErrorText('This name is already taken. Try another.');
+                    return;
+                }
+                setStep(step + 1);
+            } catch (err: any) {
+                const msg = String(err?.message || '');
+                setErrorText(msg || 'Could not verify that name. Try again.');
+            } finally {
+                setBusy(false);
+            }
+            return;
+        }
+        if (signupScreen === 'birthday') {
+            if (!birthMonth || !birthDay || !birthYear) {
+                setFieldErrors({ birthdate: 'Please enter your date of birth.' });
+                setErrorText('Enter your date of birth.');
+                return;
+            }
+            const age = getAgeFromBirthday();
+            if (age === null) {
+                setFieldErrors({ birthdate: 'Please enter a valid date of birth.' });
+                setErrorText('Enter a valid date of birth.');
+                return;
+            }
+            if (age < MIN_AGE) {
+                setFieldErrors({ birthdate: `You must be at least ${MIN_AGE} years old.` });
+                setErrorText(`You must be at least ${MIN_AGE} years old.`);
+                return;
+            }
+            setStep(step + 1);
+            return;
+        }
+        if (signupScreen === 'place') {
+            if (!homeLocationComplete) {
+                setFieldErrors({
+                    homeLocation: showManualPlace
+                        ? 'Enter your town, county or region, and country.'
+                        : 'Search and pick a place from the list.',
+                });
+                setErrorText('Choose the place for your news feed.');
+                return;
+            }
+            setStep(step + 1);
+            return;
+        }
+        if (signupScreen === 'username') {
+            const usernameError = validateSignupUsername(username);
+            if (usernameError) {
+                setFieldErrors({ username: usernameError });
+                setErrorText(usernameError);
+                return;
+            }
+            setBusy(true);
+            try {
+                const availability = await checkSignupAvailability({ username: sanitizeSignupUsernameInput(username) });
+                if (availability.username_taken) {
+                    setFieldErrors({ username: 'This username is already taken. Try another.' });
+                    setErrorText('Please choose a different username.');
+                    return;
+                }
+                setStep(step + 1);
+            } catch (err: any) {
+                const msg = String(err?.message || '');
+                setErrorText(msg || 'Could not verify username. Try again.');
+            } finally {
+                setBusy(false);
+            }
         }
     };
 
@@ -922,7 +1110,7 @@ export default function LoginScreen({ navigation, route }: any) {
         <GazetteerScreenShell edges={['top', 'bottom']} ambient={false} style={styles.shellTransparent}>
             <KeyboardAvoidingView
                 style={styles.screen}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
             <View style={styles.screen}>
                 <ScrollView
@@ -943,7 +1131,7 @@ export default function LoginScreen({ navigation, route }: any) {
 
                         {mode === 'signup' ? (
                             <View style={styles.progressTrack}>
-                                <View style={[styles.progressFill, { width: `${(step / 4) * 100}%` }]} />
+                                <View style={[styles.progressFill, { width: `${(step / signupScreens.length) * 100}%` }]} />
                             </View>
                         ) : null}
                     </View>
@@ -1014,71 +1202,27 @@ export default function LoginScreen({ navigation, route }: any) {
                         </View>
                     )}
 
-                    {mode === 'signup' && step === 1 && (
+                    {mode === 'signup' && signupScreen === 'type' && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.fieldLabel}>Account type</Text>
-                            <View style={styles.profileTabsWrap}>
-                                <View style={styles.profileTabsRow}>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            setAccountType('personal');
-                                            setBusinessAddress('');
-                                            setBusinessLatitude(null);
-                                            setBusinessLongitude(null);
-                                        }}
-                                        style={[
-                                            styles.profileTabButton,
-                                            accountType === 'personal' && styles.profileTabButtonActive,
-                                        ]}
-                                        activeOpacity={0.9}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.profileTabText,
-                                                accountType === 'personal' && styles.profileTabTextActive,
-                                            ]}
-                                        >
-                                            Personal
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        onPress={() => setAccountType('business')}
-                                        style={[
-                                            styles.profileTabButton,
-                                            accountType === 'business' && styles.profileTabButtonActive,
-                                        ]}
-                                        activeOpacity={0.9}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.profileTabText,
-                                                accountType === 'business' && styles.profileTabTextActive,
-                                            ]}
-                                        >
-                                            Business
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
+                            <View style={styles.profileTabsRow}>
+                                <TouchableOpacity
+                                    onPress={() => setAccountType('personal')}
+                                    style={[styles.profileTabButton, accountType === 'personal' && styles.profileTabButtonActive]}
+                                >
+                                    <Text style={[styles.profileTabText, accountType === 'personal' && styles.profileTabTextActive]}>Personal</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => setAccountType('business')}
+                                    style={[styles.profileTabButton, accountType === 'business' && styles.profileTabButtonActive]}
+                                >
+                                    <Text style={[styles.profileTabText, accountType === 'business' && styles.profileTabTextActive]}>Business</Text>
+                                </TouchableOpacity>
                             </View>
-                            {accountType === 'business' ? (
-                                <>
-                                    <Text style={styles.hintText}>Eligible for local business suggestion cards.</Text>
-                                    <Text style={styles.fieldLabel}>Business Address</Text>
-                                    <PlaceAutocompleteField
-                                        value={businessAddress}
-                                        onChange={(v) => {
-                                            setBusinessAddress(v);
-                                            setBusinessLatitude(null);
-                                            setBusinessLongitude(null);
-                                        }}
-                                        onSelectSuggestion={applyBusinessAddress}
-                                        mode="all"
-                                        placeholder="Search business address"
-                                    />
-                                </>
-                            ) : null}
-                            {!!getFieldError('accountType') && <Text style={styles.fieldErrorText}>{getFieldError('accountType')}</Text>}
+                        </View>
+                    )}
 
+                    {mode === 'signup' && signupScreen === 'email' && (
+                        <View style={styles.stepContent}>
                             <TextInput
                                 value={email}
                                 onChangeText={setEmail}
@@ -1087,106 +1231,52 @@ export default function LoginScreen({ navigation, route }: any) {
                                 style={styles.input}
                                 keyboardType="email-address"
                                 autoCapitalize="none"
+                                autoFocus
                             />
                             {!!getFieldError('email') && <Text style={styles.fieldErrorText}>{getFieldError('email')}</Text>}
+                            <Text style={styles.hintText}>
+                                By continuing, you agree to the{' '}
+                                <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>Terms</Text>
+                                {' '}and{' '}
+                                <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>Community Guidelines</Text>
+                                . You must be 13 or older.
+                            </Text>
+                        </View>
+                    )}
 
+                    {mode === 'signup' && signupScreen === 'password' && (
+                        <View style={styles.stepContent}>
                             <View style={styles.passwordRow}>
                                 <TextInput
                                     value={password}
-                                    onChangeText={(text) => {
-                                        setPassword(text);
-                                        // iOS/Oppo autofill often fills only the first field.
-                                        if (
-                                            password.length === 0 &&
-                                            normalizeSignupPassword(text).length >= 8 &&
-                                            !normalizeSignupPassword(confirmPassword)
-                                        ) {
-                                            setConfirmPassword(text);
+                                    onChangeText={(value) => {
+                                        setPassword(value);
+                                        if (signupPasswordIssue(value) == null) {
+                                            setFieldErrors({});
+                                            setErrorText('');
                                         }
                                     }}
-                                    placeholder="Password (8+ characters)"
+                                    placeholder="Password, 8+ characters"
                                     placeholderTextColor="#6B7280"
                                     style={[styles.input, { flex: 1 }]}
                                     secureTextEntry={!showSignupPassword}
                                     autoCapitalize="none"
                                     autoCorrect={false}
-                                    spellCheck={false}
-                                    textContentType="newPassword"
-                                    autoComplete="new-password"
-                                    passwordRules="minlength: 8;"
+                                    autoFocus
                                 />
                                 <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupPassword((v) => !v)}>
                                     <Icon name={showSignupPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
                                 </TouchableOpacity>
                             </View>
                             {!!getFieldError('password') && <Text style={styles.fieldErrorText}>{getFieldError('password')}</Text>}
-
-                            <View style={styles.passwordRow}>
-                                <TextInput
-                                    value={confirmPassword}
-                                    onChangeText={setConfirmPassword}
-                                    placeholder="Confirm Password"
-                                    placeholderTextColor="#6B7280"
-                                    style={[styles.input, { flex: 1 }]}
-                                    secureTextEntry={!showSignupConfirmPassword}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    spellCheck={false}
-                                    textContentType="newPassword"
-                                    autoComplete="new-password"
-                                    importantForAutofill="no"
-                                />
-                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupConfirmPassword((v) => !v)}>
-                                    <Icon name={showSignupConfirmPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
-                                </TouchableOpacity>
-                            </View>
-                            {password.length > 0 || confirmPassword.length > 0 ? (
-                                <Text
-                                    style={
-                                        passwordsMatch
-                                            ? styles.passwordMatchOk
-                                            : confirmPasswordNorm
-                                              ? styles.passwordMatchBad
-                                              : styles.passwordMatchWarn
-                                    }
-                                >
-                                    {passwordsMatch
-                                        ? 'Passwords match'
-                                        : confirmPasswordNorm
-                                          ? 'Passwords don’t match'
-                                          : 'Confirm your password'}
-                                </Text>
-                            ) : null}
-                            {!!getFieldError('confirmPassword') && <Text style={styles.fieldErrorText}>{getFieldError('confirmPassword')}</Text>}
+                            <Text style={[styles.hintText, { marginTop: ox(8) }, signupPasswordIssue(password) == null && styles.passwordHintMet]}>
+                                Use 8 or more characters, with a letter and a number.
+                            </Text>
                         </View>
                     )}
 
-                    {mode === 'signup' && step === 2 && (
+                    {mode === 'signup' && signupScreen === 'name' && (
                         <View style={styles.stepContent}>
-                            <View style={styles.accountTypeBadgeRow}>
-                                <View
-                                    style={[
-                                        styles.accountTypeBadge,
-                                        isBusinessAccount && styles.accountTypeBadgeBusiness,
-                                    ]}
-                                >
-                                    <Icon
-                                        name={isBusinessAccount ? 'storefront-outline' : 'person-outline'}
-                                        size={ox(14)}
-                                        color={isBusinessAccount ? '#FBBF24' : PASSPORT_PALETTE.wavePrimary}
-                                    />
-                                    <Text
-                                        style={[
-                                            styles.accountTypeBadgeText,
-                                            isBusinessAccount && styles.accountTypeBadgeTextBusiness,
-                                        ]}
-                                    >
-                                        {isBusinessAccount ? 'Business account' : 'Personal account'}
-                                    </Text>
-                                </View>
-                            </View>
-
-                            <Text style={styles.fieldLabel}>{nameFieldLabel}</Text>
                             <TextInput
                                 value={name}
                                 onChangeText={setName}
@@ -1195,67 +1285,28 @@ export default function LoginScreen({ navigation, route }: any) {
                                 style={styles.input}
                                 autoComplete="name"
                                 autoCapitalize="words"
+                                autoFocus
                             />
                             {!!getFieldError('name') && <Text style={styles.fieldErrorText}>{getFieldError('name')}</Text>}
-                            {isBusinessAccount ? (
-                                <Text style={styles.hintText}>
-                                    This is the name on your posts and profile.
-                                    {businessUsername.length >= 3 ? ` Your handle will be ${handlePreview}.` : ''}
-                                </Text>
+                            {isBusinessAccount && businessUsername.length >= 3 ? (
+                                <Text style={styles.hintText}>Your handle will be {handlePreview}</Text>
                             ) : null}
+                        </View>
+                    )}
 
-                            {isBusinessAccount ? null : (
-                                <>
-                                    <Text style={styles.fieldLabel}>Username</Text>
-                                    <Text style={styles.hintText}>
-                                        One word — used in your Gazetteer handle (letters, numbers, underscore).
-                                    </Text>
-                                    <TextInput
-                                        value={username}
-                                        onChangeText={(v) => setUsername(sanitizeSignupUsernameInput(v))}
-                                        placeholder="e.g. John or JohnS"
-                                        placeholderTextColor="#6B7280"
-                                        style={styles.input}
-                                        autoCapitalize="none"
-                                        autoCorrect={false}
-                                        autoComplete="username"
-                                    />
-                                    {!!getFieldError('username') && (
-                                        <Text style={styles.fieldErrorText}>{getFieldError('username')}</Text>
-                                    )}
-                                    {sanitizeSignupUsernameInput(username).length >= 3 ? (
-                                        <Text style={styles.hintText}>Your handle will be {handlePreview}</Text>
-                                    ) : null}
-                                </>
-                            )}
-
-                            <Text style={styles.fieldLabel}>
-                                {isBusinessAccount
-                                    ? 'Account owner’s date of birth'
-                                    : 'Date of birth'}
+                    {mode === 'signup' && signupScreen === 'birthday' && (
+                        <View style={styles.stepContent}>
+                            <Text style={styles.hintText}>
+                                {isBusinessAccount ? 'Account owner’s date of birth. You must be 13 or older.' : 'You must be 13 or older.'}
                             </Text>
-                            {isBusinessAccount ? (
-                                <Text style={styles.hintText}>
-                                    Your personal DOB for age verification (13+) — not your business founding date.
-                                </Text>
-                            ) : null}
                             <View style={styles.birthdateRow}>
                                 <TouchableOpacity
                                     style={[styles.input, styles.birthMonthBtn]}
                                     onPress={() => setMonthMenuOpen(true)}
                                     activeOpacity={0.85}
                                 >
-                                    <Text
-                                        style={
-                                            birthMonth
-                                                ? styles.birthMonthValue
-                                                : styles.birthMonthPlaceholder
-                                        }
-                                        numberOfLines={1}
-                                    >
-                                        {birthMonth
-                                            ? MONTHS[Math.max(0, parseInt(birthMonth, 10) - 1)] || 'Month'
-                                            : 'Month'}
+                                    <Text style={birthMonth ? styles.birthMonthValue : styles.birthMonthPlaceholder} numberOfLines={1}>
+                                        {birthMonth ? MONTHS[Math.max(0, parseInt(birthMonth, 10) - 1)] || 'Month' : 'Month'}
                                     </Text>
                                     <Icon name="chevron-down" size={ox(16)} color="#9CA3AF" />
                                 </TouchableOpacity>
@@ -1282,132 +1333,77 @@ export default function LoginScreen({ navigation, route }: any) {
                         </View>
                     )}
 
-                    {mode === 'signup' && step === 3 && (
+                    {mode === 'signup' && signupScreen === 'place' && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.fieldLabel}>
-                                {isBusinessAccount
-                                    ? 'Choose your business location for your local, regional, and national news feeds.'
-                                    : 'Choose your home location for your local, regional, and national news feeds.'}
-                            </Text>
-                            <View style={styles.locationModeTabs}>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.locationModeTab,
-                                        locationEntryMode === 'search' && styles.locationModeTabActive,
-                                    ]}
-                                    onPress={() => switchLocationEntryMode('search')}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.locationModeTabText,
-                                            locationEntryMode === 'search' && styles.locationModeTabTextActive,
-                                        ]}
-                                    >
-                                        Search
-                                    </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.locationModeTab,
-                                        locationEntryMode === 'manual' && styles.locationModeTabActive,
-                                    ]}
-                                    onPress={() => switchLocationEntryMode('manual')}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.locationModeTabText,
-                                            locationEntryMode === 'manual' && styles.locationModeTabTextActive,
-                                        ]}
-                                    >
-                                        Enter manually
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-                            {locationEntryMode === 'search' ? (
+                            <Text style={styles.hintText}>This sets your news feed.</Text>
+                            {showManualPlace ? (
                                 <>
-                                    <PlaceAutocompleteField
-                                        value={homeLocationQuery}
-                                        onChange={(v) => {
-                                            setHomeLocationQuery(v);
-                                            if (local || regional || national) {
-                                                setLocal('');
-                                                setRegional('');
-                                                setNational('');
-                                            }
-                                        }}
-                                        onSelectSuggestion={applyHomeLocation}
-                                        showFeedLevels
-                                        placeholder={
-                                            isBusinessAccount
-                                                ? 'Start with your business town or area'
-                                                : 'Start with your town or local area'
-                                        }
-                                    />
-                                    {!homeLocationComplete && homeLocationQuery.trim().length >= 2 ? (
-                                        <Text style={styles.warnText}>Select a suggestion from the list.</Text>
-                                    ) : null}
+                                    <TextInput value={local} onChangeText={setLocal} placeholder="Town or neighbourhood" placeholderTextColor="#6B7280" style={styles.input} autoCapitalize="words" />
+                                    <TextInput value={regional} onChangeText={setRegional} placeholder="County or region" placeholderTextColor="#6B7280" style={styles.input} autoCapitalize="words" />
+                                    <TextInput value={national} onChangeText={setNational} placeholder="Country" placeholderTextColor="#6B7280" style={styles.input} autoCapitalize="words" />
                                 </>
                             ) : (
-                                <>
-                                    <TextInput
-                                        value={local}
-                                        onChangeText={setLocal}
-                                        placeholder={
-                                            isBusinessAccount
-                                                ? 'Local area (business town / neighborhood)'
-                                                : 'Local area (town / neighborhood)'
+                                <PlaceAutocompleteField
+                                    value={homeLocationQuery}
+                                    onChange={(v) => {
+                                        setHomeLocationQuery(v);
+                                        if (local || regional || national) {
+                                            setLocal('');
+                                            setRegional('');
+                                            setNational('');
                                         }
-                                        placeholderTextColor="#6B7280"
-                                        style={styles.input}
-                                        autoCapitalize="words"
-                                    />
-                                    <TextInput
-                                        value={regional}
-                                        onChangeText={setRegional}
-                                        placeholder="Regional (city / county / region)"
-                                        placeholderTextColor="#6B7280"
-                                        style={styles.input}
-                                        autoCapitalize="words"
-                                    />
-                                    <TextInput
-                                        value={national}
-                                        onChangeText={setNational}
-                                        placeholder="National (country)"
-                                        placeholderTextColor="#6B7280"
-                                        style={styles.input}
-                                        autoCapitalize="words"
-                                    />
-                                </>
+                                    }}
+                                    onSelectSuggestion={(suggestion) => {
+                                        applyHomeLocation(suggestion);
+                                        setShowManualPlace(false);
+                                        if (isBusinessAccount) void applyBusinessAddress(suggestion);
+                                    }}
+                                    placeholder="Town or area"
+                                />
                             )}
                             {!!getFieldError('homeLocation') && <Text style={styles.fieldErrorText}>{getFieldError('homeLocation')}</Text>}
-                            {homeLocationComplete && locationEntryMode === 'search' ? (
+                            {!homeLocationComplete && !showManualPlace && homeLocationQuery.trim().length >= 2 ? (
+                                <Text style={styles.warnText}>Select a suggestion from the list.</Text>
+                            ) : null}
+                            {homeLocationComplete ? (
                                 <View style={styles.locationOk}>
                                     <Icon name="checkmark-circle" size={ox(18)} color="#7A8AF0" />
                                     <View style={{ flex: 1 }}>
                                         <Text style={styles.locationOkTitle}>
-                                            {isBusinessAccount ? 'Business area set' : 'Home area set'}
-                                        </Text>
-                                        <Text style={styles.locationOkSub}>
-                                            {signupFeedTierRows(local, regional, national).map((r) => r.value).join(' · ')}
+                                            Your feed follows {signupFeedTierRows(local, regional, national).map((row) => row.value).join(', ') || [local, regional, national].filter(Boolean).join(', ')}.
                                         </Text>
                                         <TouchableOpacity onPress={clearHomeLocation}>
-                                            <Text style={styles.linkText}>Change location</Text>
+                                            <Text style={styles.linkText}>Change</Text>
                                         </TouchableOpacity>
                                     </View>
                                 </View>
                             ) : null}
-                            {homeLocationComplete && locationEntryMode === 'manual' ? (
-                                <View style={styles.locationOk}>
-                                    <Icon name="checkmark-circle" size={ox(18)} color="#7A8AF0" />
-                                    <Text style={[styles.locationOkTitle, { flex: 1 }]}>
-                                        {isBusinessAccount ? 'Business area ready' : 'Home area ready'}
-                                    </Text>
-                                </View>
+                            <TouchableOpacity onPress={() => setShowManualPlace((open) => !open)}>
+                                <Text style={styles.linkText}>{showManualPlace ? 'Search instead' : 'Can’t find it?'}</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                    {mode === 'signup' && signupScreen === 'username' && (
+                        <View style={styles.stepContent}>
+                            <TextInput
+                                value={username}
+                                onChangeText={(v) => setUsername(sanitizeSignupUsernameInput(v))}
+                                placeholder="One word, e.g. John or JohnS"
+                                placeholderTextColor="#6B7280"
+                                style={styles.input}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                autoFocus
+                            />
+                            {!!getFieldError('username') && <Text style={styles.fieldErrorText}>{getFieldError('username')}</Text>}
+                            {sanitizeSignupUsernameInput(username).length >= 3 && regional ? (
+                                <Text style={styles.hintText}>Your handle will be {handlePreview}</Text>
                             ) : null}
                         </View>
                     )}
 
-                    {mode === 'signup' && step === 4 && (
+                    {mode === 'signup' && signupScreen === 'photo' && (
                         <View style={[styles.stepContent, styles.step3Content]}>
                             <Text style={styles.step3Handle}>{handlePreview}</Text>
                             <Text style={styles.step3Location} numberOfLines={2}>
@@ -1419,9 +1415,7 @@ export default function LoginScreen({ navigation, route }: any) {
                             <View style={styles.photoActions}>
                                 <TouchableOpacity onPress={handleProfilePictureSelect} style={styles.photoButton}>
                                     <Icon name="images-outline" size={ox(20)} color="#FFFFFF" />
-                                    <Text style={styles.photoButtonText}>
-                                        {profilePicture ? 'Change photo' : 'Add photo'}
-                                    </Text>
+                                    <Text style={styles.photoButtonText}>{profilePicture ? 'Change photo' : 'Add photo'}</Text>
                                 </TouchableOpacity>
                                 {profilePicture ? (
                                     <TouchableOpacity onPress={() => setProfilePicture(null)} style={styles.removePhotoBtn}>
@@ -1429,7 +1423,7 @@ export default function LoginScreen({ navigation, route }: any) {
                                     </TouchableOpacity>
                                 ) : null}
                             </View>
-                            <Text style={styles.photoHint}>Optional — photo library or camera. Initials if you skip.</Text>
+                            <Text style={styles.photoHint}>Optional. Initials are used if you skip.</Text>
                         </View>
                     )}
                     </View>
@@ -1437,110 +1431,30 @@ export default function LoginScreen({ navigation, route }: any) {
             </ScrollView>
 
             {mode === 'signup' ? (
-                step === 1 ? (
-                    <View style={styles.swalFooter}>
-                        <View style={styles.swalHandleWrap}>
-                            <View style={styles.swalHandle} />
-                        </View>
-                        <Text style={styles.swalEyebrow}>Gazetteer says</Text>
-                        <Text style={styles.swalTitle}>Required to continue</Text>
-
-                        <Text style={styles.legalDisclaimer}>
-                            By signing up, you agree to our{' '}
-                            <Text style={styles.legalDisclaimerLink} onPress={() => navigation.navigate('Terms')}>
-                                Terms
-                            </Text>
-                            {' of Service and '}
-                            <Text style={styles.legalDisclaimerLink} onPress={() => navigation.navigate('Terms')}>
-                                Privacy Policy
-                            </Text>
-                            .
-                        </Text>
-
-                        <TouchableOpacity
-                            onPress={handleStep1Submit}
-                            style={[
-                                styles.swalConfirmBtn,
-                                (busy || !step1CanContinue) && styles.submitButtonDisabled,
-                            ]}
-                            disabled={busy || !step1CanContinue}
-                        >
-                            <Text style={styles.swalConfirmBtnText}>
-                                {busy ? 'Please wait...' : 'Continue'}
-                            </Text>
-                        </TouchableOpacity>
-                        {!step1CanContinue && step1MissingHints.length > 0 ? (
-                            <Text style={styles.consentCompactHint}>
-                                Still needed: {step1MissingHints.join(', ')}
-                            </Text>
-                        ) : null}
-
-                        <Text style={styles.swalMeta}>
-                            13+ required · Already have an account?{' '}
-                            <Text style={styles.linkText} onPress={() => switchMode('login')}>
-                                Log in
-                            </Text>
-                        </Text>
-                    </View>
-                ) : (
-                    <View style={styles.swalFooter}>
-                        <View style={styles.swalHandleWrap}>
-                            <View style={styles.swalHandle} />
-                        </View>
-                        <Text style={styles.swalEyebrow}>Gazetteer says</Text>
-                        <Text style={styles.swalTitle}>{signupStepTitle}</Text>
-                        <View style={styles.swalActionsRow}>
+                <View ref={signupDockRef} style={[styles.signupDock, keyboardPad > 0 ? { marginBottom: keyboardPad } : null]}>
+                    <View style={styles.footerActionsRow}>
+                        {step > 1 ? (
                             <TouchableOpacity
                                 onPress={() => setStep(step - 1)}
-                                style={styles.profileTabButton}
                                 disabled={busy}
-                                activeOpacity={0.9}
+                                style={styles.footerBackButton}
                             >
-                                <Text style={styles.profileTabText}>Back</Text>
+                                <Text style={styles.footerBackButtonText}>Back</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={
-                                    step === 2
-                                        ? handleStep2Submit
-                                        : step === 3
-                                          ? handleStep3Submit
-                                          : handleProfilePictureSubmit
-                                }
-                                style={[
-                                    styles.profileTabButton,
-                                    styles.profileTabButtonActive,
-                                    styles.swalPrimaryFlex,
-                                    (
-                                        busy ||
-                                        (step === 2 && !step2CanContinue) ||
-                                        (step === 3 && !step3CanContinue)
-                                    ) && styles.submitButtonDisabled,
-                                ]}
-                                disabled={
-                                    busy ||
-                                    (step === 2 && !step2CanContinue) ||
-                                    (step === 3 && !step3CanContinue)
-                                }
-                                activeOpacity={0.9}
-                            >
-                                <Text style={styles.profileTabTextActive}>
-                                    {busy ? 'Please wait...' : step < 4 ? 'Continue' : 'Create account'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                        {step === 2 && !step2CanContinue && step2MissingHints.length > 0 ? (
-                            <Text style={styles.consentCompactHint}>
-                                Still needed: {step2MissingHints.join(', ')}
-                            </Text>
                         ) : null}
-                        {step === 3 && !step3CanContinue && step3MissingHints.length > 0 ? (
-                            <Text style={styles.consentCompactHint}>
-                                Still needed: {step3MissingHints.join(', ')}
+                        <TouchableOpacity
+                            onPress={() => void goSignupNext()}
+                            style={[styles.footerPrimaryButton, busy && styles.submitButtonDisabled]}
+                            disabled={busy}
+                        >
+                            <Text style={styles.submitButtonText}>
+                                {busy ? 'Please wait...' : signupScreen === 'photo' ? 'Create account' : 'Next'}
                             </Text>
-                        ) : null}
+                        </TouchableOpacity>
                     </View>
-                )
+                </View>
             ) : null}
+
             </View>
             </KeyboardAvoidingView>
             <Modal visible={forgotOpen} transparent animationType="fade" onRequestClose={() => setForgotOpen(false)}>
@@ -1883,6 +1797,9 @@ const styles = StyleSheet.create({
     hintText: {
         fontSize: ox(12),
         color: '#6B7280',
+    },
+    passwordHintMet: {
+        color: '#FFFFFF',
     },
     warnText: {
         fontSize: ox(12),
@@ -2330,6 +2247,13 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         fontSize: ox(14),
     },
+    signupDock: {
+        paddingHorizontal: ox(16),
+        paddingTop: ox(8),
+        paddingBottom: ox(12),
+        gap: ox(8),
+        backgroundColor: '#000000',
+    },
     submitButton: {
         width: '100%',
         paddingVertical: ox(12),
@@ -2352,7 +2276,7 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     footerBackButton: {
-        flexShrink: 0,
+        flex: 1,
         paddingVertical: ox(12),
         paddingHorizontal: ox(18),
         borderRadius: ox(12),

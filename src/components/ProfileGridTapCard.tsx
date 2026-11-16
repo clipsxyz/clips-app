@@ -93,8 +93,11 @@ export default function ProfileGridTapCard({
   }, [post.id]);
 
   useEffect(() => {
-    if (videoEl.current) videoEl.current.muted = muted;
-  }, [muted]);
+    const node = videoEl.current;
+    if (!node) return;
+    node.muted = muted;
+    node.disableRemotePlayback = true;
+  }, [muted, playback]);
 
   const requestClose = () => {
     if (textFull) {
@@ -150,6 +153,8 @@ export default function ProfileGridTapCard({
             muted={muted}
             loop
             playsInline
+            disableRemotePlayback
+            controlsList="nodownload nofullscreen noremoteplayback"
           />
         ) : imageUrl ? (
           <img src={imageUrl} alt="" className="h-full w-full object-cover" />

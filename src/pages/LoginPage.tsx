@@ -15,6 +15,7 @@ import { setAvatarForHandle } from '../api/users';
 import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import { db } from '../utils/db';
 import { buildGazetteerHandle, businessUsernameFromName, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
+import { signupPasswordIssue } from '../utils/signupPassword';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
 const avatarStorageKey = (id: string) => `clips_app_avatar_${id}`;
@@ -119,23 +120,14 @@ export default function LoginPage() {
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
-  const step = (stepFromUrl >= 1 && stepFromUrl <= 4) ? stepFromUrl : 1;
-
-  const signupStepTitle =
-    step === 1
-      ? 'Create your account'
-      : step === 2
-        ? 'About you'
-        : step === 3
-          ? 'Choose your news feeds'
-          : 'Add a photo';
+  const step = (stepFromUrl >= 1 && stepFromUrl <= 8) ? stepFromUrl : 1;
 
   const signupInputClass =
     'w-full rounded-lg border border-white/25 bg-black/40 px-3 py-3 text-sm text-white placeholder:text-gray-400 focus:outline-none focus:border-[#7A8AF0]/80 focus:ring-1 focus:ring-[#7A8AF0]/40';
 
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
-    if (newStep >= 1 && newStep <= 4) {
+    if (newStep >= 1 && newStep <= 8) {
       setSignupError('');
       setSearchParams({ mode: 'signup', step: newStep.toString() });
     }
@@ -148,6 +140,7 @@ export default function LoginPage() {
   const [regional, setRegional] = React.useState('');
   const [national, setNational] = React.useState('');
   const [homeLocationQuery, setHomeLocationQuery] = React.useState('');
+  const [showManualPlace, setShowManualPlace] = React.useState(false);
 
   // Step 1: Account details (email, password, birthday)
   const [email, setEmail] = React.useState('');
@@ -211,6 +204,30 @@ export default function LoginPage() {
   }
 
   const isBusinessAccount = accountType === 'business';
+  const signupScreens = isBusinessAccount
+    ? (['type', 'email', 'password', 'name', 'birthday', 'place', 'photo'] as const)
+    : (['type', 'email', 'password', 'name', 'birthday', 'place', 'username', 'photo'] as const);
+  const signupScreen = signupScreens[Math.min(step, signupScreens.length) - 1];
+  const signupStepTitle =
+    signupScreen === 'type'
+      ? 'Create your account'
+      : signupScreen === 'email'
+        ? 'Email'
+        : signupScreen === 'password'
+          ? 'Password'
+          : signupScreen === 'name'
+            ? isBusinessAccount
+              ? 'Business name'
+              : 'Your name'
+            : signupScreen === 'birthday'
+              ? 'Date of birth'
+              : signupScreen === 'place'
+                ? isBusinessAccount
+                  ? 'Where is the business?'
+                  : 'Where are you?'
+                : signupScreen === 'username'
+                  ? 'Username'
+                  : 'Add a photo';
   const businessUsername = businessUsernameFromName(name);
   const signupUsername = isBusinessAccount ? businessUsername : sanitizeSignupUsernameInput(username);
   const usernameForHandle = signupUsername || (isBusinessAccount ? 'business' : 'yourname');
@@ -240,6 +257,7 @@ export default function LoginPage() {
     setRegional(parsed.regional);
     setNational(parsed.national);
     setHomeLocationQuery(parsed.fullName || suggestion.name);
+    setShowManualPlace(false);
   }
 
   function clearHomeLocation() {
@@ -247,139 +265,164 @@ export default function LoginPage() {
     setRegional('');
     setNational('');
     setHomeLocationQuery('');
+    setShowManualPlace(false);
   }
 
-  async function handleAccountSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const nextErrors: Record<string, string> = {};
-    if (!email || !password || !confirmPassword) {
-      if (!email) nextErrors.email = 'Email is required.';
-      if (!password) nextErrors.password = 'Password is required.';
-      if (!confirmPassword) nextErrors.confirmPassword = 'Please confirm your password.';
+  function signupConnectionMessage(err: any, fallback: string) {
+    const msg = String(err?.message || '');
+    const isConnection = err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+    return isConnection ? 'Cannot reach the server. Check Laravel is running and try again.' : msg || fallback;
+  }
+
+  async function checkUsernameFree(cleanUsername: string, field: 'name' | 'username') {
+    const availability = await checkSignupAvailability({ username: cleanUsername });
+    if (availability.username_taken) {
+      const taken = field === 'name' ? 'This name is already taken. Try another.' : 'This username is already taken. Try another.';
+      setSignupFieldErrors({ [field]: taken });
+      setSignupError('Please choose a different username.');
+      return false;
     }
-    if (!accountType) {
-      nextErrors.accountType = 'Please choose Personal or Business account.';
-    }
-    if (!acceptedTerms) {
-      nextErrors.terms = 'You must accept Terms.';
-    }
-    if (!acceptedGuidelines) {
-      nextErrors.guidelines = 'You must accept Community Guidelines.';
-    }
-    if (password !== confirmPassword) {
-      nextErrors.confirmPassword = 'Passwords do not match.';
-    }
-    if (password && password.length < 8) {
-      nextErrors.password = 'Password must be at least 8 characters.';
-    }
-    if (Object.keys(nextErrors).length > 0) {
-      setSignupFieldErrors(nextErrors);
+    if (availability.errors?.username?.[0]) {
+      setSignupFieldErrors({ username: availability.errors.username[0] });
       setSignupError('Please fix the highlighted fields.');
-      return;
+      return false;
     }
-
-    setSignupSubmitting(true);
-    setSignupError('');
-    try {
-      const availability = await checkSignupAvailability({ email: email.trim() });
-      if (availability.email_taken) {
-        setSignupFieldErrors({ email: 'This email is already taken. Try logging in instead.' });
-        setSignupError('This email is already registered.');
-        return;
-      }
-      if (availability.errors?.email?.[0]) {
-        setSignupFieldErrors({ email: availability.errors.email[0] });
-        setSignupError('Please fix the highlighted fields.');
-        return;
-      }
-      setSignupFieldErrors({});
-      updateStep(2);
-    } catch (err: any) {
-      const msg = String(err?.message || '');
-      const isConnection =
-        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
-      setSignupError(
-        isConnection
-          ? 'Cannot reach the server. Check Laravel is running and try again.'
-          : msg || 'Could not verify email. Try again.',
-      );
-    } finally {
-      setSignupSubmitting(false);
-    }
+    return true;
   }
 
-  async function handleProfileSubmit(e: React.FormEvent) {
+  async function handleSignupContinue(e: React.FormEvent) {
     e.preventDefault();
-    const nextErrors: Record<string, string> = {};
-    if (!name) nextErrors.name = isBusinessAccount ? 'Business name is required.' : 'Full name is required.';
-    else if (isBusinessAccount && businessUsername.length < 3) {
-      nextErrors.name = 'Use a business name with at least 3 letters or numbers. That is the name people see.';
-    }
-    if (!isBusinessAccount) {
-      const usernameError = validateSignupUsername(username);
-      if (usernameError) nextErrors.username = usernameError;
-    }
-    if (!birthMonth || !birthDay || !birthYear) {
-      nextErrors.birthdate = 'Please enter your date of birth.';
-    }
-    const age = getAgeFromBirthday();
-    if (age === null) {
-      nextErrors.birthdate = 'Please enter a valid date of birth.';
-    } else if (age < MIN_AGE) {
-      nextErrors.birthdate = `You must be at least ${MIN_AGE} years old to create an account.`;
-    }
-    if (Object.keys(nextErrors).length > 0) {
-      setSignupFieldErrors(nextErrors);
-      setSignupError('Please complete all required profile fields.');
-      return;
-    }
-
-    setSignupSubmitting(true);
-    setSignupError('');
-    try {
-      const cleanUsername = isBusinessAccount ? businessUsername : sanitizeSignupUsernameInput(username);
-      const availability = await checkSignupAvailability({ username: cleanUsername });
-      if (availability.username_taken) {
-        const taken = isBusinessAccount
-          ? 'This name is already taken. Try another.'
-          : 'This username is already taken. Try another.';
-        setSignupFieldErrors(isBusinessAccount ? { name: taken } : { username: taken });
-        setSignupError('Please choose a different username.');
-        return;
-      }
-      if (availability.errors?.username?.[0]) {
-        setSignupFieldErrors({ username: availability.errors.username[0] });
-        setSignupError('Please fix the highlighted fields.');
-        return;
-      }
-      setSignupFieldErrors({});
-      updateStep(3);
-    } catch (err: any) {
-      const msg = String(err?.message || '');
-      const isConnection =
-        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
-      setSignupError(
-        isConnection
-          ? 'Cannot reach the server. Check Laravel is running and try again.'
-          : msg || 'Could not verify username. Try again.',
-      );
-    } finally {
-      setSignupSubmitting(false);
-    }
-  }
-
-  function handleLocationSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!homeLocationComplete) {
-      setSignupFieldErrors({
-        homeLocation: 'Search and pick a place from the list — we need your local, regional, and national feeds.',
-      });
-      setSignupError('Please choose the location that will power your news feeds.');
+    if (signupSubmitting) return;
+    if (signupScreen === 'photo') {
+      await handleProfilePictureSubmit(e);
       return;
     }
     setSignupFieldErrors({});
     setSignupError('');
-    updateStep(4);
+    if (signupScreen === 'type') {
+      if (!accountType) {
+        setSignupError('Choose Personal or Business.');
+        return;
+      }
+      updateStep(step + 1);
+      return;
+    }
+    if (signupScreen === 'email') {
+      if (!email.trim()) {
+        setSignupFieldErrors({ email: 'Email is required.' });
+        setSignupError('Enter your email.');
+        return;
+      }
+      setSignupSubmitting(true);
+      try {
+        const availability = await checkSignupAvailability({ email: email.trim() });
+        if (availability.email_taken) {
+          setSignupFieldErrors({ email: 'This email is already taken. Try logging in instead.' });
+          setSignupError('This email is already registered.');
+          return;
+        }
+        if (availability.errors?.email?.[0]) {
+          setSignupFieldErrors({ email: availability.errors.email[0] });
+          setSignupError('Please fix the highlighted fields.');
+          return;
+        }
+        setAcceptedTerms(true);
+        setAcceptedGuidelines(true);
+        updateStep(step + 1);
+      } catch (err: any) {
+        setSignupError(signupConnectionMessage(err, 'Could not verify email. Try again.'));
+      } finally {
+        setSignupSubmitting(false);
+      }
+      return;
+    }
+    if (signupScreen === 'password') {
+      const issue = signupPasswordIssue(password);
+      if (issue) {
+        setSignupFieldErrors({ password: issue });
+        setSignupError(issue);
+        return;
+      }
+      setConfirmPassword(password);
+      updateStep(step + 1);
+      return;
+    }
+    if (signupScreen === 'name') {
+      if (!name.trim()) {
+        setSignupFieldErrors({ name: isBusinessAccount ? 'Business name is required.' : 'Full name is required.' });
+        setSignupError('Enter a name.');
+        return;
+      }
+      if (isBusinessAccount && businessUsername.length < 3) {
+        setSignupFieldErrors({ name: 'Use a business name with at least 3 letters or numbers.' });
+        setSignupError('Use a business name with at least 3 letters or numbers.');
+        return;
+      }
+      if (isBusinessAccount) {
+        setSignupSubmitting(true);
+        try {
+          const free = await checkUsernameFree(businessUsername, 'name');
+          if (free) updateStep(step + 1);
+        } catch (err: any) {
+          setSignupError(signupConnectionMessage(err, 'Could not verify that name. Try again.'));
+        } finally {
+          setSignupSubmitting(false);
+        }
+        return;
+      }
+      updateStep(step + 1);
+      return;
+    }
+    if (signupScreen === 'birthday') {
+      if (!birthMonth || !birthDay || !birthYear) {
+        setSignupFieldErrors({ birthdate: 'Please enter your date of birth.' });
+        setSignupError('Enter your date of birth.');
+        return;
+      }
+      const age = getAgeFromBirthday();
+      if (age === null) {
+        setSignupFieldErrors({ birthdate: 'Please enter a valid date of birth.' });
+        setSignupError('Enter a valid date of birth.');
+        return;
+      }
+      if (age < MIN_AGE) {
+        setSignupFieldErrors({ birthdate: `You must be at least ${MIN_AGE} years old.` });
+        setSignupError(`You must be at least ${MIN_AGE} years old.`);
+        return;
+      }
+      updateStep(step + 1);
+      return;
+    }
+    if (signupScreen === 'place') {
+      if (!homeLocationComplete) {
+        setSignupFieldErrors({
+          homeLocation: showManualPlace
+            ? 'Enter your town, county or region, and country.'
+            : 'Search and pick a place from the list.',
+        });
+        setSignupError('Choose the place for your news feed.');
+        return;
+      }
+      updateStep(step + 1);
+      return;
+    }
+    if (signupScreen === 'username') {
+      const usernameError = validateSignupUsername(username);
+      if (usernameError) {
+        setSignupFieldErrors({ username: usernameError });
+        setSignupError(usernameError);
+        return;
+      }
+      setSignupSubmitting(true);
+      try {
+        const free = await checkUsernameFree(sanitizeSignupUsernameInput(username), 'username');
+        if (free) updateStep(step + 1);
+      } catch (err: any) {
+        setSignupError(signupConnectionMessage(err, 'Could not verify username. Try again.'));
+      } finally {
+        setSignupSubmitting(false);
+      }
+    }
   }
 
   async function handleProfilePictureSubmit(e: React.FormEvent) {
@@ -934,15 +977,7 @@ export default function LoginPage() {
           </div>
         ) : (
         <form
-          onSubmit={
-            step === 1
-              ? handleAccountSubmit
-              : step === 2
-                ? handleProfileSubmit
-                : step === 3
-                  ? handleLocationSubmit
-                  : handleProfilePictureSubmit
-          }
+          onSubmit={handleSignupContinue}
           className="flex flex-1 flex-col min-h-0 w-full h-full overflow-hidden"
           style={{ backgroundColor: 'transparent' }}
         >
@@ -976,7 +1011,7 @@ export default function LoginPage() {
               <div className="mx-auto mt-5 mb-1 h-0.5 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
                 <div
                   className="h-full rounded-full bg-[#7A8AF0] transition-all duration-300 ease-out"
-                  style={{ width: `${(step / 4) * 100}%` }}
+                  style={{ width: `${(step / signupScreens.length) * 100}%` }}
                 />
               </div>
             </div>
@@ -994,255 +1029,152 @@ export default function LoginPage() {
           </div>
         )}
 
-        {step === 1 && (
-          <>
-            {/* Step 1: Account details (email + password) */}
-            <div className="space-y-2">
-              <p className="text-xs text-gray-500">Account type</p>
-              <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-white/5 p-1">
-                <button
-                  type="button"
-                  onClick={() => setAccountType('personal')}
-                  className={`relative rounded-md px-3 py-2.5 text-xs font-semibold transition-colors ${
-                    accountType === 'personal'
-                      ? 'bg-[#7A8AF0]/20 text-white'
-                      : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  <span
-                    className={`absolute right-2 top-1/2 -translate-y-1/2 transition-all duration-200 ${
-                      accountType === 'personal' ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
-                    }`}
-                  >
-                    <FiCheck className="h-3.5 w-3.5" />
-                  </span>
-                  Personal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAccountType('business')}
-                  className={`relative rounded-md px-3 py-2.5 text-xs font-semibold transition-colors ${
-                    accountType === 'business'
-                      ? 'bg-[#7A8AF0]/20 text-white'
-                      : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  <span
-                    className={`absolute right-2 top-1/2 -translate-y-1/2 transition-all duration-200 ${
-                      accountType === 'business' ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
-                    }`}
-                  >
-                    <FiCheck className="h-3.5 w-3.5" />
-                  </span>
-                  Business
-                </button>
-              </div>
-              {accountType === 'business' && (
-                <p className="text-xs text-gray-500">Eligible for local business suggestion cards.</p>
-              )}
-              {signupFieldErrors.accountType && (
-                <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.accountType}</p>
-              )}
-            </div>
+        {signupScreen === 'type' && (
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setAccountType('personal')}
+              className={`rounded-xl border px-3 py-6 text-sm font-semibold ${
+                accountType === 'personal' ? 'border-white bg-white text-black' : 'border-white/20 text-white'
+              }`}
+            >
+              Personal
+            </button>
+            <button
+              type="button"
+              onClick={() => setAccountType('business')}
+              className={`rounded-xl border px-3 py-6 text-sm font-semibold ${
+                accountType === 'business' ? 'border-white bg-white text-black' : 'border-white/20 text-white'
+              }`}
+            >
+              Business
+            </button>
+          </div>
+        )}
 
-            {/* Email */}
-            <div>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className={signupInputClass}
-                placeholder="Email"
-                required
-                autoComplete="email"
-              />
-              {signupFieldErrors.email && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.email}</p>}
-            </div>
+        {signupScreen === 'email' && (
+          <div className="space-y-3">
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              className={signupInputClass}
+              placeholder="Email"
+              autoComplete="email"
+              autoFocus
+            />
+            {signupFieldErrors.email && <p className="text-xs text-red-400 px-1">{signupFieldErrors.email}</p>}
+            <p className="text-center text-[11px] leading-4 text-gray-500">
+              By continuing, you agree to the{' '}
+              <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-[#7A8AF0] hover:underline">Terms</Link>
+              {' '}and{' '}
+              <Link to="/terms#community-guidelines" target="_blank" rel="noopener noreferrer" className="text-[#7A8AF0] hover:underline">Community Guidelines</Link>.
+              You must be 13 or older.
+            </p>
+          </div>
+        )}
 
-            {/* Password */}
-            <div>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  className={`${signupInputClass} pr-10`}
-                  placeholder="Password (8+ characters)"
-                  required
-                  autoComplete="new-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(p => !p)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-300"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
-                </button>
-              </div>
-              {signupFieldErrors.password && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.password}</p>}
-              {/* Password strength meter */}
-              {password && (
-                <div className="mt-1.5 flex items-center gap-2">
-                  <div className="flex-1 h-1 rounded-full bg-gray-700 overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${
-                        getPasswordStrength(password) === 0 ? 'w-1/4 bg-red-500' :
-                        getPasswordStrength(password) === 1 ? 'w-1/2 bg-orange-500' :
-                        getPasswordStrength(password) === 2 ? 'w-3/4 bg-yellow-500' :
-                        'w-full bg-green-500'
-                      }`}
-                    />
-                  </div>
-                  <span className={`text-xs ${
-                    getPasswordStrength(password) === 0 ? 'text-red-400' :
-                    getPasswordStrength(password) === 1 ? 'text-orange-400' :
-                    getPasswordStrength(password) === 2 ? 'text-yellow-400' :
-                    'text-green-400'
-                  }`}>
-                    {getPasswordStrength(password) === 0 ? 'Weak' :
-                     getPasswordStrength(password) === 1 ? 'Fair' :
-                     getPasswordStrength(password) === 2 ? 'Good' : 'Strong'}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Confirm Password */}
+        {signupScreen === 'password' && (
+          <div>
             <div className="relative">
               <input
-                type={showConfirmPassword ? 'text' : 'password'}
-                value={confirmPassword}
-                onChange={e => setConfirmPassword(e.target.value)}
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={e => {
+                  const next = e.target.value;
+                  setPassword(next);
+                  if (signupPasswordIssue(next) == null) {
+                    setSignupFieldErrors({});
+                    setSignupError('');
+                  }
+                }}
                 className={`${signupInputClass} pr-10`}
-                placeholder="Confirm Password"
-                required
+                placeholder="Password, 8+ characters"
                 autoComplete="new-password"
+                autoFocus
               />
               <button
                 type="button"
-                onClick={() => setShowConfirmPassword(p => !p)}
+                onClick={() => setShowPassword(p => !p)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-300"
-                aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
-                {showConfirmPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+                {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
               </button>
-              {confirmPassword && (
-                <p className={`text-xs mt-1.5 px-1 font-semibold ${password === confirmPassword ? 'text-green-400' : 'text-amber-300'}`}>
-                  {password === confirmPassword ? 'Passwords match' : 'Passwords don\'t match'}
-                </p>
-              )}
-              {signupFieldErrors.confirmPassword && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.confirmPassword}</p>}
             </div>
-
-          </>
+            {signupFieldErrors.password && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.password}</p>}
+            <p className={`mt-3 text-xs ${signupPasswordIssue(password) == null ? 'text-white' : 'text-gray-500'}`}>
+              Use 8 or more characters, with a letter and a number.
+            </p>
+          </div>
         )}
 
-        {step === 2 && (
-          <>
-            {/* Step 2: Location Selection */}
-            {/* Name Input */}
-            <div>
-              <input
-                value={name}
-                onChange={e => setName(e.target.value)}
-                className={signupInputClass}
-                placeholder={isBusinessAccount ? 'Business name' : 'Full Name'}
-                required
-                autoComplete="name"
-              />
-              {signupFieldErrors.name && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.name}</p>}
-            </div>
-
-            {isBusinessAccount ? (
-              <p className="text-xs text-gray-400 px-1 -mt-2">
-                This is the name on your posts and profile.
-                {businessUsername.length >= 3 ? (
-                  <>
-                    {' '}Your handle will be <span className="text-white font-medium">{handlePreview}</span>
-                  </>
-                ) : null}
-              </p>
+        {signupScreen === 'name' && (
+          <div className="space-y-2">
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className={signupInputClass}
+              placeholder={isBusinessAccount ? 'Business name' : 'Full name'}
+              autoComplete="name"
+              autoFocus
+            />
+            {signupFieldErrors.name && <p className="text-xs text-red-400 px-1">{signupFieldErrors.name}</p>}
+            {isBusinessAccount && businessUsername.length >= 3 ? (
+              <p className="text-xs text-gray-400 px-1">Your handle will be <span className="text-white">{handlePreview}</span></p>
             ) : null}
-            {isBusinessAccount ? null : <div>
-              <p className="text-xs text-gray-500 mb-2">
-                Username — one word for your Gazetteer handle (letters, numbers, underscore).
-              </p>
-              <input
-                value={username}
-                onChange={e => setUsername(sanitizeSignupUsernameInput(e.target.value))}
-                className={signupInputClass}
-                placeholder="e.g. John or JohnS"
-                required
-                autoComplete="username"
-                autoCapitalize="off"
-                spellCheck={false}
-              />
-              {signupFieldErrors.username && (
-                <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.username}</p>
-              )}
-              {sanitizeSignupUsernameInput(username).length >= 3 && (
-                <p className="mt-1.5 text-xs text-gray-400 px-1">
-                  Your handle will be <span className="text-white font-medium">{handlePreview}</span>
-                </p>
-              )}
-            </div>}
-
-            {/* Date of Birth - required, 13+ */}
-            <div>
-              <p className="text-xs text-gray-500 mb-2">Date of birth</p>
-              <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-5 relative">
-                  <select
-                    value={birthMonth}
-                    onChange={e => setBirthMonth(e.target.value)}
-                    className={`${signupInputClass} pr-8 appearance-none`}
-                    required
-                  >
-                    <option value="">Month</option>
-                    {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
-                      <option key={m} value={String(i + 1)}>{m}</option>
-                    ))}
-                  </select>
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                  </div>
-                </div>
-                <div className="col-span-3">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={birthDay}
-                    onChange={e => setBirthDay(e.target.value.replace(/\D/g, '').slice(0, 2))}
-                    placeholder="Day"
-                    className={signupInputClass}
-                    maxLength={2}
-                  />
-                </div>
-                <div className="col-span-4">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={birthYear}
-                    onChange={e => setBirthYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    placeholder="Year"
-                    className={signupInputClass}
-                    maxLength={4}
-                  />
-                </div>
-              </div>
-              {signupFieldErrors.birthdate && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.birthdate}</p>}
-            </div>
-
-          </>
+          </div>
         )}
 
-        {step === 3 && (
-          <>
-            <div>
-              <p className="text-xs text-gray-500 mb-2">
-                Choose your home location to set your local, regional, and national news feeds.
-              </p>
+        {signupScreen === 'birthday' && (
+          <div>
+            <p className="mb-2 text-xs text-gray-500">
+              {isBusinessAccount ? 'Account owner’s date of birth. You must be 13 or older.' : 'You must be 13 or older.'}
+            </p>
+            <div className="grid grid-cols-12 gap-2">
+              <div className="relative col-span-5">
+                <select
+                  value={birthMonth}
+                  onChange={e => setBirthMonth(e.target.value)}
+                  className={`${signupInputClass} appearance-none pr-8`}
+                >
+                  <option value="">Month</option>
+                  {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
+                    <option key={m} value={String(i + 1)}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-3">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={birthDay}
+                  onChange={e => setBirthDay(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                  placeholder="Day"
+                  className={signupInputClass}
+                  maxLength={2}
+                />
+              </div>
+              <div className="col-span-4">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={birthYear}
+                  onChange={e => setBirthYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  placeholder="Year"
+                  className={signupInputClass}
+                  maxLength={4}
+                />
+              </div>
+            </div>
+            {signupFieldErrors.birthdate && <p className="mt-1.5 px-1 text-xs text-red-400">{signupFieldErrors.birthdate}</p>}
+          </div>
+        )}
+
+        {signupScreen === 'place' && (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">This sets your news feed.</p>
+            {!showManualPlace ? (
               <PlaceAutocompleteField
                 value={homeLocationQuery}
                 onChange={(v) => {
@@ -1256,44 +1188,56 @@ export default function LoginPage() {
                 onSelectSuggestion={applyHomeLocation}
                 mode="location"
                 showIcon
-                showFeedLevels
-                placeholder="Search city or neighborhood"
+                placeholder={isBusinessAccount ? 'Town or area' : 'Town or area'}
                 inputClassName={signupPlaceInputClass}
               />
-              {!homeLocationComplete && homeLocationQuery.trim().length >= 2 && (
-                <p className="mt-1.5 text-xs text-amber-300/90">
-                  Select a suggestion from the list.
-                </p>
-              )}
-              {signupFieldErrors.homeLocation && (
-                <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.homeLocation}</p>
-              )}
-              {homeLocationComplete && (
-                <div className="mt-2 flex items-start gap-2 text-sm text-gray-300">
-                  <FiCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#7A8AF0]" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-white">Home area set</p>
-                    <p className="mt-0.5 text-xs text-gray-400">
-                      {signupFeedTierRows(local, regional, national)
-                        .map((row) => row.value)
-                        .join(' ? ')}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={clearHomeLocation}
-                      className="mt-1 text-xs text-[#7A8AF0] hover:underline"
-                    >
-                      Change location
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-          </>
+            ) : (
+              <div className="space-y-2">
+                <input value={local} onChange={e => setLocal(e.target.value)} className={signupInputClass} placeholder="Town or neighbourhood" />
+                <input value={regional} onChange={e => setRegional(e.target.value)} className={signupInputClass} placeholder="County or region" />
+                <input value={national} onChange={e => setNational(e.target.value)} className={signupInputClass} placeholder="Country" />
+              </div>
+            )}
+            {!homeLocationComplete && !showManualPlace && homeLocationQuery.trim().length >= 2 && (
+              <p className="text-xs text-amber-300/90">Select a suggestion from the list.</p>
+            )}
+            {signupFieldErrors.homeLocation && <p className="text-xs text-red-400">{signupFieldErrors.homeLocation}</p>}
+            {homeLocationComplete && (
+              <div className="text-sm text-white">
+                <p>Your feed follows {signupFeedTierRows(local, regional, national).map((row) => row.value).join(', ') || [local, regional, national].filter(Boolean).join(', ')}.</p>
+                <button type="button" onClick={clearHomeLocation} className="mt-1 text-xs text-[#7A8AF0] hover:underline">Change</button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowManualPlace((open) => !open)}
+              className="text-xs text-[#7A8AF0] hover:underline"
+            >
+              {showManualPlace ? 'Search instead' : 'Can’t find it?'}
+            </button>
+          </div>
         )}
 
-        {step === 4 && (
+        {signupScreen === 'username' && (
+          <div className="space-y-2">
+            <input
+              value={username}
+              onChange={e => setUsername(sanitizeSignupUsernameInput(e.target.value))}
+              className={signupInputClass}
+              placeholder="One word, e.g. John or JohnS"
+              autoComplete="username"
+              autoCapitalize="off"
+              spellCheck={false}
+              autoFocus
+            />
+            {signupFieldErrors.username && <p className="text-xs text-red-400 px-1">{signupFieldErrors.username}</p>}
+            {sanitizeSignupUsernameInput(username).length >= 3 && regional ? (
+              <p className="text-xs text-gray-400 px-1">Your handle will be <span className="text-white">{handlePreview}</span></p>
+            ) : null}
+          </div>
+        )}
+
+        {signupScreen === 'photo' && (
           <>
             <p className="text-center text-sm text-gray-400">
               <span className="font-medium text-white">@{handlePreview}</span>
@@ -1302,9 +1246,6 @@ export default function LoginPage() {
                   <Flag value={previewCountryFlag} national={national} size={16} />
                 </span>
               ) : null}
-              <span className="mt-1 block truncate text-xs text-gray-500">
-                {[local, regional, national].filter(Boolean).join(' ? ')}
-              </span>
             </p>
             <div className="flex flex-col items-center gap-4 py-2">
               <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-lg text-gray-200">
@@ -1320,16 +1261,12 @@ export default function LoginPage() {
                   <input type="file" accept="image/*" className="hidden" onChange={handleProfilePictureSelect} />
                 </label>
                 {profilePicture && (
-                  <button
-                    type="button"
-                    onClick={() => setProfilePicture(null)}
-                    className="rounded-lg px-4 py-2.5 text-sm text-gray-400 transition-colors hover:text-white"
-                  >
+                  <button type="button" onClick={() => setProfilePicture(null)} className="rounded-lg px-4 py-2.5 text-sm text-gray-400 hover:text-white">
                     Remove
                   </button>
                 )}
               </div>
-              <p className="text-center text-xs text-gray-500">Optional ? initials are used if you skip.</p>
+              <p className="text-center text-xs text-gray-500">Optional. Initials are used if you skip.</p>
             </div>
           </>
         )}
@@ -1337,122 +1274,45 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div className="flex-shrink-0 border-t border-white/10 px-6 sm:px-10 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(0,0,0,0.65)]" style={{ backgroundColor: 'transparent' }}>
-            <div className="mx-auto w-full max-w-[400px] space-y-3">
-              {step === 1 && (
-                <div className="space-y-2.5 rounded-lg border border-white/15 bg-white/5 px-3 py-3">
-                  <p className="text-xs font-medium text-gray-300">Required to continue</p>
-                  <label className="flex items-start gap-2.5 text-sm text-gray-200">
-                    <input
-                      type="checkbox"
-                      checked={acceptedTerms}
-                      onChange={(e) => setAcceptedTerms(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-white/40 bg-black accent-[#7A8AF0]"
-                    />
-                    <span>
-                      I accept{' '}
-                      <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-[#7A8AF0] hover:underline">
-                        Terms & Conditions
-                      </Link>
-                    </span>
-                  </label>
-                  {signupFieldErrors.terms && <p className="text-xs text-red-400">{signupFieldErrors.terms}</p>}
-                  <label className="flex items-start gap-2.5 text-sm text-gray-200">
-                    <input
-                      type="checkbox"
-                      checked={acceptedGuidelines}
-                      onChange={(e) => setAcceptedGuidelines(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-white/40 bg-black accent-[#7A8AF0]"
-                    />
-                    <span>
-                      I accept{' '}
-                      <Link
-                        to="/terms#community-guidelines"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#7A8AF0] hover:underline"
-                      >
-                        Community Guidelines
-                      </Link>
-                    </span>
-                  </label>
-                  {signupFieldErrors.guidelines && <p className="text-xs text-red-400">{signupFieldErrors.guidelines}</p>}
-                  {!step1CanContinue && (email || password) && (!acceptedTerms || !acceptedGuidelines) && (
-                    <p className="text-xs text-amber-300/90">Accept both above to enable Continue.</p>
-                  )}
-                </div>
-              )}
-              {step > 1 && (
+          <div className="flex-shrink-0 border-t border-white/10 bg-black px-6 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-10">
+            <div className="mx-auto w-full max-w-[400px] space-y-2">
+              <div className="flex gap-2">
+                {step > 1 && (
+                  <button
+                    type="button"
+                    disabled={signupSubmitting}
+                    onClick={() => updateStep(step - 1)}
+                    className="flex-1 rounded-lg border border-white/25 bg-transparent px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-45"
+                  >
+                    Back
+                  </button>
+                )}
                 <button
-                  type="button"
+                  type="submit"
                   disabled={signupSubmitting}
-                  onClick={() => updateStep(step - 1)}
-                  className="w-full py-2 text-sm text-gray-400 transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex-1 rounded-lg bg-white px-4 py-3 text-sm font-semibold text-[#111827] hover:bg-gray-100 disabled:cursor-not-allowed disabled:bg-white/25 disabled:text-white/50"
                 >
-                  Back
+                  {signupSubmitting ? 'Please wait…' : signupScreen === 'photo' ? 'Create account' : 'Next'}
                 </button>
-              )}
-              <button
-                type="submit"
-                disabled={
-                  signupSubmitting ||
-                  (step === 1 && !step1CanContinue) ||
-                  (step === 2 && !step2CanContinue) ||
-                  (step === 3 && !step3CanContinue)
-                }
-                className="w-full rounded-lg bg-white px-4 py-3 text-sm font-semibold text-[#111827] transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:bg-white/25 disabled:text-white/50"
-              >
-                {signupSubmitting
-                  ? 'Creating account?'
-                  : step < 4
-                    ? 'Continue'
-                    : 'Create account'}
-              </button>
-
-              <p className="text-xs text-center text-gray-400 mt-4">
-                Already have an account?{' '}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('login');
-                    setSearchParams({ mode: 'login' });
-                  }}
-                  className="text-[#7A8AF0] hover:underline font-medium"
-                >
-                  Log in
-                </button>
-              </p>
-              {step === 1 ? (
-                <p className="text-center text-[11px] text-gray-500">You must be at least 13 years old.</p>
-              ) : (
-                <div className="mt-1 space-y-1.5">
-                  <p className="text-[11px] text-center text-gray-500">
-                    By signing up, you confirm that you are at least 13 years old and agree to our Terms and Conditions and Community Guidelines.
-                  </p>
-                  <div className="flex items-center justify-center gap-4 text-[11px] text-gray-400">
-                    <Link
-                      to="/terms"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 hover:text-[#7A8AF0]"
-                    >
-                      <FiFileText className="w-3.5 h-3.5" />
-                      <span>Terms</span>
-                    </Link>
-                    <Link
-                      to="/terms#community-guidelines"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 hover:text-[#7A8AF0]"
-                    >
-                      <FiShield className="w-3.5 h-3.5" />
-                      <span>Community Guidelines</span>
-                    </Link>
-                  </div>
-                </div>
+              </div>
+              {signupScreen === 'type' && (
+                <p className="text-center text-xs text-gray-400">
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setSearchParams({ mode: 'login' });
+                    }}
+                    className="font-medium text-[#7A8AF0] hover:underline"
+                  >
+                    Log in
+                  </button>
+                </p>
               )}
             </div>
           </div>
+
       </form>
         )}
       </div>
