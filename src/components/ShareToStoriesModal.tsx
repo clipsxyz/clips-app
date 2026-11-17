@@ -52,7 +52,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         thumbType: payload.mediaType === 'video' ? 'video' : 'image',
         initialMessage: 'Sharing to Stories 24...',
         uploadingTitle: 'Preparing story...',
-        successTitle: 'Story shared!',
+        successTitle: 'The post is now live in Stories.',
         errorTitle: 'Story share failed',
       });
       onClose();
@@ -90,8 +90,8 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       }));
       window.dispatchEvent(new CustomEvent('storiesUpdated'));
 
-      overlay.success('Shared to Stories 24.');
-      showToast?.('Successfully shared to Stories 24!');
+      overlay.success('The post is now live in Stories.');
+      showToast?.('The post is now live in Stories.');
     } catch (e) {
       console.error('Failed to share to clips:', e);
       showToast?.('Failed to share to Stories 24. Please try again.');

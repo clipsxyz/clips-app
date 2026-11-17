@@ -151,6 +151,7 @@ export function showUploadOverlay(opts: Options): UploadOverlayController {
       title.textContent = errorTitle;
     }
     message.textContent = msg;
+    message.style.display = msg && msg !== title.textContent ? 'block' : 'none';
   };
 
   const scheduleRemove = (delayMs: number) => {

@@ -164,7 +164,7 @@ export default function ShareToStoriesModal({
                 thumbType: payload.mediaType === 'video' ? 'video' : 'image',
                 initialMessage: 'Sharing to Stories 24...',
                 uploadingTitle: 'Preparing story...',
-                successTitle: 'Story shared!',
+                successTitle: 'The post is now live in Stories.',
                 errorTitle: 'Story share failed',
             });
 
@@ -197,7 +197,7 @@ export default function ShareToStoriesModal({
 
             rememberPostSharedToStories(post.id);
             emitStoriesRefresh();
-            overlay.success('Shared to Stories 24.');
+            overlay.success('The post is now live in Stories.');
         } catch (e) {
             const message = e instanceof Error ? e.message : '';
             if (/already on your Stories/i.test(message)) {

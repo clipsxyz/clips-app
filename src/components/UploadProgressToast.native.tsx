@@ -162,7 +162,7 @@ export default function UploadProgressToast() {
         ? state.title || 'Optimizing video…'
         : isError
           ? state.title || 'Post failed'
-          : 'Your post is now live';
+          : state.message || state.title || 'Your post is now live';
     const subtitle =
         isUploading &&
         state.message &&
