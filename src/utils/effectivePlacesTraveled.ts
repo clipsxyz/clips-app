@@ -1,23 +1,16 @@
-import { parsePlacesFromBio } from './suggestedPlaces';
-
-/** Resolve places for profile “Places” action (Travel Info, bio parsing). */
+/** Saved places for the profile Places sheet. The bio is not a place list. */
 export function getEffectivePlacesTraveled(profileUser: any, authUser?: any): string[] {
     const fromProfileList =
         Array.isArray(profileUser?.placesTraveled) && profileUser.placesTraveled.length > 0
-            ? profileUser.placesTraveled.filter((s: unknown) => typeof s === 'string')
+            ? profileUser.placesTraveled.filter((s: unknown) => typeof s === 'string' && s.trim().length > 0)
             : [];
     if (fromProfileList.length > 0) return fromProfileList;
 
     const fromAuthList =
         Array.isArray(authUser?.placesTraveled) && authUser.placesTraveled.length > 0
-            ? authUser.placesTraveled.filter((s: unknown) => typeof s === 'string')
+            ? authUser.placesTraveled.filter((s: unknown) => typeof s === 'string' && s.trim().length > 0)
             : [];
-    if (fromAuthList.length > 0) return fromAuthList;
-
-    const profileBio = typeof profileUser?.bio === 'string' ? profileUser.bio : '';
-    const authBio = typeof authUser?.bio === 'string' ? authUser.bio : '';
-    const merged = [...parsePlacesFromBio(profileBio), ...parsePlacesFromBio(authBio)];
-    return [...new Set(merged)];
+    return fromAuthList;
 }
 
 export function formatProfileStatCount(value: number): string {
