@@ -1399,10 +1399,15 @@ const FeedCard = React.memo(function FeedCard({
         [post.mediaItems],
     );
     const displayCaption = React.useMemo(() => getPostDisplayCaption(post), [post]);
-    const { profileHandle } = getReclipDisplay(post, viewerHandle);
+    const { isReclip, profileHandle, authorFollowing } = getReclipDisplay(post, viewerHandle);
+    const menuSubjectIsViewer = isReclip
+        ? !!viewerHandle &&
+          viewerHandle.replace(/^@/, '').trim().toLowerCase() ===
+              profileHandle.replace(/^@/, '').trim().toLowerCase()
+        : isCurrentUser;
     const isRequested = Boolean(
-        !isCurrentUser &&
-            !post.isFollowing &&
+        !menuSubjectIsViewer &&
+            !authorFollowing &&
             viewerHandle &&
             isProfilePrivate(profileHandle) &&
             hasPendingFollowRequest(viewerHandle, profileHandle),
@@ -1828,10 +1833,10 @@ const FeedCard = React.memo(function FeedCard({
                 visible={profileMenuVisible}
                 anchor={profileMenuAnchor}
                 profileHandle={profileHandle}
-                isCurrentUser={isCurrentUser}
-                isMutualFollow={isMutualFollow}
+                isCurrentUser={menuSubjectIsViewer}
+                isMutualFollow={isReclip ? false : isMutualFollow}
                 hasStory={headerHasStory}
-                isFollowing={post.isFollowing === true}
+                isFollowing={authorFollowing}
                 isRequested={isRequested}
                 onClose={closeProfileMenu}
                 onVisitProfile={() => {
@@ -3108,7 +3113,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                               .trim()
                               .toLowerCase() === lower
                               ? ({ ...p, ...extras, isFollowing } as Post)
-                              : p,
+                              : String(p.originalUserHandle || '')
+                                      .trim()
+                                      .toLowerCase() === lower
+                                ? ({ ...p, ...extras, originalAuthorIsFollowing: isFollowing } as Post)
+                                : p,
                       ),
                   ),
               );
@@ -5331,28 +5340,26 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onLikeBurst={showFeedLikeBurst}
                     onFollow={async () => {
                         if (isPendingUpload || !user) return;
+                        const { profileHandle: followHandle, authorFollowing } = getReclipDisplay(mergedPost);
                         try {
                             const updated = await toggleFollowForPost(
                                 userId,
                                 mergedPost.id,
-                                mergedPost.userHandle,
+                                followHandle,
                                 user.handle,
                             );
                             const isFollowRequested = Boolean(
                                 !updated.isFollowing &&
                                     user.handle &&
-                                    isProfilePrivate(mergedPost.userHandle) &&
-                                    hasPendingFollowRequest(user.handle, mergedPost.userHandle),
+                                    isProfilePrivate(followHandle) &&
+                                    hasPendingFollowRequest(user.handle, followHandle),
                             );
-                            patchFollowForHandle(mergedPost.userHandle, updated.isFollowing === true, {
+                            patchFollowForHandle(followHandle, updated.isFollowing === true, {
                                 isFollowRequested,
                             } as Partial<Post>);
                         } catch (err) {
                             console.error('Error toggling follow in FeedScreen:', err);
-                            patchFollowForHandle(
-                                mergedPost.userHandle,
-                                !(mergedPost.isFollowing === true),
-                            );
+                            patchFollowForHandle(followHandle, authorFollowing);
                         }
                         if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
                             setReloadTick((t) => t + 1);

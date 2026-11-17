@@ -337,6 +337,28 @@ class PostController extends Controller
             $postData['comment_audience'] = $audience;
         }
 
+        if ($post->is_reclipped && $post->original_post_id) {
+            $original = $post->relationLoaded('originalPost') ? $post->originalPost : null;
+            if ($original && ! $original->relationLoaded('user')) {
+                $original->load('user:id,handle,avatar_url');
+            }
+            $originalUser = $original?->user;
+            if ($originalUser && is_string($originalUser->avatar_url) && $originalUser->avatar_url !== '') {
+                $postData['original_user_avatar_url'] = $originalUser->avatar_url;
+            }
+            if (array_key_exists('original_author_is_following', $attrs)) {
+                $postData['original_author_is_following'] = (bool) $attrs['original_author_is_following'];
+            } elseif ($viewer && $original?->user_id) {
+                $postData['original_author_is_following'] = DB::table('user_follows')
+                    ->where('follower_id', $viewer->id)
+                    ->where('following_id', $original->user_id)
+                    ->where('status', 'accepted')
+                    ->exists();
+            } else {
+                $postData['original_author_is_following'] = false;
+            }
+        }
+
         return PublicMediaUrl::rewritePayloadMedia($postData);
     }
 
@@ -401,7 +423,7 @@ class PostController extends Controller
         // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
         // Location feeds: only original posts from that location.
         $query = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($filter === 'Following' && $userId) {
@@ -432,6 +454,10 @@ class PostController extends Controller
                 )
                 ->selectRaw(
                     "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'accepted') as original_author_is_following",
                     [$userId]
                 );
         }
@@ -532,7 +558,7 @@ class PostController extends Controller
         $userId = $request->get('userId');
         $hasViewer = ! empty($userId);
 
-        $query = Post::with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url'])
+        $query = Post::with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($hasViewer) {
@@ -553,6 +579,10 @@ class PostController extends Controller
                 )
                 ->selectRaw(
                     "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'accepted') as original_author_is_following",
                     [$userId]
                 );
         }

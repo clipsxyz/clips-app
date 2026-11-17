@@ -32,7 +32,6 @@ export default function ProgressiveImage({
     blurDataURL
 }: ProgressiveImageProps) {
     const [imageSrc, setImageSrc] = useState<string | null>(null);
-    const [lowResSrc, setLowResSrc] = useState<string | null>(null);
     const [isLoaded, setIsLoaded] = useState(false);
     const [hasError, setHasError] = useState(false);
     const imgRef = useRef<HTMLImageElement>(null);
@@ -63,86 +62,38 @@ export default function ProgressiveImage({
 
     const [blurPlaceholder] = useState(() => generateBlurPlaceholder());
 
-    // Generate low-res URL (if backend supports it, otherwise use full URL with size param)
-    const getLowResUrl = (url: string): string => {
-        // Check if URL is a data URL or external URL
-        if (url.startsWith('data:') || url.startsWith('blob:')) {
-            return url; // Can't optimize data/blob URLs
-        }
-
-        // Try to use WebP format if supported
-        const supportsWebP = document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') === 0;
-        const format = supportsWebP ? 'webp' : 'jpg';
-
-        // If URL already has query params, append; otherwise add
-        const separator = url.includes('?') ? '&' : '?';
-        // Request smaller version (20% size for low-res, WebP if supported)
-        return `${url}${separator}w=400&q=30&format=${format}`;
-    };
-
-    // Get full resolution URL with WebP support
-    const getFullResUrl = (url: string): string => {
-        if (url.startsWith('data:') || url.startsWith('blob:')) {
-            return url;
-        }
-
-        const supportsWebP = document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') === 0;
-        if (supportsWebP && !url.includes('format=')) {
-            const separator = url.includes('?') ? '&' : '?';
-            return `${url}${separator}format=webp`;
-        }
-        return url;
-    };
-
-    // Load strategy: priority images load immediately, others wait for intersection
+    // One request for the real file. Extra w=/format= copies were the full
+    // photo again, and they queued behind the clips further down the feed.
     useEffect(() => {
-        if (priority) {
-            // Priority images (first 1-3): load immediately
-            setLowResSrc(getLowResUrl(src));
-            setImageSrc(getFullResUrl(src));
-        } else {
-            // Non-priority: use Intersection Observer for lazy loading
-            if (!containerRef.current) return;
-
-            observerRef.current = new IntersectionObserver(
-                (entries) => {
-                    entries.forEach((entry) => {
-                        if (entry.isIntersecting) {
-                            // Start loading when visible
-                            setLowResSrc(getLowResUrl(src));
-                            // Load full res after a small delay
-                            setTimeout(() => {
-                                setImageSrc(getFullResUrl(src));
-                            }, 100);
-                            // Disconnect after starting load
-                            if (observerRef.current) {
-                                observerRef.current.disconnect();
-                            }
-                        }
-                    });
-                },
-                {
-                    rootMargin: '200px', // Start loading 200px before entering viewport
-                    threshold: 0.01
-                }
-            );
-
-            observerRef.current.observe(containerRef.current);
+        setIsLoaded(false);
+        setHasError(false);
+        if (!src) {
+            setImageSrc(null);
+            return;
         }
-
+        if (priority) {
+            setImageSrc(src);
+            return;
+        }
+        if (!containerRef.current) return;
+        const scrollRoot = containerRef.current.closest('.overflow-y-auto');
+        observerRef.current = new IntersectionObserver(
+            (entries) => {
+                if (!entries.some((entry) => entry.isIntersecting)) return;
+                setImageSrc(src);
+                observerRef.current?.disconnect();
+            },
+            {
+                root: scrollRoot instanceof HTMLElement ? scrollRoot : null,
+                rootMargin: '600px 0px',
+                threshold: 0,
+            },
+        );
+        observerRef.current.observe(containerRef.current);
         return () => {
-            if (observerRef.current) {
-                observerRef.current.disconnect();
-            }
+            observerRef.current?.disconnect();
         };
     }, [src, priority]);
-
-    const handleLowResLoad = () => {
-        // Low-res loaded, now load full resolution
-        if (!imageSrc) {
-            setImageSrc(getFullResUrl(src));
-        }
-    };
 
     const handleFullResLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
         setIsLoaded(true);
@@ -174,26 +125,6 @@ export default function ProgressiveImage({
                 }}
             />
 
-            {/* Low-res image - loads first */}
-            {lowResSrc && (
-                <img
-                    src={lowResSrc}
-                    alt=""
-                    draggable={false}
-                    onContextMenu={(e) => e.preventDefault()}
-                    className="absolute inset-0 w-full h-full object-cover"
-                    style={{
-                        objectFit: fit,
-                        objectPosition: position,
-                        opacity: isLoaded ? 0 : 1,
-                        transition: 'opacity 0.3s ease-out'
-                    }}
-                    onLoad={handleLowResLoad}
-                    loading="lazy"
-                    decoding="async"
-                />
-            )}
-
             {/* Full resolution image */}
             {imageSrc && (
                 <img
@@ -211,7 +142,7 @@ export default function ProgressiveImage({
                     }}
                     onLoad={handleFullResLoad}
                     onError={handleError}
-                    loading={priority ? 'eager' : 'lazy'}
+                    loading="eager"
                     decoding="async"
                 />
             )}

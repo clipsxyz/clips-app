@@ -83,6 +83,14 @@ export default function ProfileGridTapCard({
     () => profileGridCardFrame(window.innerWidth, window.innerHeight, actionCount),
     [post.id, actionCount],
   );
+  const video = isVideoPost(post) || postHasVideoMedia(post);
+  const playbackRaw = video ? resolvePostPlaybackUri(post) : undefined;
+  const playback = playbackRaw ? rewriteMediaUrlForClient(playbackRaw) : '';
+  const poster = stillUrl(post);
+  const imageUrl = !video ? poster || (post.mediaUrl ? rewriteMediaUrlForClient(post.mediaUrl) : '') : '';
+  const caption = getPostBodyText(post);
+  const handleLabel = formatProfileDisplayHandle(profileHandle || post.userHandle);
+  const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
 
   useEffect(() => {
     setMuted(true);
@@ -109,14 +117,6 @@ export default function ProfileGridTapCard({
     window.setTimeout(onClose, 280);
   };
 
-  const video = isVideoPost(post) || postHasVideoMedia(post);
-  const playbackRaw = video ? resolvePostPlaybackUri(post) : undefined;
-  const playback = playbackRaw ? rewriteMediaUrlForClient(playbackRaw) : '';
-  const poster = stillUrl(post);
-  const imageUrl = !video ? poster || (post.mediaUrl ? rewriteMediaUrlForClient(post.mediaUrl) : '') : '';
-  const caption = getPostBodyText(post);
-  const handleLabel = formatProfileDisplayHandle(profileHandle || post.userHandle);
-  const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
   const shown = textFull
     ? { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight }
     : expanded && !closing

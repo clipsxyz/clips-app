@@ -1295,6 +1295,52 @@ function unifyAuthorFollowFlags(items: Post[]): Post[] {
   });
 }
 
+/**
+ * One account, one follow label, across every loaded card.
+ * A later page must not paint Follow on someone an earlier card already shows as Following.
+ * In the Following feed the post author is followed, which is why the post is there,
+ * unless the viewer just unfollowed them.
+ */
+export function unifyLoadedFeedFollow(
+  posts: Post[],
+  options?: { followingFeed?: boolean; viewerHandle?: string | null; userId?: string },
+): Post[] {
+  const userId = options?.userId || '';
+  const viewer = normFollowHandle(options?.viewerHandle);
+  const turnedOff = (handle: string) => viewerTurnedFollowOff(userId, handle);
+  const followed = new Set<string>();
+  for (const post of posts) {
+    const author = normFollowHandle(post.userHandle);
+    if (author && post.isFollowing === true && !turnedOff(author)) followed.add(author);
+    const original = normFollowHandle(post.originalUserHandle);
+    if (original && post.originalAuthorIsFollowing === true && !turnedOff(original)) followed.add(original);
+    if (options?.followingFeed && author && author !== viewer && !turnedOff(author)) {
+      followed.add(author);
+    }
+  }
+  if (followed.size === 0) return posts;
+  return posts.map((post) => {
+    const author = normFollowHandle(post.userHandle);
+    const original = normFollowHandle(post.originalUserHandle);
+    let next = post;
+    if (author && followed.has(author) && post.isFollowing !== true) {
+      next = { ...next, isFollowing: true };
+      emitFollowStatusChanged({ handle: post.userHandle, isFollowing: true });
+    }
+    if (original && followed.has(original) && next.originalAuthorIsFollowing !== true) {
+      next = { ...next, originalAuthorIsFollowing: true };
+      emitFollowStatusChanged({ handle: post.originalUserHandle || '', isFollowing: true });
+    }
+    return next;
+  });
+}
+
+function viewerTurnedFollowOff(userId: string, handle: string): boolean {
+  const key = normFollowHandle(handle);
+  if (!key || !followChangedAt.has(key)) return false;
+  return !getFollowState(getState(userId).follows, handle);
+}
+
 // The server follow flag on a fetched post is the same graph the profile page uses.
 // A stale local unfollow must not keep the feed card on Follow, and a stale local
 // follow must not stick after the server says it is gone. A later page must not
@@ -1326,6 +1372,15 @@ export function decorateForUser(
       saveFollowsToStorage(userId, s.follows);
       emitFollowStatusChanged({ handle: p.userHandle, isFollowing: fromApi });
       isFollowing = fromApi;
+    }
+  }
+  if (p.isReclipped && p.originalUserHandle) {
+    const originalFromApi = p.originalAuthorIsFollowing === true;
+    const originalFromLocal = getFollowState(s.follows, p.originalUserHandle);
+    if (originalFromApi !== originalFromLocal) {
+      setFollowStateKey(s.follows, p.originalUserHandle, originalFromApi);
+      saveFollowsToStorage(userId, s.follows);
+      emitFollowStatusChanged({ handle: p.originalUserHandle, isFollowing: originalFromApi });
     }
   }
   const idKey = String(p.id);
@@ -1613,6 +1668,17 @@ width: response.width ?? existing?.width,
     isReclipped: Boolean(response.is_reclipped ?? response.isReclipped),
     originalPostId: response.original_post_id || response.originalPostId || undefined,
     originalUserHandle: response.original_user_handle || response.originalUserHandle || undefined,
+    originalUserAvatarUrl: (() => {
+      const raw = response.original_user_avatar_url || response.originalUserAvatarUrl;
+      if (typeof raw !== 'string' || !raw.trim()) return undefined;
+      const url = rewriteMediaUrlForNetwork(raw.trim());
+      const author = response.original_user_handle || response.originalUserHandle;
+      if (author && url) setAvatarForHandle(String(author), url);
+      return url || undefined;
+    })(),
+    originalAuthorIsFollowing: Boolean(
+      response.original_author_is_following ?? response.originalAuthorIsFollowing,
+    ),
     reclippedBy: response.reclipped_by || response.reclippedBy || undefined,
     stickers: response.stickers,
     templateId: response.template_id || response.templateId,
@@ -2609,7 +2675,7 @@ export async function toggleFollowForPost(
     viewerHandle?: string,
   ): Promise<Post> {
     const updated = await runToggleFollowForPost(userId, id, userHandle, viewerHandle);
-const handle = updated.userHandle;
+    const handle = (typeof userHandle === 'string' && userHandle.trim()) || updated.userHandle;
     const viewer = typeof viewerHandle === 'string' ? viewerHandle.trim() : '';
     const authorUserId = (updated as { user_id?: string }).user_id;
     // Broadcast so headers / quick menus / DM gates update globally.
@@ -2641,12 +2707,19 @@ const handle = updated.userHandle;
       posts.push(p);
     }
   }
-  const handle = p?.userHandle ?? userHandle;
+  const handle = (typeof userHandle === 'string' && userHandle.trim()) || p?.userHandle;
   if (!handle) {
     throw new Error('Post not found');
   }
   const s = getState(userId);
-  const wasFollowing = getFollowState(s.follows, handle);
+  const handleLower = handle.toLowerCase();
+  const wasFollowing = hasExplicitFollowState(s.follows, handle)
+    ? getFollowState(s.follows, handle)
+    : p && String(p.originalUserHandle || '').trim().toLowerCase() === handleLower
+      ? p.originalAuthorIsFollowing === true
+      : p && String(p.userHandle || '').trim().toLowerCase() === handleLower
+        ? p.isFollowing === true
+        : false;
   const viewer = typeof viewerHandle === 'string' ? viewerHandle.trim() : '';
 
   // Private accounts: follow → request (not instant follow). Matches View Profile / Scenes.

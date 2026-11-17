@@ -102,6 +102,13 @@ export function useFollowState(opts: {
     // already moved the author back to Follow.
     const cached = handle ? cache.get(handle) : undefined;
     if (cached && matchesHook(cached, handle, userId)) {
+        // A confirmed follow on this card wins over a stale Follow broadcast from another post.
+        if (opts.isFollowing === true && cached.isFollowing !== true) {
+            return {
+                isFollowing: true,
+                hasPendingRequest: opts.hasPendingRequest === true,
+            };
+        }
         return {
             isFollowing: cached.isFollowing === true,
             hasPendingRequest: cached.hasPendingRequest === true,

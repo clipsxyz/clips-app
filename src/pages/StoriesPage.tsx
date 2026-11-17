@@ -332,10 +332,16 @@ export default function StoriesPage() {
     const stories24ContentReady = !loading && viewingStories;
     // Open the story as soon as it is ready. The extra wait left the phone on
     // "Opening stories" and the next-story taps never reached the viewer.
+    const feedCardHasNothingToPlay =
+        skipStories24RailReturn &&
+        !loading &&
+        !viewingStories &&
+        !storyGroups.some((group) => (group.stories || []).some(storyHasRenderableMedia));
     const showStories24HoldScreen =
         stories24OpenFromFeedRail &&
-        openUserHandle &&
-        !stories24ContentReady;
+        (openUserHandle || skipStories24RailReturn) &&
+        !stories24ContentReady &&
+        !feedCardHasNothingToPlay;
     const openingStill = storyOpenStill(
         (location.state as { previewThumb?: string } | null)?.previewThumb,
     );
@@ -692,24 +698,40 @@ export default function StoriesPage() {
 
     // Auto-open specific user's stories if requested
     React.useEffect(() => {
-        if (!openUserHandle) {
+        const feedCardOpen = skipStories24RailReturn && stories24OpenFromFeedRail;
+        if (!openUserHandle && !feedCardOpen) {
             autoOpenedStoryKeyRef.current = '';
             return;
         }
         if (storyGroups.length === 0) return;
-        const key = `${openUserHandle.trim().toLowerCase()}|${openStoryId || ''}`;
+        const key = feedCardOpen && !openUserHandle
+            ? 'feed-card'
+            : `${String(openUserHandle || '').trim().toLowerCase()}|${openStoryId || ''}`;
         if (autoOpenedStoryKeyRef.current === key) return;
-        const target = openUserHandle.trim().toLowerCase();
-        const targetGroup = storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target);
+        const target = String(openUserHandle || '').trim().toLowerCase();
+        const targetGroup = target
+            ? storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target)
+            : undefined;
         if (targetGroup) {
             autoOpenedStoryKeyRef.current = key;
             startViewingStories(targetGroup, openStoryId);
             return;
         }
-        // If handle is missing, allow fallback to story list UI.
+        // Feed "View stories" opens the player, the same as the phone. A missing
+        // handle must not drop onto the old Clips 24 grid.
+        if (feedCardOpen) {
+            const firstPlayable = storyGroups.find((group) =>
+                (group.stories || []).some(storyHasRenderableMedia),
+            );
+            if (firstPlayable) {
+                autoOpenedStoryKeyRef.current = key;
+                startViewingStories(firstPlayable);
+                return;
+            }
+        }
         setAutoOpeningStory(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [openUserHandle, openStoryId, storyGroups]);
+    }, [openUserHandle, openStoryId, storyGroups, skipStories24RailReturn, stories24OpenFromFeedRail]);
 
     React.useEffect(() => {
         setAutoOpeningStory(!!openUserHandle);

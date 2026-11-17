@@ -5,6 +5,7 @@ import {
     Text,
     StyleSheet,
     Pressable,
+    Image,
     Platform,
     BackHandler,
     useWindowDimensions,
@@ -401,15 +402,19 @@ export default function ScenesViewer({
     }, [activePost?.id, viewerUserId]);
 
     useEffect(() => {
-        if (!activePost?.id || !viewerHandle || viewerHandle === activePost.userHandle) {
+        const pendingHandle =
+            activePost?.isReclipped && activePost.originalUserHandle
+                ? activePost.originalUserHandle
+                : activePost?.userHandle;
+        if (!activePost?.id || !viewerHandle || !pendingHandle || viewerHandle === pendingHandle) {
             setHasPendingRequest(false);
             return;
         }
         setHasPendingRequest(
-            isProfilePrivate(activePost.userHandle) &&
-                hasPendingFollowRequest(viewerHandle, activePost.userHandle),
+            isProfilePrivate(pendingHandle) &&
+                hasPendingFollowRequest(viewerHandle, pendingHandle),
         );
-    }, [activePost?.id, activePost?.userHandle, viewerHandle]);
+    }, [activePost?.id, activePost?.userHandle, activePost?.originalUserHandle, activePost?.isReclipped, viewerHandle]);
 
     useEffect(() => {
         if (!overflowVisible || !activePost?.id) return;
@@ -536,32 +541,35 @@ export default function ScenesViewer({
     const handleFollow = useCallback(async () => {
         if (!activePost || !viewerHandle) return;
         try {
+            const { profileHandle: followHandle } = getReclipDisplay(activePost, viewerHandle);
             const updated = await toggleFollowForPost(
                 viewerUserId,
                 activePost.id,
-                activePost.userHandle,
+                followHandle,
                 viewerHandle,
             );
             const nextFollowing = updated?.isFollowing === true;
-            const handleLower = String(activePost.userHandle || '')
+            const handleLower = String(followHandle || '')
                 .trim()
                 .toLowerCase();
             // Author-level follow; merge flags only so video posts stay in the Scenes list.
             const next = postsProp.map((p) => {
-                if (
-                    String(p.userHandle || '')
-                        .trim()
-                        .toLowerCase() !== handleLower
-                ) {
-                    return p;
-                }
-                return { ...p, isFollowing: nextFollowing };
+                const sameAuthor =
+                    String(p.userHandle || '').trim().toLowerCase() === handleLower;
+                const sameOriginal =
+                    String(p.originalUserHandle || '').trim().toLowerCase() === handleLower;
+                if (!sameAuthor && !sameOriginal) return p;
+                return {
+                    ...p,
+                    ...(sameAuthor ? { isFollowing: nextFollowing } : {}),
+                    ...(sameOriginal ? { originalAuthorIsFollowing: nextFollowing } : {}),
+                };
             });
             onPostsChange?.(next);
             setHasPendingRequest(
                 !nextFollowing &&
-                    isProfilePrivate(activePost.userHandle) &&
-                    hasPendingFollowRequest(viewerHandle, activePost.userHandle),
+                    isProfilePrivate(followHandle) &&
+                    hasPendingFollowRequest(viewerHandle, followHandle),
             );
         } catch (err) {
             console.warn('Follow failed in Scenes:', err);
@@ -760,7 +768,9 @@ export default function ScenesViewer({
         );
     }
 
-    const { profileHandle, displayHandle } = getReclipDisplay(activePost, viewerHandle);
+    const { isReclip, profileHandle, displayHandle, authorFollowing } = getReclipDisplay(activePost, viewerHandle);
+    const reclipperLabel = String(activePost.userHandle || '').replace(/^@/, '').trim();
+    const reclipperAvatar = activePost.avatarUrl;
     const isOwn =
         !!viewerHandle &&
         viewerHandle.replace(/^@/, '').trim().toLowerCase() ===
@@ -770,9 +780,15 @@ export default function ScenesViewer({
         handle: viewerHandle,
     });
     const canReclip = Boolean(viewerHandle && !isOwn && !activePost.userReclipped);
-    const authorAvatarSrc = isOwn
-        ? viewerAvatarUrl || getAvatarForHandle(profileHandle) || getAvatarForHandle(viewerHandle)
-        : getAvatarForHandle(profileHandle);
+    const authorIsViewer =
+        !!viewerHandle &&
+        viewerHandle.replace(/^@/, '').trim().toLowerCase() ===
+            profileHandle.replace(/^@/, '').trim().toLowerCase();
+    const authorAvatarSrc = isReclip
+        ? activePost.originalUserAvatarUrl || getAvatarForHandle(profileHandle)
+        : isOwn
+          ? viewerAvatarUrl || getAvatarForHandle(profileHandle) || getAvatarForHandle(viewerHandle)
+          : getAvatarForHandle(profileHandle);
     const dismissOpacity = Math.max(0.55, 1 - dismissPull / (windowHeight * 0.45));
     const captionLong = caption.length > 50;
 
@@ -950,6 +966,17 @@ export default function ScenesViewer({
                 ]}
                 pointerEvents="box-none"
             >
+                {isReclip && reclipperLabel ? (
+                    <View style={styles.reclipCredit}>
+                        {reclipperAvatar ? (
+                            <Image source={{ uri: reclipperAvatar }} style={styles.reclipCreditAvatar} />
+                        ) : null}
+                        <Icon name="repeat" size={12} color="rgba(255,255,255,0.92)" />
+                        <Text style={styles.reclipCreditText} numberOfLines={1}>
+                            {reclipperLabel} reclipped
+                        </Text>
+                    </View>
+                ) : null}
                 <View style={styles.profileRow}>
                     <Pressable
                         style={styles.avatarBtn}
@@ -961,15 +988,15 @@ export default function ScenesViewer({
                             size={36}
                         />
                     </Pressable>
-                    {!activePost.isFollowing && !isOwn && !hasPendingRequest ? (
+                    {!authorFollowing && !authorIsViewer && !hasPendingRequest ? (
                         <Pressable style={styles.followPlus} onPress={() => void handleFollow()}>
                             <Icon name="add" size={12} color="#FFFFFF" />
                         </Pressable>
-                    ) : !activePost.isFollowing && hasPendingRequest && !isOwn ? (
+                    ) : !authorFollowing && hasPendingRequest && !authorIsViewer ? (
                         <View style={styles.requestedPill}>
                             <Text style={styles.requestedPillText}>Requested</Text>
                         </View>
-                    ) : activePost.isFollowing && !isOwn ? (
+                    ) : authorFollowing && !authorIsViewer ? (
                         <Pressable
                             style={styles.followingPill}
                             onPress={() => void handleFollow()}
@@ -1159,7 +1186,7 @@ export default function ScenesViewer({
                 onUnfollow={async () => {
                     await handleFollow();
                 }}
-                isFollowing={activePost.isFollowing}
+                isFollowing={authorFollowing}
                 onHide={async () => {
                     await hideFeedPostMobile(viewerUserId, activePost.id);
                     const next = posts.filter((p) => p.id !== activePost.id);
@@ -1414,6 +1441,24 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         paddingTop: 56,
         backgroundColor: 'transparent',
+    },
+    reclipCredit: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 6,
+    },
+    reclipCreditAvatar: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#374151',
+    },
+    reclipCreditText: {
+        flexShrink: 1,
+        color: 'rgba(255,255,255,0.92)',
+        fontSize: 12,
+        fontWeight: '600',
     },
     profileRow: {
         flexDirection: 'row',

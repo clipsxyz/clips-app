@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -59,13 +59,15 @@ export default function FeedPostHeader({
     const { user } = useAuth();
     const [followBusy, setFollowBusy] = useState(false);
 
-    const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
+    const { isReclip, displayHandle, profileHandle, reclipperHandle, authorFollowing } = getReclipDisplay(post, viewerHandle ?? user?.handle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
     const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
+    const reclipperLabel = String(reclipperHandle || '').replace(/^@/, '').trim();
+    const reclipperAvatar = post.avatarUrl || getAvatarForHandle(reclipperHandle);
     const socialSourceLabel = getPostSocialSourceLabel(post);
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const viewer = viewerHandle ?? user?.handle;
-    const isFollowingFromProps = post.isFollowing === true;
+    const isFollowingFromProps = authorFollowing;
     const hasPendingRequestFromProps = Boolean(
         !isCurrentUser &&
             !isFollowingFromProps &&
@@ -76,15 +78,20 @@ export default function FeedPostHeader({
     // Live follow state keyed on the author handle: a follow/unfollow on View Profile
     // (or a quick menu) updates this header immediately, without a feed refetch.
     const { isFollowing, hasPendingRequest } = useFollowState({
-        userId: post.user_id,
+        userId: isReclip ? undefined : post.user_id,
         handle: safeProfileHandle,
         isFollowing: isFollowingFromProps,
         hasPendingRequest: hasPendingRequestFromProps,
     });
 
-    const avatarSrc = isCurrentUser
-        ? user?.avatarUrl || post.avatarUrl || getAvatarForHandle(safeProfileHandle)
-        : post.avatarUrl || getAvatarForHandle(safeProfileHandle);
+    const viewerMatchesAuthor =
+        !!viewer &&
+        viewer.replace(/^@/, '').trim().toLowerCase() === safeProfileHandle.replace(/^@/, '').trim().toLowerCase();
+    const avatarSrc = isReclip
+        ? post.originalUserAvatarUrl || getAvatarForHandle(safeProfileHandle)
+        : isCurrentUser
+          ? user?.avatarUrl || post.avatarUrl || getAvatarForHandle(safeProfileHandle)
+          : post.avatarUrl || getAvatarForHandle(safeProfileHandle);
 
     const verifiedAccountType = resolveVerifiedAccountType(
         isCurrentUser ? user?.accountType : post.userAccountType,
@@ -124,7 +131,7 @@ export default function FeedPostHeader({
                     }}
                 />
             </View>
-            {!isCurrentUser && isMutualFollow && onOpenDM ? (
+            {!isReclip && !isCurrentUser && isMutualFollow && onOpenDM ? (
                 <GesturePressable
                     style={styles.dmButton}
                     onPress={() => {
@@ -158,9 +165,12 @@ export default function FeedPostHeader({
             <View style={styles.left}>
                 {isReclip ? (
                     <View style={styles.reclipRow}>
+                        {reclipperAvatar ? (
+                            <Image source={{ uri: reclipperAvatar }} style={styles.reclipAvatar} />
+                        ) : null}
                         <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
                         <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
-                            {String(post.userHandle || safeHandle).trim() || 'User'} reclipped
+                            {reclipperLabel || 'User'} reclipped
                         </Text>
                     </View>
                 ) : null}
@@ -187,7 +197,7 @@ export default function FeedPostHeader({
                 ) : null}
             </View>
             <View style={styles.right}>
-                {!isCurrentUser && onFollow ? (
+                {!viewerMatchesAuthor && onFollow ? (
                     <TouchableOpacity
                         style={styles.followPill}
                         onPress={pressFollow}
@@ -351,6 +361,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 4,
         marginBottom: 4,
+        maxWidth: '100%',
+    },
+    reclipAvatar: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#374151',
     },
     // Web: `text-xs` — optically bumped for phone Instagram weight
     reclipText: {

@@ -175,6 +175,10 @@ export type Post = {
   originalPostId?: string;
   original_post_id?: string; // Backend field
   originalUserHandle?: string; // Original poster's handle (for reclipped posts)
+  /** Profile photo of the original author. The reclip row's avatarUrl is the reclipper. */
+  originalUserAvatarUrl?: string;
+  /** Whether the viewer follows the original author. isFollowing on a reclip is the reclipper. */
+  originalAuthorIsFollowing?: boolean;
   reclippedBy?: string;
   reclipped_by?: string; // Backend field
   is_reclipped?: boolean; // Backend field

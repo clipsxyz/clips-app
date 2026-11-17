@@ -53,7 +53,7 @@ import { inboxBadgeFromEventPayload, inboxBadgeTotal, loadInboxUnreadParts } fro
 import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, unifyLoadedFeedFollow, getState, setFollowState, setReclipState, getFollowState, hasExplicitFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { onFollowStatusChanged, useFollowState } from './hooks/useFollowState';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe, updateAuthProfile } from './api/client';
@@ -1456,20 +1456,17 @@ function PostHeader({
   const [hasAnyStory, setHasAnyStory] = React.useState(false);
   const titleId = `post-title-${post.id}`;
   const userId = getStableUserId(user);
-  const isReclippedPost =
-    !!post.isReclipped &&
-    !!post.originalUserHandle &&
-    !!user?.handle &&
-    post.userHandle === user.handle &&
-    post.userReclipped === true;
+  const isReclippedPost = Boolean(post.isReclipped && post.originalUserHandle);
   const profileTargetHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
+  const reclipperLabel = (post.userHandle || '').replace(/^@/, '').trim();
+  const reclipperAvatar = post.avatarUrl || getAvatarForHandle(post.userHandle);
 
-  // Check if this is the current user's post
+  // The name on the card is the original author when this row is a reclip.
   const isCurrentUser = user?.handle === post.userHandle;
-  const rawAvatar =
-    (isCurrentUser
-      ? user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || post.avatarUrl
-      : post.avatarUrl) || getAvatarForHandle(profileTargetHandle);
+  const subjectIsViewer = !!user?.handle && user.handle === profileTargetHandle;
+  const rawAvatar = subjectIsViewer
+    ? user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || post.originalUserAvatarUrl || post.avatarUrl
+    : (isReclippedPost ? post.originalUserAvatarUrl : post.avatarUrl) || getAvatarForHandle(profileTargetHandle);
   const avatarSrc = rawAvatar ? rewriteMediaUrlForClient(rawAvatar) : undefined;
 
   // Check if user has unviewed stories using API
@@ -1572,9 +1569,9 @@ function PostHeader({
       e.stopPropagation();
       e.preventDefault();
     }
-    if (isCurrentUser || !user?.handle || !post.userHandle) return;
+    if (subjectIsViewer || !user?.handle || !profileTargetHandle) return;
     const result = await Swal.fire(bottomSheet({
-      title: `Block ${post.userHandle}?`,
+      title: `Block ${profileTargetHandle}?`,
       message: "You won't see their posts in your current session and they won't be able to DM you.",
       icon: 'alert',
       showCancelButton: true,
@@ -1583,8 +1580,8 @@ function PostHeader({
     }));
     if (!result.isConfirmed) return;
     try {
-      await blockUser(user.handle, post.userHandle);
-      window.dispatchEvent(new CustomEvent('feedUserBlocked', { detail: { handle: post.userHandle } }));
+      await blockUser(user.handle, profileTargetHandle);
+      window.dispatchEvent(new CustomEvent('feedUserBlocked', { detail: { handle: profileTargetHandle } }));
       setProfileMenuOpen(false);
       showToast('User blocked');
     } catch (err) {
@@ -1598,7 +1595,7 @@ function PostHeader({
       e.stopPropagation();
       e.preventDefault();
     }
-    if (isCurrentUser) return;
+    if (subjectIsViewer) return;
     setProfileMenuOpen(false);
     const { promptReportPostWeb } = await import('./utils/promptReportPostWeb');
     await promptReportPostWeb(post.id);
@@ -1614,15 +1611,12 @@ function PostHeader({
 
   // Live follow state. The feed post object often stays stale after a follow,
   // so the header subscribes to the shared follow bus instead of a one-time read.
-  let storedFollowing = !!post.isFollowing;
-  try {
-    storedFollowing = getFollowState(getState(userId).follows, profileTargetHandle);
-  } catch {
-    storedFollowing = !!post.isFollowing;
-  }
+  const serverFollowing = isReclippedPost
+    ? post.originalAuthorIsFollowing === true
+    : !!post.isFollowing;
   const liveFollow = useFollowState({
     handle: profileTargetHandle,
-    isFollowing: storedFollowing,
+    isFollowing: serverFollowing,
   });
   const isFollowingThisUser = liveFollow.isFollowing;
 
@@ -1699,7 +1693,7 @@ function PostHeader({
   }, [profileMenuOpen]);
 
   const followRequested =
-    !isCurrentUser &&
+    !subjectIsViewer &&
     !isFollowingThisUser &&
     hasPendingFollowRequest(user?.handle || '', profileTargetHandle);
   const quickActionClass = 'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-[#F9FAFB]';
@@ -1743,7 +1737,7 @@ function PostHeader({
           <FiUser className="h-[18px] w-[18px] shrink-0 text-white" />
           <span>Visit profile</span>
         </button>
-        {!isCurrentUser && onFollow ? (
+        {!subjectIsViewer && onFollow ? (
           <button
             type="button"
             className={quickActionClass}
@@ -1752,7 +1746,11 @@ function PostHeader({
               e.preventDefault();
               setProfileMenuOpen(false);
               try {
-                await onFollow();
+                if (isReclippedPost) {
+                  await toggleFollowForPost(userId, post.id, profileTargetHandle, user?.handle);
+                } else {
+                  await onFollow();
+                }
               } catch (error) {
                 console.error('Error in onFollow from quick actions:', error);
               }
@@ -1774,7 +1772,7 @@ function PostHeader({
             <span>View stories</span>
           </button>
         ) : null}
-        {!isCurrentUser && isMutualFollow && isFollowingThisUser && onOpenDM ? (
+        {!isReclippedPost && !subjectIsViewer && isMutualFollow && isFollowingThisUser && onOpenDM ? (
           <button
             type="button"
             className={quickActionClass}
@@ -1789,13 +1787,13 @@ function PostHeader({
             <span>Message</span>
           </button>
         ) : null}
-        {!isCurrentUser ? (
+        {!subjectIsViewer ? (
           <button type="button" className={quickActionClass} onClick={handleBlockFromQuickActions}>
             <FiSlash className="h-[18px] w-[18px] shrink-0 text-[#FCA5A5]" />
             <span className="text-[#FCA5A5]">Block user</span>
           </button>
         ) : null}
-        {!isCurrentUser ? (
+        {!subjectIsViewer ? (
           <button type="button" className={quickActionClass} onClick={handleReportFromQuickActions}>
             <FiFlag className="h-[18px] w-[18px] shrink-0 text-[#FDE68A]" />
             <span className="text-[#FDE68A]">Report</span>
@@ -1823,7 +1821,7 @@ function PostHeader({
     >
       <Avatar
         src={avatarSrc}
-        name={post.userHandle.split('@')[0]}
+        name={profileTargetHandle.split('@')[0]}
         size={hasStory ? 25 : 'sm'}
         hideBorder
         hasStory={false}
@@ -1833,7 +1831,7 @@ function PostHeader({
   );
 
   const followPillLabel = isFollowingThisUser ? 'Following' : followRequested ? 'Requested' : 'Follow';
-  const followPill = !isCurrentUser && onFollow ? (
+  const followPill = !subjectIsViewer && onFollow ? (
     <button
       type="button"
       aria-label={followPillLabel}
@@ -1842,7 +1840,11 @@ function PostHeader({
         e.stopPropagation();
         e.preventDefault();
         try {
-          await onFollow();
+          if (isReclippedPost) {
+            await toggleFollowForPost(userId, post.id, profileTargetHandle, user?.handle);
+          } else {
+            await onFollow();
+          }
         } catch (error) {
           console.error('Error in onFollow from header pill:', error);
         }
@@ -1862,7 +1864,7 @@ function PostHeader({
         data-feed-dm-anchor={post.id}
       >
         {feedAvatar}
-        {!isCurrentUser && isMutualFollow && onOpenDM && (
+        {!isReclippedPost && !isCurrentUser && isMutualFollow && onOpenDM && (
           <button
             type="button"
             onClick={(e) => {
@@ -1892,9 +1894,12 @@ function PostHeader({
       >
         <div className="relative z-40 px-2.5 py-2">
           {isReclippedPost && (
-            <div className={`mb-1 flex items-center gap-1 text-xs ${reclipColorClass}`}>
-              <FiRepeat className="w-3 h-3" />
-              <span>{post.userHandle} reclipped</span>
+            <div className={`mb-1 flex items-center gap-1.5 text-xs ${reclipColorClass}`}>
+              {reclipperAvatar ? (
+                <img src={reclipperAvatar} alt="" className="h-4 w-4 rounded-full object-cover" />
+              ) : null}
+              <FiRepeat className="h-3 w-3 shrink-0" />
+              <span className="truncate">{reclipperLabel} reclipped</span>
             </div>
           )}
           <div className="flex items-center justify-between gap-2">
@@ -1984,7 +1989,7 @@ function PostHeader({
           >
             {feedAvatar}
             {/* DM icon only when mutual follow (both follow each other) */}
-            {!isCurrentUser && isMutualFollow && onOpenDM && (
+            {!isReclippedPost && !isCurrentUser && isMutualFollow && onOpenDM && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -2007,9 +2012,12 @@ function PostHeader({
           <div className="ml-2.5 flex-1 min-w-0 flex flex-col gap-0" onClick={(e) => e.stopPropagation()}>
             {/* Show reclip indicator if this is a reclipped post */}
             {isReclippedPost && (
-              <div className={`text-xs mb-1 flex items-center gap-1 ${reclipColorClass}`}>
-                <FiRepeat className="w-3 h-3" />
-                <span>{post.userHandle} reclipped</span>
+              <div className={`mb-1 flex items-center gap-1.5 text-xs ${reclipColorClass}`}>
+                {reclipperAvatar ? (
+                  <img src={reclipperAvatar} alt="" className="h-4 w-4 rounded-full object-cover" />
+                ) : null}
+                <FiRepeat className="h-3 w-3 shrink-0" />
+                <span className="truncate">{reclipperLabel} reclipped</span>
               </div>
             )}
             <button
@@ -2634,6 +2642,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
+  // Only the clip near the screen should download. Every mounted mp4 was
+  // taking a connection, so cards further down stayed on the loader.
+  const [mountVideoSrc, setMountVideoSrc] = React.useState(priority);
+  const mountVideoSrcRef = React.useRef(priority);
+  mountVideoSrcRef.current = mountVideoSrc;
   const [hasError, setHasError] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [showControls, setShowControls] = React.useState(false);
@@ -2695,6 +2708,15 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const currentIndexRef = React.useRef(currentIndex);
   currentIndexRef.current = currentIndex;
   const hasFeedVideo = items.some((item) => item.type === 'video' && !!item.url);
+  const feedPoster = React.useMemo(() => {
+    const fromItem = currentItem?.type === 'video'
+      ? (currentItem as { posterUrl?: string }).posterUrl
+      : '';
+    const raw = fromItem
+      || videoPosterUrl
+      || siblingJpegFromVideoUrl(currentItem?.type === 'video' ? currentItem.url : undefined);
+    return raw ? rewriteMediaUrl(raw) : '';
+  }, [currentItem, videoPosterUrl, rewriteMediaUrl]);
   const imageOnlyItems = React.useMemo(
     () => items.filter((it) => it.type === 'image' && it.url),
     [items]
@@ -2767,13 +2789,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       if (candidate.type === 'image') {
         const img = new Image();
         img.src = candidate.url;
-      } else if (candidate.type === 'video') {
+      } else if (candidate.type === 'video' && mountVideoSrc) {
         const v = document.createElement('video');
         v.preload = 'metadata';
         v.src = candidate.url;
       }
     });
-  }, [hasMultipleItems, currentIndex, items]);
+  }, [hasMultipleItems, currentIndex, items, mountVideoSrc]);
 
   // Thumbnail rail tap: scroll feed carousel track (not index-swap — avoids flash on mobile).
   React.useEffect(() => {
@@ -3048,6 +3070,26 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setIsPlaying(true);
   }, [autoplayPref, hasMultipleItems, isMuted, items, lowBandwidthMode, pauseCarouselExcept]);
 
+  React.useEffect(() => {
+    const node = mediaContainerRef.current;
+    if (!hasFeedVideo || !node) return;
+    const scrollRoot = node.closest('.overflow-y-auto') as HTMLElement | null;
+    const obs = new IntersectionObserver((entries) => {
+      const near = entries.some((entry) => entry.isIntersecting);
+      mountVideoSrcRef.current = near;
+      setMountVideoSrc(near);
+      if (near) return;
+      const v = videoRef.current;
+      if (!v) return;
+      try { v.pause(); } catch { /* ignore */ }
+      v.removeAttribute('src');
+      // Empty load aborts the download so a later card can use the connection.
+      try { v.load(); } catch { /* ignore */ }
+    }, { root: scrollRoot, rootMargin: '70% 0px', threshold: 0 });
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [hasFeedVideo, postId]);
+
   // Intersection Observer for auto-play (wrapped in try/catch for mobile â€“ avoids "Something went wrong" on phone)
   React.useEffect(() => {
     const root = mediaContainerRef.current;
@@ -3237,6 +3279,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   };
 
   const handleVideoError = (_e: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (!mountVideoSrcRef.current) return;
     const v = videoRef.current;
     const src = v?.currentSrc || v?.src || currentItem?.url || '';
     if (
@@ -3718,11 +3761,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                     carouselVideoRefs.current[slideIndex] = node;
                     if (slideIndex === currentIndexRef.current) videoRef.current = node;
                   }}
-                  src={item.url}
+                  src={mountVideoSrc && Math.abs(slideIndex - currentIndex) <= 1 ? item.url : undefined}
                   className="w-full h-full"
                   style={{ objectFit: 'cover' }}
-                  poster={(item as { posterUrl?: string }).posterUrl || videoPosterUrl}
-                  preload="metadata"
+                  poster={feedPoster || undefined}
+                  preload={mountVideoSrc ? 'metadata' : 'none'}
                   playsInline
                   muted={isMuted}
                   loop
@@ -3864,15 +3907,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             <video
               key={currentItem.url}
               ref={videoRef}
-              src={currentItem.url}
+              src={mountVideoSrc ? currentItem.url : undefined}
               className="w-full h-full"
               style={{ objectFit: 'cover' }}
-              poster={
-                currentItem.type === 'video'
-                  ? (currentItem as { posterUrl?: string }).posterUrl || videoPosterUrl
-                  : undefined
-              }
-              preload="metadata"
+              poster={feedPoster || undefined}
+              preload={mountVideoSrc ? 'metadata' : 'none'}
               playsInline
               muted={isMuted}
               loop
@@ -3948,7 +3987,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               </ZoomableMedia>
 
               {/* Loading Spinner */}
-              {isLoading && (
+              {isLoading && mountVideoSrc && !feedPoster && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 z-50">
                   <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 </div>
@@ -7489,10 +7528,19 @@ function FeedPageWrapper() {
     if (syncedFollowStateOnFeedRef.current) return;
     syncedFollowStateOnFeedRef.current = true;
     const follows = getState(userId).follows || {};
-    setPages(prev => prev.map(page => page.map(p => ({
-      ...p,
-      isFollowing: getFollowState(follows, p.userHandle)
-    }))));
+    setPages(prev => prev.map(page => page.map(p => {
+      const authorFollow = hasExplicitFollowState(follows, p.userHandle)
+        ? getFollowState(follows, p.userHandle)
+        : p.isFollowing === true;
+      const originalFollow = p.originalUserHandle && hasExplicitFollowState(follows, p.originalUserHandle)
+        ? getFollowState(follows, p.originalUserHandle)
+        : p.originalAuthorIsFollowing === true;
+      return {
+        ...p,
+        isFollowing: authorFollow,
+        ...(p.originalUserHandle ? { originalAuthorIsFollowing: originalFollow } : {}),
+      };
+    })));
   }, [routerLocation.pathname, userId, pages.length]);
 
   // Poll for new posts every 10 seconds
@@ -7959,8 +8007,16 @@ function FeedPageWrapper() {
       return true;
     }).map((p) => bestByKey.get(idKey(p))!);
 
-    // Apply current follow/like/bookmark state so UI is correct after cache or tab switch
-    const decoratedPosts = uniquePosts.map(p => decorateForUser(userId, p));
+    // Apply current follow/like/bookmark state so UI is correct after cache or tab switch.
+    // Then give each account one label, so a later post cannot say Follow while an earlier one says Following.
+    const decoratedPosts = unifyLoadedFeedFollow(
+      uniquePosts.map((p) => decorateForUser(userId, p, { allowDowngrade: false })),
+      {
+        followingFeed: currentFilter.toLowerCase() === 'discover',
+        viewerHandle: user?.handle,
+        userId,
+      },
+    );
     const visiblePosts = filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current, {
       isProtectedDevMockVideo: isDevMockFeedVideoPost,
     });
@@ -7975,7 +8031,7 @@ function FeedPageWrapper() {
     feedItems.sort((a, b) => b.createdAt - a.createdAt);
 
     return feedItems;
-  }, [pages, ads, userId, currentFilter, feedPrefsVersion]);
+  }, [pages, ads, userId, user?.handle, currentFilter, feedPrefsVersion]);
 
   /** Insert â€œSuggested for your placesâ€ strips between posts (skipped on custom venue/location feeds). */
   const flatWithSuggested = React.useMemo(() => {
@@ -8552,9 +8608,29 @@ function FeedPageWrapper() {
     return orderStories24RailItems(ordered, user?.handle).slice(0, 41);
   }, [storiesRailItems, user?.handle]);
 
-  const openStories24FromHeader = React.useCallback((opts?: { skipRailReturn?: boolean }) => {
+  const openStories24FromHeader = React.useCallback(async (opts?: { skipRailReturn?: boolean }) => {
     const skipRailReturn = opts?.skipRailReturn === true;
-    const target = resolveStories24OpenTarget(stories24Items);
+    let items = orderStories24RailItems(stories24Items, user?.handle);
+    let target = resolveStories24OpenTarget(items);
+
+    // The mid-feed card can be tapped before the rail has cards. Load stories first,
+    // then open the player. Navigating with no story drops onto the old Clips 24 list.
+    if (!target && user?.id) {
+      try {
+        const { buildStories24RailItems } = await import('./utils/stories24Rail');
+        const built = await buildStories24RailItems(user.id, user.handle, user.avatarUrl);
+        if (built.length > 0) {
+          setStoriesRailItems(built);
+          items = orderStories24RailItems(built, user?.handle);
+          target = resolveStories24OpenTarget(items);
+        }
+      } catch (err) {
+        console.warn('Stories24 header: failed to refresh rail items', err);
+      }
+    }
+
+    snapshotStories24FeedScrollForRail();
+
     if (!target) {
       navigate('/stories', {
         state: {
@@ -8564,7 +8640,7 @@ function FeedPageWrapper() {
       });
       return;
     }
-    snapshotStories24FeedScrollForRail();
+
     try {
       sessionStorage.setItem(STORIES24_FROM_RAIL_HANDLE_KEY, target.item.handle);
     } catch {
@@ -8580,7 +8656,7 @@ function FeedPageWrapper() {
         ...(skipRailReturn ? { skipStories24RailReturn: true } : {}),
       },
     });
-  }, [stories24Items, navigate, snapshotStories24FeedScrollForRail]);
+  }, [stories24Items, user?.id, user?.handle, user?.avatarUrl, navigate, snapshotStories24FeedScrollForRail]);
 
   // Human-readable feed label for Scenes carousel header
   const feedLabelForScenes = React.useMemo(() => {

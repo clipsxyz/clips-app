@@ -81,7 +81,7 @@ class PublicMediaUrl
      */
     public static function rewritePayloadMedia(array $payload): array
     {
-        foreach (['media_url', 'final_video_url', 'thumbnail_url', 'video_poster_url', 'poster_url', 'avatar_url'] as $key) {
+        foreach (['media_url', 'final_video_url', 'thumbnail_url', 'video_poster_url', 'poster_url', 'avatar_url', 'original_user_avatar_url'] as $key) {
             if (! isset($payload[$key]) || ! is_string($payload[$key])) {
                 continue;
             }

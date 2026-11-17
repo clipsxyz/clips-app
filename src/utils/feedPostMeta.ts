@@ -45,11 +45,21 @@ export function getReclipDisplay(post: Post, _viewerHandle?: string | null): {
     isReclip: boolean;
     displayHandle: string;
     profileHandle: string;
+    /** Person who reclipped. Same as the author when this is not a reclip. */
+    reclipperHandle: string;
+    /** Follow state for the person whose name is on the card. */
+    authorFollowing: boolean;
 } {
     const isReclip = Boolean(post.isReclipped && post.originalUserHandle);
     const displayHandle = isReclip ? post.originalUserHandle! : post.userHandle;
     const profileHandle = isReclip ? post.originalUserHandle! : post.userHandle;
-    return { isReclip, displayHandle, profileHandle };
+    return {
+        isReclip,
+        displayHandle,
+        profileHandle,
+        reclipperHandle: post.userHandle,
+        authorFollowing: isReclip ? post.originalAuthorIsFollowing === true : post.isFollowing === true,
+    };
 }
 
 export function getPostDisplayCaption(post: Post): string {

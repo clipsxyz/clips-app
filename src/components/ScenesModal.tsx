@@ -17,7 +17,7 @@ import VerifiedBadge from './VerifiedBadge';
 import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
-import { addComment, addReply, fetchCommentsPage, toggleCommentLike, toggleReplyLike, deletePost } from '../api/posts';
+import { addComment, addReply, fetchCommentsPage, toggleCommentLike, toggleReplyLike, deletePost, toggleFollowForPost } from '../api/posts';
 import { getCollectionsForPost, unsavePost, savePostToDefaultCollection } from '../api/collections';
 import { getStableUserId } from '../utils/userId';
 import { markFeedPostArchived, setPostNotificationsPref, hasPostNotificationsPref } from '../utils/feedPostPrefs';
@@ -31,6 +31,7 @@ import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { postHasVideoMedia, siblingJpegFromVideoUrl } from '../utils/postMedia';
+import { getReclipDisplay } from '../utils/feedPostMeta';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
 import { showToast } from '../utils/toast';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
@@ -208,12 +209,15 @@ export default function ScenesModal({
     feedLabel,
     onPostChange
 }: ScenesModalProps) {
+    const reclipOf = post.isReclipped && post.originalUserHandle ? post.originalUserHandle : '';
+    const shownAuthorHandle = reclipOf || post.userHandle;
+    const shownAuthorFollowing = reclipOf ? post.originalAuthorIsFollowing === true : post.isFollowing;
     const [liked, setLiked] = React.useState(post.userLiked);
     const [likes, setLikes] = React.useState(post.stats.likes);
     const [comments, setComments] = React.useState(post.stats.comments);
     const [shares, setShares] = React.useState(post.stats.shares);
     const [reclips, setReclips] = React.useState(post.stats.reclips);
-    const [isFollowing, setIsFollowing] = React.useState(post.isFollowing);
+    const [isFollowing, setIsFollowing] = React.useState(shownAuthorFollowing);
     const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
     // Separate busy flags so Reclip doesn't visually affect Follow and vice versa
     const [followBusy, setFollowBusy] = React.useState(false);
@@ -746,7 +750,7 @@ export default function ScenesModal({
         setComments(post.stats.comments);
         setShares(post.stats.shares);
         setReclips(post.stats.reclips);
-        setIsFollowing(post.isFollowing);
+        setIsFollowing(shownAuthorFollowing);
         // Only ever turn userReclipped ON from the post; never force it OFF here,
         // so a local optimistic reclip in Scenes is not immediately reset.
         if (post.userReclipped) {
@@ -759,6 +763,7 @@ export default function ScenesModal({
         post.stats.shares,
         post.stats.reclips,
         post.isFollowing,
+        post.originalAuthorIsFollowing,
         post.userReclipped
     ]);
 
@@ -1273,7 +1278,14 @@ export default function ScenesModal({
         if (followBusy) return;
         setFollowBusy(true);
         try {
-            const res = await onFollow();
+            const res = reclipOf
+                ? (await toggleFollowForPost(
+                      getStableUserId(user),
+                      post.id,
+                      shownAuthorHandle,
+                      user?.handle,
+                  )).isFollowing
+                : await onFollow();
             // If parent returns false (e.g. private profile – request sent, not following), keep Follow state
             if (typeof res === 'boolean') {
                 setIsFollowing(res);
@@ -1281,7 +1293,7 @@ export default function ScenesModal({
                 setIsFollowing(prev => !prev);
             }
         } catch (error) {
-            setIsFollowing(post.isFollowing);
+            setIsFollowing(shownAuthorFollowing);
             console.error('Error toggling follow:', error);
         } finally {
             setFollowBusy(false);
@@ -1289,8 +1301,8 @@ export default function ScenesModal({
     }
 
     // Private user + pending follow request = show "Requested" instead of "Follow" or "Following"
-    const isPrivateProfile = isProfilePrivate(post.userHandle);
-    const hasPendingRequest = Boolean(user?.handle && isPrivateProfile && hasPendingFollowRequest(user.handle, post.userHandle));
+    const isPrivateProfile = isProfilePrivate(shownAuthorHandle);
+    const hasPendingRequest = Boolean(user?.handle && isPrivateProfile && hasPendingFollowRequest(user.handle, shownAuthorHandle));
 
     function handleShare() {
         console.log('Share clicked in ScenesModal, opening ShareModal, current state:', shareModalOpen);
@@ -1602,10 +1614,15 @@ export default function ScenesModal({
 
     if (!isOpen) return null;
 
-    const sceneAvatarRaw =
-        (user?.handle === post.userHandle
+    const { isReclip, profileHandle: reclipAuthorHandle } = getReclipDisplay(post, user?.handle);
+    const sceneAuthorHandle = isReclip ? reclipAuthorHandle : post.userHandle;
+    const reclipperLabel = (post.userHandle || '').replace(/^@/, '').trim();
+    const reclipperAvatar = post.avatarUrl || getAvatarForHandle(post.userHandle);
+    const sceneAvatarRaw = isReclip
+        ? post.originalUserAvatarUrl || getAvatarForHandle(sceneAuthorHandle)
+        : (user?.handle === post.userHandle
             ? user?.avatarUrl || (user as { avatar_url?: string } | null)?.avatar_url || post.avatarUrl
-            : post.avatarUrl) || getAvatarForHandle(post.userHandle);
+            : post.avatarUrl) || getAvatarForHandle(sceneAuthorHandle);
     const sceneAvatarSrc = sceneAvatarRaw ? rewriteMediaUrlForClient(sceneAvatarRaw) : undefined;
 
     const carouselIdx = effectivePosts.length > 0 ? Math.max(0, effectivePosts.findIndex((p) => p.id === post.id)) : 0;
@@ -2175,24 +2192,33 @@ export default function ScenesModal({
                                 {/* Profile & Caption Section */}
                                 <div className="pt-12 pb-4">
                                     {/* Profile Section */}
+                                    {isReclip && reclipperLabel ? (
+                                        <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-white/90">
+                                            {reclipperAvatar ? (
+                                                <img src={reclipperAvatar} alt="" className="h-4 w-4 rounded-full object-cover" />
+                                            ) : null}
+                                            <IoRepeat className="h-3 w-3 shrink-0" />
+                                            <span className="truncate">{reclipperLabel} reclipped</span>
+                                        </div>
+                                    ) : null}
                                     <div className="flex items-center gap-3 mb-4 pr-[70px]">
                                         <div className="relative shrink-0">
                                         <button
                                             onClick={() => {
                                                 window.scrollTo(0, 0);
-                                                navigate(`/user/${encodeURIComponent(post.userHandle)}`);
+                                                navigate(`/user/${encodeURIComponent(sceneAuthorHandle)}`);
                                                 onClose();
                                             }}
                                             className="relative h-9 w-9 overflow-hidden rounded-full"
                                         >
                                             <Avatar
                                                 src={sceneAvatarSrc}
-                                                name={post.userHandle.split('@')[0]}
+                                                name={sceneAuthorHandle.split('@')[0]}
                                                 size={36}
                                                 hideBorder
                                             />
                                         </button>
-                                        {!isFollowing && !hasPendingRequest && user?.handle !== post.userHandle && (
+                                        {!isFollowing && !hasPendingRequest && user?.handle !== sceneAuthorHandle && (
                                             <button
                                                 type="button"
                                                 onClick={handleFollow}
@@ -2210,12 +2236,12 @@ export default function ScenesModal({
                                             <button
                                                 onClick={() => {
                                                     window.scrollTo(0, 0);
-                                                    navigate(`/user/${encodeURIComponent(post.userHandle)}`);
+                                                    navigate(`/user/${encodeURIComponent(sceneAuthorHandle)}`);
                                                     onClose();
                                                 }}
                                                 className="flex min-w-0 items-center gap-1 text-left text-sm font-bold text-white hover:opacity-80"
                                             >
-                                                <span className="truncate">{post.userHandle.replace(/^@/, '')}</span>
+                                                <span className="truncate">{sceneAuthorHandle.replace(/^@/, '')}</span>
                                                 <VerifiedBadge accountType={post.userAccountType} size={12} />
                                             </button>
                                             <div className="mt-0.5 flex items-center gap-2">
@@ -2233,7 +2259,7 @@ export default function ScenesModal({
                                                         Requested
                                                     </span>
                                                 )}
-                                                {isFollowing && user?.handle !== post.userHandle && (
+                                                {isFollowing && user?.handle !== sceneAuthorHandle && (
                                                     <button
                                                         type="button"
                                                         onClick={handleFollow}
