@@ -21,6 +21,9 @@ import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
 import { storyHasRenderableMedia } from '../utils/storyMediaNative';
+import { storyTextFontSize } from '../utils/storyTextStyleNative';
+import { StoryLinkStory } from '../components/stories/StoryLinkCard';
+import { extractFirstHttpUrl } from '../utils/linkPreview';
 import { siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow } from '../api/client';
@@ -29,6 +32,10 @@ import type { Story, StoryGroup, Post, StoryViewerIdentity } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+
+function storyHandleKey(handle?: string | null): string {
+    return (handle || '').replace(/^@/, '').trim().toLowerCase();
+}
 
 function storyOpenStill(raw?: string): string {
     const value = (raw || '').trim();
@@ -648,11 +655,11 @@ export default function StoriesPage() {
             // Keep feed rail playback order when provided.
             if (requestedHandles.length > 0) {
                 const orderMap = new Map<string, number>(
-                    requestedHandles.map((h, idx) => [h.toLowerCase(), idx])
+                    requestedHandles.map((h, idx) => [storyHandleKey(h), idx])
                 );
                 finalGroups = [...finalGroups].sort((a, b) => {
-                    const aRank = orderMap.get((a.userHandle || '').toLowerCase());
-                    const bRank = orderMap.get((b.userHandle || '').toLowerCase());
+                    const aRank = orderMap.get(storyHandleKey(a.userHandle));
+                    const bRank = orderMap.get(storyHandleKey(b.userHandle));
                     if (aRank === undefined && bRank === undefined) return 0;
                     if (aRank === undefined) return 1;
                     if (bRank === undefined) return -1;
@@ -708,9 +715,9 @@ export default function StoriesPage() {
             ? 'feed-card'
             : `${String(openUserHandle || '').trim().toLowerCase()}|${openStoryId || ''}`;
         if (autoOpenedStoryKeyRef.current === key) return;
-        const target = String(openUserHandle || '').trim().toLowerCase();
+        const target = storyHandleKey(typeof openUserHandle === 'string' ? openUserHandle : '');
         const targetGroup = target
-            ? storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target)
+            ? storyGroups.find(g => storyHandleKey(g.userHandle) === target)
             : undefined;
         if (targetGroup) {
             autoOpenedStoryKeyRef.current = key;
@@ -769,25 +776,25 @@ export default function StoriesPage() {
             const initialStoryIndex = preferredStoryId
                 ? Math.max(0, stories.findIndex((story) => story.id === preferredStoryId))
                 : 0;
-            setStoryGroups((prev) => {
-                let groupIndex = prev.findIndex(
-                    (g) => g.userId === group.userId || g.userHandle === group.userHandle,
-                );
-                if (groupIndex === -1) {
-                    const updated = [...prev, { ...group, stories, avatarUrl: group.avatarUrl }];
-                    groupIndex = updated.length - 1;
-                    currentGroupIndexRef.current = groupIndex;
-                    currentStoryIndexRef.current = initialStoryIndex;
-                    return updated;
-                }
-                const updated = [...prev];
-                updated[groupIndex] = { ...group, stories, avatarUrl: group.avatarUrl };
-                currentGroupIndexRef.current = groupIndex;
-                currentStoryIndexRef.current = initialStoryIndex;
-                return updated;
-            });
-            setCurrentGroupIndex(currentGroupIndexRef.current);
-            setCurrentStoryIndex(currentStoryIndexRef.current);
+            const prev = storyGroupsRef.current;
+            const wantedHandle = storyHandleKey(group.userHandle);
+            let groupIndex = prev.findIndex(
+                (g) => g.userId === group.userId || storyHandleKey(g.userHandle) === wantedHandle,
+            );
+            const nextGroup = { ...group, stories, avatarUrl: group.avatarUrl };
+            const updated = [...prev];
+            if (groupIndex === -1) {
+                updated.push(nextGroup);
+                groupIndex = updated.length - 1;
+            } else {
+                updated[groupIndex] = nextGroup;
+            }
+            storyGroupsRef.current = updated;
+            currentGroupIndexRef.current = groupIndex;
+            currentStoryIndexRef.current = initialStoryIndex;
+            setStoryGroups(updated);
+            setCurrentGroupIndex(groupIndex);
+            setCurrentStoryIndex(initialStoryIndex);
             setViewingStories(true);
             setAutoOpeningStory(false);
             setProgress(0);
@@ -2280,6 +2287,25 @@ export default function StoriesPage() {
                                         );
                                     }
                                     
+
+                                    const pastedLink = currentStoryText ? extractFirstHttpUrl(currentStoryText) : undefined;
+                                    if (pastedLink && !currentStory?.mediaUrl && !currentStory?.sharedFromPost) {
+                                        return (
+                                            <StoryLinkStory
+                                                text={currentStoryText}
+                                                authorAvatar={currentGroup?.avatarUrl}
+                                                authorName={currentGroup?.userHandle}
+                                                textColor={
+                                                    currentStory?.textStyle?.color ||
+                                                    currentStory?.textColor ||
+                                                    '#ffffff'
+                                                }
+                                                fontSize={storyTextFontSize(
+                                                    currentStory?.textStyle?.size || currentStory?.textSize,
+                                                )}
+                                            />
+                                        );
+                                    }
 
                                     // Text-only story — full-screen template background + centered text (pre–speech-bubble stories UX)
                                     if (currentStoryText) {
