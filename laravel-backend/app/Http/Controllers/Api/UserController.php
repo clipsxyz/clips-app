@@ -8,6 +8,7 @@ use App\Models\Notification;
 use App\Services\BoostAnalyticsService;
 use App\Services\StoryService;
 use App\Services\VideoThumbnailService;
+use App\Support\PublicMediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -109,6 +110,11 @@ class UserController extends Controller
         }
 
         $userData = $user->toApiArray();
+        foreach (['profile_background_url', 'avatar_url'] as $mediaKey) {
+            if (isset($userData[$mediaKey]) && is_string($userData[$mediaKey]) && $userData[$mediaKey] !== '') {
+                $userData[$mediaKey] = PublicMediaUrl::forClient($userData[$mediaKey]) ?? $userData[$mediaKey];
+            }
+        }
         // Counts are also denormalized on the row; recompute from the follow graph so every
         // surface (header, Audience card, connections modal) agrees and stale columns self-heal.
         $liveCounts = $user->syncLiveAudienceCounts();

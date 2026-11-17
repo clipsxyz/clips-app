@@ -195,6 +195,17 @@ video {
     @apply outline-none ring-2 ring-brand-600 ring-offset-2 ring-offset-white dark:ring-offset-gray-950;
   }
 
+  /* Search field keeps the rounded box. The global ring draws a square around the text. */
+  input.search-field:focus,
+  input.search-field:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-width: 0px !important;
+    --tw-ring-width: 0px !important;
+  }
+
   /* Override focus ring for tab buttons */
   button[role="tab"]:focus-visible {
     outline: none !important;

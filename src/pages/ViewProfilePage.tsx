@@ -35,6 +35,7 @@ import { fetchFollowers, fetchFollowing, fetchUserProfile } from '../api/client'
 import { getFollowedUsers, mapLaravelProfilePosts, posts as allPosts } from '../api/posts';
 import { resolvePostThumbnail } from '../api/collections';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+import defaultProfileCover from '../assets/world-map.jpg';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import {
@@ -218,7 +219,12 @@ export default function ViewProfilePage() {
     return source.filter((place) => typeof place === 'string' && place.trim().length > 0);
   }, [profileUser, isOwnProfile, user]);
   const coverRaw = profileUser?.profileBackgroundUrl || (isOwnProfile ? user?.profileBackgroundUrl : undefined);
-  const coverUrl = !isStockCover(coverRaw) && coverRaw ? rewriteMediaUrlForClient(coverRaw) : '';
+  const customCover = !isStockCover(coverRaw) && coverRaw ? rewriteMediaUrlForClient(coverRaw) : '';
+  const [coverFailed, setCoverFailed] = React.useState(false);
+  React.useEffect(() => {
+    setCoverFailed(false);
+  }, [coverRaw]);
+  const showingCustomCover = Boolean(customCover) && !coverFailed;
   const avatarUrl = rewriteMediaUrlForClient(profileUser?.avatarUrl || getAvatarForHandle(decodedHandle) || '');
   const flagValue = isOwnProfile ? user?.countryFlag || '' : profileUser?.countryFlag || getFlagForHandle(profileUser?.handle || decodedHandle) || '';
   const accountType = String(profileUser?.accountType || (isOwnProfile ? user?.accountType : '') || '').toLowerCase();
@@ -654,7 +660,14 @@ export default function ViewProfilePage() {
       {header(profileDisplayName, profileUser?.handle || decodedHandle, true)}
       <div className="relative mt-1">
         <div className="relative h-[156px] overflow-hidden bg-[#020B26]">
-          {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full object-cover" /> : null}
+          <img
+            src={showingCustomCover ? customCover : defaultProfileCover}
+            alt=""
+            className={`absolute inset-0 h-full w-full object-cover ${showingCustomCover ? '' : 'opacity-55'}`}
+            onError={() => {
+              if (showingCustomCover) setCoverFailed(true);
+            }}
+          />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(10,25,78,0.18), rgba(0,56,209,0.22), rgba(2,11,38,0.72))' }} />
           {isOwnProfile ? (
             <button type="button" onClick={() => navigate('/profile/cover')} className="absolute right-3 top-3 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-xs font-semibold text-white">

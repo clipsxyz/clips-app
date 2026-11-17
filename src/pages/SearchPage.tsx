@@ -468,7 +468,7 @@ export default function SearchPage() {
                         aria-label={modePlaceholder[searchMode]}
                         autoCorrect="off"
                         autoCapitalize="none"
-                        className="min-w-0 flex-1 bg-transparent text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none"
+                        className="search-field min-w-0 flex-1 bg-transparent text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none"
                     />
                     {searchQuery ? (
                         <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear search">
