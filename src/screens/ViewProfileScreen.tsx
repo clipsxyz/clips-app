@@ -91,6 +91,7 @@ import {
     getProfilePostNotifyLevelMobile,
     setProfilePostNotifyLevelMobile,
 } from '../utils/profilePostNotifyPrefsMobile';
+import { fetchProfilePostNotifyLevel, saveProfilePostNotifyLevel } from '../api/profilePostNotifications';
 
 export default function ViewProfileScreen({ route, navigation }: any) {
     const { handle, sourcePostId, isFollowing: routeIsFollowing } = route.params ?? {};
@@ -161,8 +162,24 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             return;
         }
         const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
-        void getProfilePostNotifyLevelMobile(viewerId, decodedHandle).then(setPostNotifyLevel);
-    }, [user?.id, decodedHandle, isOwnProfile]);
+        let cancelled = false;
+        void (async () => {
+            const local = await getProfilePostNotifyLevelMobile(viewerId, decodedHandle);
+            if (!cancelled) setPostNotifyLevel(local);
+            if (!isLaravelApiEnabled()) return;
+            try {
+                const level = await fetchProfilePostNotifyLevel(decodedHandle);
+                if (cancelled) return;
+                setPostNotifyLevel(level);
+                await setProfilePostNotifyLevelMobile(viewerId, user.handle, decodedHandle, level);
+            } catch {
+                /* keep the local choice until the server answers */
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.id, user?.handle, decodedHandle, isOwnProfile]);
 
     useEffect(() => {
         const viewerId = user?.id != null ? String(user.id) : String(user?.handle || '');
@@ -196,14 +213,24 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const applyPostNotifyLevel = (level: ProfilePostNotifyLevel) => {
         if (!user?.id || !user?.handle) return;
         const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
-        void setProfilePostNotifyLevelMobile(viewerId, user.handle, decodedHandle, level).then(() => {
+        void (async () => {
+            if (isLaravelApiEnabled()) {
+                try {
+                    await saveProfilePostNotifyLevel(decodedHandle, level);
+                } catch (error) {
+                    const detail = error instanceof Error && error.message ? error.message : 'Try again in a moment.';
+                    gazetteerAlert('Could not update notifications', detail);
+                    return;
+                }
+            }
+            await setProfilePostNotifyLevelMobile(viewerId, user.handle, decodedHandle, level);
             setPostNotifyLevel(level);
             if (level === 'all') {
                 setPostNotifySheetMode('confirm');
             } else {
                 setPostNotifySheetMode(null);
             }
-        });
+        })();
     };
     const profileCoverUrl =
         profileUser?.profileBackgroundUrl ||
@@ -512,6 +539,9 @@ const result = await followOrRequest({
             }
             if (!result.following && !result.requested && wasFollowingBeforeClick) {
                 void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
+                if (isLaravelApiEnabled()) {
+                    void saveProfilePostNotifyLevel(handleToUse, 'off').catch(() => {});
+                }
                 setPostNotifyLevel('off');
                 setPostNotifySheetMode(null);
                 setStats((prev) => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));

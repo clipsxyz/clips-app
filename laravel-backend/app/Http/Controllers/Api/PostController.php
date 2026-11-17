@@ -894,6 +894,12 @@ class PostController extends Controller
             'posts_count' => $user->fresh()?->posts_count,
         ]);
 
+        try {
+            app(\App\Services\InteractionPushService::class)->notifyProfilePostSubscribers($user, (string) $post->id);
+        } catch (\Throwable $e) {
+            \Log::warning('posts.store subscriber notify failed', ['error' => $e->getMessage()]);
+        }
+
         // Transform taggedUsers to array of handles for frontend compatibility
         $postData = $post->toArray();
         $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();

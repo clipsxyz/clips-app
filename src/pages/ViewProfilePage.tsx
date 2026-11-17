@@ -80,6 +80,7 @@ import {
   setProfilePostNotifyLevel,
   type ProfilePostNotifyLevel,
 } from '../utils/profilePostNotifyPrefs';
+import { fetchProfilePostNotifyLevel, saveProfilePostNotifyLevel } from '../api/profilePostNotifications';
 import { buildProfileShareUrl } from '../utils/profileShareUrl';
 import { SiInstagram } from 'react-icons/si';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
@@ -360,8 +361,21 @@ export default function ViewProfilePage() {
       setNotifyLevel('off');
       return;
     }
-    setNotifyLevel(getProfilePostNotifyLevel(String(user.id), decodedHandle));
-  }, [decodedHandle, isOwnProfile, user?.id]);
+    const viewerId = String(user.id);
+    setNotifyLevel(getProfilePostNotifyLevel(viewerId, decodedHandle));
+    if (!isLaravelApiEnabled()) return;
+    let cancelled = false;
+    void fetchProfilePostNotifyLevel(decodedHandle)
+      .then((level) => {
+        if (cancelled) return;
+        setNotifyLevel(level);
+        setProfilePostNotifyLevel(viewerId, user.handle, decodedHandle, level);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [decodedHandle, isOwnProfile, user?.handle, user?.id]);
 
   const filteredPosts = posts.filter((post) => {
     if (contentTab === 'videos') return isVideoPost(post);
@@ -395,6 +409,9 @@ export default function ViewProfilePage() {
       }
       if (!result.following && !result.requested && wasFollowing) {
         clearProfilePostNotifyForCreator(String(user.id), user.handle, handleToUse);
+        if (isLaravelApiEnabled()) {
+          void saveProfilePostNotifyLevel(handleToUse, 'off').catch(() => {});
+        }
         setNotifyLevel('off');
         setNotifyOpen(false);
         setStats((prev) => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
@@ -598,10 +615,21 @@ export default function ViewProfilePage() {
 
   const applyNotify = (level: ProfilePostNotifyLevel) => {
     if (!user?.id || !user.handle) return;
-    setProfilePostNotifyLevel(String(user.id), user.handle, decodedHandle, level);
-    setNotifyLevel(level);
-    setNotifyOpen(level === 'all');
-    if (level === 'off') setNotifyOpen(false);
+    void (async () => {
+      if (isLaravelApiEnabled()) {
+        try {
+          await saveProfilePostNotifyLevel(decodedHandle, level);
+        } catch (error) {
+          const detail = error instanceof Error && error.message ? error.message : 'Try again in a moment.';
+          setAlert({ title: 'Could not update notifications', message: detail, icon: 'alert' });
+          return;
+        }
+      }
+      setProfilePostNotifyLevel(String(user.id), user.handle, decodedHandle, level);
+      setNotifyLevel(level);
+      setNotifyOpen(level === 'all');
+      if (level === 'off') setNotifyOpen(false);
+    })();
   };
 
   const header = (title: string, subtitle?: string, share = false) => (

@@ -316,6 +316,8 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/check-follows-me', [UserController::class, 'checkFollowsMe']);
         Route::get('/{handle}/posts', [UserController::class, 'posts']);
         Route::get('/{handle}', [UserController::class, 'show']);
+        Route::get('/{handle}/post-notifications', [UserController::class, 'postNotification']);
+        Route::put('/{handle}/post-notifications', [UserController::class, 'updatePostNotification']);
         Route::post('/{handle}/follow', [UserController::class, 'toggleFollow']);
         Route::post('/{handle}/follower/remove', [UserController::class, 'removeFollower']);
         Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest']);

@@ -267,6 +267,52 @@ class InteractionPushService
         }
     }
 
+    public function notifyProfilePostSubscribers(User $creator, string $postId): void
+    {
+        if (! Schema::hasTable('profile_post_subscriptions')) {
+            return;
+        }
+
+        $subscriberIds = DB::table('profile_post_subscriptions')
+            ->where('creator_id', $creator->id)
+            ->pluck('subscriber_id');
+        if ($subscriberIds->isEmpty()) {
+            return;
+        }
+
+        $subscribers = User::query()->whereIn('id', $subscriberIds)->get();
+        foreach ($subscribers as $subscriber) {
+            $this->notifyNewPost($creator, $subscriber, $postId);
+        }
+    }
+
+    public function notifyNewPost(User $creator, User $recipient, string $postId): void
+    {
+        if ($creator->id === $recipient->id) {
+            return;
+        }
+        if (! $this->prefAllows($recipient, 'newPosts')) {
+            return;
+        }
+
+        $handle = (string) $creator->handle;
+        $this->createAndPush(
+            recipient: $recipient,
+            type: 'new_post',
+            fromHandle: $handle,
+            message: "{$handle} posted a new clip",
+            postId: $postId,
+            title: $handle,
+            body: 'posted a new clip',
+            data: [
+                'type' => 'new_post',
+                'postId' => $postId,
+                'post_id' => $postId,
+                'fromHandle' => $handle,
+            ]
+        );
+    }
+
     public function notifyFollow(User $actor, User $recipient): void
     {
         if ($actor->id === $recipient->id) {

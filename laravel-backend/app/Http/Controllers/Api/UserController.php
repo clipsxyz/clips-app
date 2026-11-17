@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ProfilePostSubscription;
 use App\Models\User;
 use App\Models\Notification;
 use App\Services\BoostAnalyticsService;
@@ -222,6 +223,11 @@ class UserController extends Controller
                     $following->decrement('followers_count');
                 }
                 
+                ProfilePostSubscription::query()
+                    ->where('subscriber_id', $follower->id)
+                    ->where('creator_id', $following->id)
+                    ->delete();
+
                 return ['following' => false, 'status' => 'unfollowed'];
             } else {
                 // Check if profile is private
@@ -858,6 +864,70 @@ class UserController extends Controller
         }
 
         return ['created_at' => $createdAt, 'id' => $id];
+    }
+
+    public function postNotification(string $handle): JsonResponse
+    {
+        $viewer = Auth::user();
+        $creator = $this->findUserByHandle($handle);
+        if (! $creator) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        $on = ProfilePostSubscription::query()
+            ->where('subscriber_id', $viewer->id)
+            ->where('creator_id', $creator->id)
+            ->exists();
+
+        return response()->json(['level' => $on ? 'all' : 'off']);
+    }
+
+    public function updatePostNotification(Request $request, string $handle): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'level' => 'required|in:all,off',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $viewer = Auth::user();
+        $creator = $this->findUserByHandle($handle);
+        if (! $creator) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+        if ($viewer->id === $creator->id) {
+            return response()->json(['error' => 'Cannot subscribe to your own posts'], 400);
+        }
+
+        if ($request->input('level') === 'all') {
+            ProfilePostSubscription::query()->firstOrCreate([
+                'subscriber_id' => $viewer->id,
+                'creator_id' => $creator->id,
+            ]);
+        } else {
+            ProfilePostSubscription::query()
+                ->where('subscriber_id', $viewer->id)
+                ->where('creator_id', $creator->id)
+                ->delete();
+        }
+
+        return response()->json(['level' => $request->input('level')]);
+    }
+
+    private function findUserByHandle(string $handle): ?User
+    {
+        $bare = ltrim(trim($handle), '@');
+        if ($bare === '') {
+            return null;
+        }
+
+        $lower = strtolower($bare);
+
+        return User::query()
+            ->whereRaw('LOWER(handle) = ?', [$lower])
+            ->orWhereRaw('LOWER(handle) = ?', ['@'.$lower])
+            ->first();
     }
 
     private function encodeConnectionsCursor(string $createdAt, string $id): string
