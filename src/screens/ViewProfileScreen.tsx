@@ -69,7 +69,7 @@ import ViewProfileConnectionsModal, {
     type ConnectionsScope,
 } from '../components/ViewProfileConnectionsModal.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
-import ProfileCoverActionsModal from '../components/ProfileCoverActionsModal.native';
+import GazetteerMenuSheet from '../components/GazetteerMenuSheet.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import ProfileGridPeekSheet, {
     openProfileGridInFullscreen,
@@ -1474,27 +1474,19 @@ const result = await followOrRequest({
                 </View>
             </Modal>
 
-            <ProfileCoverActionsModal
+            <GazetteerMenuSheet
                 visible={showProfileMenu}
-                onClose={() => setShowProfileMenu(false)}
-                name={profileDisplayName}
-                handle={profileUser?.handle || decodedHandle}
-                avatarUrl={profileUser?.avatarUrl || getAvatarForHandle(decodedHandle)}
-                actions={[
+                title={profileDisplayName}
+                subtitle={String(profileUser?.handle || decodedHandle).replace(/^@/, '')}
+                cancelLabel="Cancel"
+                onDismiss={() => setShowProfileMenu(false)}
+                options={[
                     ...(hasStory
-                        ? [
-                              {
-                                  id: 'stories',
-                                  label: 'View Stories',
-                                  icon: 'play',
-                                  onPress: () => handleStoryPress(),
-                              },
-                          ]
+                        ? [{ label: 'View Stories', icon: 'play', onPress: () => handleStoryPress() }]
                         : []),
                     ...(!isOwnProfile
                         ? [
                               {
-                                  id: 'follow',
                                   label: isFollowing ? 'Unfollow' : 'Follow',
                                   icon: isFollowing ? 'person-remove' : 'person-add',
                                   onPress: () => {
@@ -1502,7 +1494,6 @@ const result = await followOrRequest({
                                   },
                               },
                               {
-                                  id: 'invite',
                                   label: 'Invite to group',
                                   icon: 'people',
                                   onPress: () => setShowInviteToGroup(true),
@@ -1510,13 +1501,11 @@ const result = await followOrRequest({
                           ]
                         : []),
                     {
-                        id: 'share',
                         label: 'Share profile',
                         icon: 'share-social',
                         onPress: () => setShowShareProfileSheet(true),
                     },
                     {
-                        id: 'qr',
                         label: 'QR code',
                         icon: 'qr-code-outline',
                         onPress: () => setShowProfileQR(true),

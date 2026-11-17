@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
+import Svg, { Defs, LinearGradient as SvgGradient, Mask, Rect, Stop } from 'react-native-svg';
 import type { Post } from '../types';
 import CachedImage from './CachedImage.native';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
@@ -63,6 +64,46 @@ type Nav = {
 const ACTIONS_ROW = 52;
 const STACK_GAP = 12;
 const ACTION_BORDER = 2;
+const MEDIA_RADIUS = 28;
+const TILE_RADIUS = 8;
+
+/** Draws the spectrum edge above a video. Android TextureView ignores a rounded parent, so the stroke has to sit on top. */
+function TileSpectrumEdge({ width, height }: { width: number; height: number }) {
+    const stroke = ACTION_BORDER;
+    const inset = stroke / 2;
+    return (
+        <Svg width={width} height={height} style={styles.tileEdge} pointerEvents="none">
+            <Defs>
+                <SvgGradient id="profileTileSpectrum" x1="0" y1="0" x2="1" y2="1">
+                    <Stop offset="0" stopColor="#22C55E" />
+                    <Stop offset="0.5" stopColor="#FFD400" />
+                    <Stop offset="1" stopColor="#FF4D9A" />
+                </SvgGradient>
+                <Mask id="profileTileOutside">
+                    <Rect width={width} height={height} fill="#FFFFFF" />
+                    <Rect width={width} height={height} rx={MEDIA_RADIUS} ry={MEDIA_RADIUS} fill="#000000" />
+                </Mask>
+            </Defs>
+            <Rect
+                width={width}
+                height={height}
+                fill="rgba(0,0,0,0.72)"
+                mask="url(#profileTileOutside)"
+            />
+            <Rect
+                x={inset}
+                y={inset}
+                width={Math.max(0, width - stroke)}
+                height={Math.max(0, height - stroke)}
+                rx={MEDIA_RADIUS - inset}
+                ry={MEDIA_RADIUS - inset}
+                stroke="url(#profileTileSpectrum)"
+                strokeWidth={stroke}
+                fill="none"
+            />
+        </Svg>
+    );
+}
 
 export type ProfileGridTapAction = {
     label: string;
@@ -244,7 +285,7 @@ export default function ProfileGridPeekSheet({
         top: progress.interpolate({ inputRange: [0, 1], outputRange: [from.y, target.top] }),
         width: progress.interpolate({ inputRange: [0, 1], outputRange: [from.width, target.width] }),
         height: progress.interpolate({ inputRange: [0, 1], outputRange: [from.height, target.height] }),
-        borderRadius: progress.interpolate({ inputRange: [0, 1], outputRange: [8, 18] }),
+        borderRadius: progress.interpolate({ inputRange: [0, 1], outputRange: [TILE_RADIUS, MEDIA_RADIUS] }),
     };
     const fadeIn = {
         opacity: progress.interpolate({ inputRange: [0.62, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
@@ -288,7 +329,24 @@ export default function ProfileGridPeekSheet({
                             top: target.top,
                             width: target.width,
                             height: target.height,
-                            borderRadius: 18,
+                            borderRadius: MEDIA_RADIUS,
+                        },
+                    ]}
+                >
+                <LinearGradient
+                    colors={['#22C55E', '#FFD400', '#FF4D9A']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[styles.mediaGradient, { borderRadius: MEDIA_RADIUS }]}
+                >
+                <View
+                    style={[
+                        styles.mediaInner,
+                        video && playback ? styles.videoCard : null,
+                        {
+                            width: target.width - ACTION_BORDER * 2,
+                            height: target.height - ACTION_BORDER * 2,
+                            borderRadius: MEDIA_RADIUS - ACTION_BORDER,
                         },
                     ]}
                 >
@@ -302,13 +360,19 @@ export default function ProfileGridPeekSheet({
                                 />
                             ) : null}
                             {ready ? (
-                                <View
-                                    style={{ width: target.width, height: target.height }}
+                                    <View
+                                    style={{
+                                        width: target.width - ACTION_BORDER * 2,
+                                        height: target.height - ACTION_BORDER * 2,
+                                    }}
                                     collapsable={false}
                                 >
                                     <Video
                                         source={withFeedVideoCache({ uri: playback })}
-                                        style={{ width: target.width, height: target.height }}
+                                        style={{
+                                            width: target.width - ACTION_BORDER * 2,
+                                            height: target.height - ACTION_BORDER * 2,
+                                        }}
                                         resizeMode="cover"
                                         muted={cardMuted}
                                         repeat
@@ -354,8 +418,18 @@ export default function ProfileGridPeekSheet({
                         </Pressable>
                     ) : null}
                 </View>
+                </LinearGradient>
+                {video && playback ? <TileSpectrumEdge width={target.width} height={target.height} /> : null}
+                </View>
                 ) : (
                 <Animated.View style={[styles.mediaCard, shellStyle]}>
+                    <LinearGradient
+                        colors={['#22C55E', '#FFD400', '#FF4D9A']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.mediaGradient}
+                    >
+                        <View style={[styles.mediaInner, { borderRadius: MEDIA_RADIUS - ACTION_BORDER }]}>
                     {poster || imageUri ? (
                         <CachedImage
                             source={{ uri: (video ? poster : imageUri) || imageUri || poster || '' }}
@@ -367,6 +441,8 @@ export default function ProfileGridPeekSheet({
                             {textBody}
                         </View>
                     )}
+                        </View>
+                    </LinearGradient>
                 </Animated.View>
                 )}
 
@@ -424,11 +500,26 @@ const styles = StyleSheet.create({
     mediaCard: {
         position: 'absolute',
         overflow: 'hidden',
+    },
+    mediaGradient: {
+        flex: 1,
+        padding: ACTION_BORDER,
+    },
+    mediaInner: {
+        flex: 1,
+        overflow: 'hidden',
         backgroundColor: '#111111',
     },
     /** TextureView on Android does not draw inside an overflow-hidden parent. */
     videoCard: {
         overflow: 'visible',
+    },
+    tileEdge: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        zIndex: 40,
+        elevation: 40,
     },
     posterHidden: {
         opacity: 0,
@@ -478,11 +569,11 @@ const styles = StyleSheet.create({
         position: 'absolute',
     },
     actionsGradient: {
-        borderRadius: 16,
+        borderRadius: MEDIA_RADIUS,
         padding: ACTION_BORDER,
     },
     actions: {
-        borderRadius: 14,
+        borderRadius: MEDIA_RADIUS - ACTION_BORDER,
         backgroundColor: '#000000',
         overflow: 'hidden',
     },

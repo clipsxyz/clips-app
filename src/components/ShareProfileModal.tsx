@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiLink, FiMail, FiPlay, FiShare2 } from 'react-icons/fi';
+import { FiX, FiLink, FiMail, FiShare2 } from 'react-icons/fi';
 import { SiWhatsapp, SiFacebook, SiX, SiLinkedin, SiInstagram } from 'react-icons/si';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
@@ -174,7 +174,7 @@ const ShareProfileModal: React.FC<ShareProfileModalProps> = ({ isOpen, onClose, 
                     {isSharing ? (
                         <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
                     ) : (
-                        <FiPlay className="h-[22px] w-[22px] text-white" />
+                        <span aria-hidden className="text-[22px] leading-none text-white">✦</span>
                     )}
                 </IconCircle>
             ),

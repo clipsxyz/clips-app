@@ -25,6 +25,7 @@ import Avatar from '../components/Avatar';
 import Flag from '../components/Flag';
 import VerifiedBadge from '../components/VerifiedBadge';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet';
+import GazetteerMenuSheet from '../components/GazetteerMenuSheet';
 import ProfileConnectionsSheet, {
   type ProfileConnectionRow,
   type ProfileConnectionScope,
@@ -878,24 +879,24 @@ export default function ViewProfilePage() {
         </div>
       ) : null}
 
-      {menuOpen ? (
-        <div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/60 p-4" onClick={() => setMenuOpen(false)}>
-          <div className="w-full max-w-[360px] rounded-3xl bg-black px-4 py-5" onClick={(event) => event.stopPropagation()}>
-            <div className="mb-4 flex flex-col items-center">
-              <Avatar src={avatarUrl} name={profileDisplayName} size={72} />
-              <p className="mt-2 truncate text-base font-bold">{profileDisplayName}</p>
-              <p className="truncate text-sm text-[#9CA3AF]">{(profileUser?.handle || decodedHandle).replace(/^@/, '')}</p>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {hasStory ? <MenuAction icon={<FiPlay />} label="View Stories" onClick={() => { setMenuOpen(false); openStory(); }} /> : null}
-              {!isOwnProfile ? <MenuAction icon={isFollowing ? <FiUserMinus /> : <FiUserPlus />} label={isFollowing ? 'Unfollow' : 'Follow'} onClick={() => { setMenuOpen(false); void handleFollow(); }} /> : null}
-              {!isOwnProfile ? <MenuAction icon={<FiUsers />} label="Invite to group" onClick={() => { setMenuOpen(false); setInviteOpen(true); }} /> : null}
-              <MenuAction icon={<FiShare2 />} label="Share profile" onClick={() => { setMenuOpen(false); setShareOpen(true); }} />
-              <MenuAction icon={<FiFlag />} label="QR code" onClick={() => { setMenuOpen(false); void openQr(); }} />
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <GazetteerMenuSheet
+        visible={menuOpen}
+        title={profileDisplayName}
+        subtitle={(profileUser?.handle || decodedHandle).replace(/^@/, '')}
+        cancelLabel="Cancel"
+        onDismiss={() => setMenuOpen(false)}
+        options={[
+          ...(hasStory ? [{ label: 'View Stories', icon: <FiPlay className="h-4 w-4" />, onPress: () => openStory() }] : []),
+          ...(!isOwnProfile ? [{
+            label: isFollowing ? 'Unfollow' : 'Follow',
+            icon: isFollowing ? <FiUserMinus className="h-4 w-4" /> : <FiUserPlus className="h-4 w-4" />,
+            onPress: () => { void handleFollow(); },
+          }] : []),
+          ...(!isOwnProfile ? [{ label: 'Invite to group', icon: <FiUsers className="h-4 w-4" />, onPress: () => setInviteOpen(true) }] : []),
+          { label: 'Share profile', icon: <FiShare2 className="h-4 w-4" />, onPress: () => setShareOpen(true) },
+          { label: 'QR code', icon: <FiFlag className="h-4 w-4" />, onPress: () => { void openQr(); } },
+        ]}
+      />
 
       {notifyOpen ? (
         <div className="fixed inset-0 z-[230] flex items-end bg-black/55" onClick={() => setNotifyOpen(false)}>
@@ -1048,19 +1049,6 @@ function SocialIcon({ label, onClick, children }: { label: string; onClick: () =
   return (
     <button type="button" onClick={onClick} aria-label={label} className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/20 bg-black text-white">
       {children}
-    </button>
-  );
-}
-
-function MenuAction({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onClick()}
-      className="flex flex-col items-center gap-1 text-center text-[11px] font-semibold"
-    >
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white">{icon}</span>
-      {label}
     </button>
   );
 }

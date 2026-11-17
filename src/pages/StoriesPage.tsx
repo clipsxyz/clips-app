@@ -23,6 +23,8 @@ import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils
 import { storyHasRenderableMedia } from '../utils/storyMediaNative';
 import { storyTextFontSize } from '../utils/storyTextStyleNative';
 import { StoryLinkStory } from '../components/stories/StoryLinkCard';
+import StoryProfileShareCard from '../components/stories/StoryProfileShareCard';
+import { profileShareHandleFromText } from '../utils/profileShareStory';
 import { extractFirstHttpUrl } from '../utils/linkPreview';
 import { siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
@@ -32,6 +34,7 @@ import type { Story, StoryGroup, Post, StoryViewerIdentity } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+import GazetteerMenuSheet from '../components/GazetteerMenuSheet';
 
 function storyHandleKey(handle?: string | null): string {
     return (handle || '').replace(/^@/, '').trim().toLowerCase();
@@ -1860,6 +1863,9 @@ export default function StoriesPage() {
         || (((currentStory as any)?.mediaItems || []).find((m: any) => m?.type === 'text')?.text)
         || ''
     ).trim();
+    const profileShareHandle = currentStory?.mediaType === 'video'
+        ? null
+        : profileShareHandleFromText(currentStoryText);
     // Image/MP4 (or any story with real media): author is already on the post card or in the frame—no extra "Shared from" bar.
     // Text-only shares: keep the explicit credit (no handle on a full-bleed image like a reposted clip).
     const isCurrentStoryVisualShare =
@@ -2248,6 +2254,21 @@ export default function StoriesPage() {
                                     }
                                     
                                     // Not a shared post - show regular story content
+                                    if (profileShareHandle && currentStory?.mediaUrl) {
+                                        return (
+                                            <StoryProfileShareCard
+                                                handle={profileShareHandle}
+                                                avatarUrl={currentStory.mediaUrl}
+                                                onViewProfile={() => {
+                                                    const handle = profileShareHandle;
+                                                    setViewingStories(false);
+                                                    setTimeout(() => {
+                                                        navigate(`/user/${encodeURIComponent(handle)}`);
+                                                    }, 100);
+                                                }}
+                                            />
+                                        );
+                                    }
                                     if (currentStory?.mediaUrl) {
                                         return currentStory.mediaType === 'video' ? (
                                             <video
@@ -2978,7 +2999,7 @@ export default function StoriesPage() {
 
                     {/* Story Text - Only show for original stories (not feed re-shares),
                         and only if media is not a generated text image (data URL) */}
-                    {currentStoryText && !currentStory?.sharedFromPost && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
+                    {currentStoryText && !profileShareHandle && !currentStory?.sharedFromPost && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
                         <div className="absolute bottom-32 left-0 right-0 px-4 z-[55] pointer-events-none">
                             <div className="backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg max-w-md mx-auto pointer-events-auto">
                                 <p
@@ -3678,63 +3699,32 @@ export default function StoriesPage() {
                     />
                 )}
 
-                {/* Shared Post Modal - Instagram style card popup */}
-                {showSharedPostModal && originalPost && currentStory?.sharedFromPost && (
-                    <div
-                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
-                        onClick={() => {
-                            setShowSharedPostModal(false);
-                        }}
-                    >
-                        <div
-                            className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                                    View Original Post
-                                </h3>
-                                <button
-                                    onClick={() => setShowSharedPostModal(false)}
-                                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
-                                >
-                                    <FiX className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                                </button>
-                            </div>
-                            
-                            <div className="mb-4">
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                                    This story was shared from a post by <span className="font-semibold text-gray-900 dark:text-gray-100">{originalPost.userHandle}</span>
-                                </p>
-                            </div>
-
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => {
-                                        setShowSharedPostModal(false);
-                                        setFullPost(originalPost);
-                                        setShowScenesModal(true);
-                                    }}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-blue-500 text-white font-medium hover:bg-blue-600 transition-colors"
-                                >
-                                    View Full Post
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setShowSharedPostModal(false);
-                                        setViewingStories(false);
-                                        setTimeout(() => {
-                                            navigate(`/user/${encodeURIComponent(originalPost.userHandle)}`);
-                                        }, 100);
-                                    }}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                                >
-                                    View Profile
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                <GazetteerMenuSheet
+                    visible={Boolean(showSharedPostModal && originalPost && currentStory?.sharedFromPost)}
+                    title="View original post"
+                    subtitle={originalPost ? `This story was shared from a post by ${originalPost.userHandle}` : undefined}
+                    cancelLabel="Cancel"
+                    onDismiss={() => setShowSharedPostModal(false)}
+                    options={originalPost ? [
+                        {
+                            label: 'View full post',
+                            onPress: () => {
+                                setFullPost(originalPost);
+                                setShowScenesModal(true);
+                            },
+                        },
+                        {
+                            label: 'View profile',
+                            onPress: () => {
+                                const handle = originalPost.userHandle;
+                                setViewingStories(false);
+                                setTimeout(() => {
+                                    navigate(`/user/${encodeURIComponent(handle)}`);
+                                }, 100);
+                            },
+                        },
+                    ] : []}
+                />
             </>
         );
     }

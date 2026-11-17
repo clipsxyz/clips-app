@@ -14,6 +14,8 @@ import {
 } from '../../utils/storyMediaNative';
 import StorySafeVideo from './StorySafeVideo.native';
 import StoryLinkCard from './StoryLinkCard.native';
+import StoryProfileShareCard from './StoryProfileShareCard.native';
+import { profileShareHandleFromText } from '../../utils/profileShareStory';
 import { useLinkPreview } from '../../hooks/useLinkPreview';
 import {
     captionWithoutLinkUrl,
@@ -28,10 +30,11 @@ type Props = {
     paused: boolean;
     authorAvatar?: string;
     authorName?: string;
+    onViewProfile?: (handle: string) => void;
 };
 
 /** Regular (non–shared-post) story media: video, image, or text-only template. */
-export default function StoryViewerMedia({ story, isMuted, paused, authorAvatar, authorName }: Props) {
+export default function StoryViewerMedia({ story, isMuted, paused, authorAvatar, authorName, onViewProfile }: Props) {
     const text = getStoryTextContent(story);
     const mediaUri = pickStoryMediaUri(story) || story.mediaUrl;
     const videoSource = storyVideoSource(mediaUri);
@@ -61,6 +64,17 @@ export default function StoryViewerMedia({ story, isMuted, paused, authorAvatar,
                 muted={isMuted}
                 paused={paused}
                 onError={() => setVideoFailed(true)}
+            />
+        );
+    }
+
+    const profileShareHandle = isVideo ? null : profileShareHandleFromText(text);
+    if (profileShareHandle) {
+        return (
+            <StoryProfileShareCard
+                handle={profileShareHandle}
+                avatarUrl={story.mediaUrl}
+                onViewProfile={onViewProfile}
             />
         );
     }

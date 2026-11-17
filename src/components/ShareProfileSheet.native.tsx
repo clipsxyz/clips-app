@@ -219,7 +219,7 @@ export default function ShareProfileSheet({
                     {isSharingStory ? (
                         <ActivityIndicator size="small" color="#fff" />
                     ) : (
-                        <Icon name="play" size={22} color="#fff" />
+                        <Icon name="sparkles-outline" size={22} color="#fff" />
                     )}
                 </IconCircle>
             ),

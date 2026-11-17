@@ -35,9 +35,11 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
 import StoryViewerMedia from '../components/stories/StoryViewerMedia.native';
 import { getStoryTextContent } from '../utils/storyTextStyleNative';
+import { profileShareHandleFromText } from '../utils/profileShareStory';
 import { extractFirstHttpUrl } from '../utils/linkPreview';
 import StorySharedPostViewer from '../components/stories/StorySharedPostViewer.native';
 import StoryProfileCard from '../components/stories/StoryProfileCard.native';
+import GazetteerMenuSheet from '../components/GazetteerMenuSheet.native';
 import StoryDeliveryFx, {
     type StoryDeliveryFxState,
 } from '../components/stories/StoryDeliveryFx.native';
@@ -1368,8 +1370,12 @@ export default function StoriesScreen({ route, navigation }: any) {
     );
     // Captions on media stories only — text-only body is rendered by StoryViewerMedia /
     // StorySharedPostViewer (a second overlay was duplicating shared feed statements).
+    const profileShareHandle = currentStory?.mediaType === 'video'
+        ? null
+        : profileShareHandleFromText(currentStoryText);
     const showMediaTextOverlay =
         !!currentStoryText &&
+        !profileShareHandle &&
         !currentStory?.sharedFromPost &&
         !!currentStory?.mediaUrl &&
         !currentStory.mediaUrl.startsWith('data:image');
@@ -1458,6 +1464,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                             style={StyleSheet.absoluteFill}
                             pointerEvents={
                                 currentStory.sharedFromPost ||
+                                !!profileShareHandle ||
                                 (!currentStory.mediaUrl &&
                                     !!extractFirstHttpUrl(getStoryTextContent(currentStory)))
                                     ? 'box-none'
@@ -1495,6 +1502,12 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     paused={paused || isHoldingToPause || !!deliveryFx}
                                     authorAvatar={currentGroup.avatarUrl}
                                     authorName={currentGroup.userHandle}
+                                    onViewProfile={(handle) => {
+                                        closeStories();
+                                        setTimeout(() => {
+                                            navigation.navigate('ViewProfile', { handle });
+                                        }, 100);
+                                    }}
                                 />
                             )}
                         </View>
@@ -1674,7 +1687,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                             );
                         })}
 
-                    {storyTagPins(currentStory).map((pin) => (
+                    {profileShareHandle ? null : storyTagPins(currentStory).map((pin) => (
                         <TouchableOpacity
                             key={`tag-${pin.handle}`}
                             activeOpacity={0.85}
@@ -1798,84 +1811,39 @@ export default function StoriesScreen({ route, navigation }: any) {
                 </View>
             </Modal>
 
-            <Modal
+            <GazetteerMenuSheet
                 visible={showSharedPostModal}
-                transparent
-                animationType="fade"
-                onRequestClose={closeSharedPostModal}
-            >
-                <View style={styles.sharedPostBackdrop}>
-                    <Pressable
-                        style={StyleSheet.absoluteFill}
-                        onPress={closeSharedPostModal}
-                        accessibilityRole="button"
-                        accessibilityLabel="Dismiss"
-                    />
-                    <View style={styles.sharedPostCard}>
-                        <View style={styles.sharedPostCardHeader}>
-                            <Text style={styles.sharedPostCardTitle}>View original post</Text>
-                            <TouchableOpacity
-                                onPress={closeSharedPostModal}
-                                style={styles.sharedPostCloseBtn}
-                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                accessibilityRole="button"
-                                accessibilityLabel="Close"
-                            >
-                                <Icon name="close" size={ox(22)} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {originalPost ? (
-                            <Text style={styles.sharedModalSub}>
-                                This story was shared from a post by{' '}
-                                <Text style={styles.sharedModalSubStrong}>
-                                    {originalPost.userHandle}
-                                </Text>
-                            </Text>
-                        ) : sharedPostFetchFailed ? (
-                            <Text style={styles.sharedModalSub}>
-                                Couldn’t load the original post.
-                            </Text>
-                        ) : (
-                            <View style={styles.sharedPostLoadingRow}>
-                                <ActivityIndicator size="small" color="#60A5FA" />
-                                <Text style={[styles.sharedModalSub, { marginBottom: 0 }]}>
-                                    Loading post…
-                                </Text>
-                            </View>
-                        )}
-
-                        <TouchableOpacity
-                            style={[
-                                styles.sheetActionButton,
-                                styles.sheetActionPrimary,
-                                !originalPost && styles.sheetActionDisabled,
-                            ]}
-                            onPress={openFullPostFromStory}
-                            disabled={!originalPost}
-                        >
-                            <Text style={styles.sheetActionText}>View full post</Text>
-                        </TouchableOpacity>
-
-                        {originalPost ? (
-                            <TouchableOpacity
-                                style={[styles.sheetActionButton, styles.sheetActionSecondary]}
-                                onPress={() => {
-                                    setShowSharedPostModal(false);
-                                    closeStories();
-                                    setTimeout(() => {
-                                        navigation.navigate('ViewProfile', {
-                                            handle: originalPost.userHandle,
-                                        });
-                                    }, 100);
-                                }}
-                            >
-                                <Text style={styles.sheetActionTextSecondary}>View profile</Text>
-                            </TouchableOpacity>
-                        ) : null}
-                    </View>
-                </View>
-            </Modal>
+                title="View original post"
+                subtitle={
+                    originalPost
+                        ? `This story was shared from a post by ${originalPost.userHandle}`
+                        : sharedPostFetchFailed
+                          ? 'Couldn’t load the original post.'
+                          : 'Loading post…'
+                }
+                cancelLabel="Cancel"
+                onDismiss={closeSharedPostModal}
+                options={
+                    originalPost
+                        ? [
+                              {
+                                  label: 'View full post',
+                                  onPress: openFullPostFromStory,
+                              },
+                              {
+                                  label: 'View profile',
+                                  onPress: () => {
+                                      const handle = originalPost.userHandle;
+                                      closeStories();
+                                      setTimeout(() => {
+                                          navigation.navigate('ViewProfile', { handle });
+                                      }, 100);
+                                  },
+                              },
+                          ]
+                        : []
+                }
+            />
 
             <ImageFullscreenModal
                 post={imageFullscreenPost}

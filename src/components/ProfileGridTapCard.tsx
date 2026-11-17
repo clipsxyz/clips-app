@@ -24,6 +24,8 @@ export type ProfileGridTapOrigin = {
 const ACTION_ROW = 52;
 const STACK_GAP = 12;
 const ACTION_BORDER = 2;
+const MEDIA_RADIUS = 28;
+const TILE_RADIUS = 8;
 
 export type ProfileGridTapAction = {
   label: string;
@@ -123,6 +125,8 @@ export default function ProfileGridTapCard({
       ? frame
       : origin;
   const actionsOn = expanded && !closing && !textFull;
+  const outerRadius = textFull ? 0 : expanded && !closing ? MEDIA_RADIUS : TILE_RADIUS;
+  const innerRadius = textFull ? 0 : Math.max(0, outerRadius - ACTION_BORDER);
 
   const shell = (
     <div className="fixed inset-0 z-[240]" role="dialog" aria-label="Post">
@@ -134,15 +138,18 @@ export default function ProfileGridTapCard({
         onClick={requestClose}
       />
       <div
-        className="absolute overflow-hidden bg-black transition-[top,left,width,height,border-radius] duration-300 ease-out"
+        className="absolute overflow-hidden transition-[top,left,width,height,border-radius,padding] duration-300 ease-out"
         style={{
           top: shown.top,
           left: shown.left,
           width: shown.width,
           height: shown.height,
-          borderRadius: textFull ? 0 : expanded && !closing ? 18 : 8,
+          borderRadius: outerRadius,
+          padding: textFull ? 0 : ACTION_BORDER,
+          background: textFull ? '#000000' : 'linear-gradient(135deg, #22C55E, #FFD400, #FF4D9A)',
         }}
       >
+        <div className="relative h-full w-full overflow-hidden bg-black" style={{ borderRadius: innerRadius }}>
         {video && playback ? (
           <video
             ref={videoEl}
@@ -203,19 +210,21 @@ export default function ProfileGridTapCard({
             {muted ? <FiVolumeX size={13} /> : <FiVolume2 size={13} />}
           </button>
         ) : null}
+        </div>
       </div>
       <div
-        className="absolute rounded-2xl p-0.5"
+        className="absolute p-0.5"
         style={{
           top: frame.top + frame.height + STACK_GAP,
           left: frame.left,
           width: frame.width,
+          borderRadius: MEDIA_RADIUS,
           background: 'linear-gradient(135deg, #22C55E, #FFD400, #FF4D9A)',
           opacity: actionsOn ? 1 : 0,
           pointerEvents: actionsOn ? 'auto' : 'none',
         }}
       >
-        <div className="overflow-hidden rounded-[14px] bg-black text-white">
+        <div className="overflow-hidden bg-black text-white" style={{ borderRadius: MEDIA_RADIUS - ACTION_BORDER }}>
         {actions
           ? actions.map((action, index) => (
               <React.Fragment key={action.label}>
