@@ -4,6 +4,7 @@ import { isHandleStoryRingSeen, isStoryMarkedViewed, storyHasViewed } from './st
 import { getFollowedUsers, posts as localPosts } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
+import { storyRailLinkLabel } from './storyLinkBrand';
 import {
     isVideoUrl,
     pickStoryMediaUri,
@@ -330,7 +331,9 @@ export async function buildStories24RailItems(
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
             (latest.sharedFromPost ? 'Shared a post' : 'New story');
-        const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
+        const linkLabel = storyRailLinkLabel(text);
+        const titleSource = linkLabel || text;
+        const title = titleSource.length > 42 ? `${titleSource.slice(0, 40)}…` : titleSource;
         const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
 
         const isViewerGroup =

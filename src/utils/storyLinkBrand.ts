@@ -1,3 +1,5 @@
+import { extractFirstHttpUrl } from './linkPreview';
+
 export type StoryLinkBrandTheme = {
     id: string;
     /** Card container fill. */
@@ -213,6 +215,47 @@ const NEWS_PUBLISHERS: { hosts: string[]; name: string }[] = [
     { hosts: ['reuters.com'], name: 'Reuters' },
     { hosts: ['cnn.com'], name: 'CNN' },
 ];
+
+const RAIL_BRAND_NAMES: Record<string, string> = {
+    tiktok: 'TikTok',
+    instagram: 'Instagram',
+    youtube: 'YouTube',
+    twitter: 'X',
+    skynews: 'Sky News',
+    rte: 'RTÉ',
+    bbc: 'BBC',
+    facebook: 'Facebook',
+    reddit: 'Reddit',
+    linkedin: 'LinkedIn',
+    amazon: 'Amazon',
+};
+
+/**
+ * Label for a newsfeed story-rail card.
+ * A pasted URL becomes the site name. A note written with the link stays, without the address.
+ * Returns null when the text is not a link.
+ */
+export function storyRailLinkLabel(text?: string | null): string | null {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    const url = extractFirstHttpUrl(raw);
+    if (!url) return null;
+    const note = raw
+        .split(url)
+        .join(' ')
+        .replace(/https?:\/\/\S+/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (note && !extractFirstHttpUrl(note)) {
+        return note.length > 42 ? `${note.slice(0, 40)}…` : note;
+    }
+    const news = storyLinkNewsName(url);
+    if (news) return news;
+    const brand = storyLinkBrandForUrl(url);
+    if (brand.id !== 'default' && RAIL_BRAND_NAMES[brand.id]) return RAIL_BRAND_NAMES[brand.id];
+    const host = storyLinkHostname(url);
+    return host || 'Link';
+}
 
 /** Display name for a news publisher, or empty when the URL is not one of those sites. */
 export function storyLinkNewsName(url?: string | null): string {

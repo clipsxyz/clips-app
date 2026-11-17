@@ -34,6 +34,7 @@ import {
   STORIES24_RAIL_MAX_CARDS,
   stories24RailItemIsSeen,
 } from './utils/stories24Rail';
+import { storyRailLinkLabel } from './utils/storyLinkBrand';
 import {
   getFeedNewPostsPollMs,
   getHeaderCountsPollMs,
@@ -6225,8 +6226,10 @@ function Stories24FeedRail({
               : item.avatarUrl || getAvatarForHandle(item.handle);
             const avatarSrc = avatarRaw ? rewriteMediaUrlForClient(avatarRaw) : undefined;
             const rawTitle = (item.title || '').trim();
-            const caption =
-              rawTitle && !['shared a post', 'new story', 'add yours'].includes(rawTitle.toLowerCase())
+            const linkLabel = storyRailLinkLabel(rawTitle);
+            const caption = linkLabel
+              ? linkLabel
+              : rawTitle && !['shared a post', 'new story', 'add yours'].includes(rawTitle.toLowerCase())
                 ? rawTitle
                 : '';
             const displayHandle = item.handle.replace(/^@/, '').includes('@')
@@ -8512,11 +8515,13 @@ function FeedPageWrapper() {
           const text =
             (latest.text || (latest as any).text_content || '').trim()
             || (latest.sharedFromPost ? 'Shared a post' : 'New story');
-          const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
+          const linkLabel = storyRailLinkLabel(text);
+          const titleSource = linkLabel || text;
+          const title = titleSource.length > 42 ? `${titleSource.slice(0, 40)}…` : titleSource;
           const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
 
-          // Dedicated visual fallback for text-only stories â€” template background + byline + body (rail aspect).
-          if (!thumb && latestMediaType !== 'video') {
+          // A pasted link stays a short site name. Painting the address on the card is what spilled the URL across the rail.
+          if (!thumb && latestMediaType !== 'video' && !linkLabel) {
             thumb = await generateTextStoryPreview(text, {
               textStyle: {
                 color: latest.textStyle?.color ?? latest.textColor,

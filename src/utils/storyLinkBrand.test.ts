@@ -1,11 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import {
+    storyRailLinkLabel,
     storyLinkBrandForUrl,
     storyLinkFaviconUrl,
     storyLinkHostname,
     storyLinkNewsName,
     storyLinkSlugHeadline,
 } from './storyLinkBrand';
+
+describe('storyRailLinkLabel', () => {
+    it('uses the site name instead of a pasted address', () => {
+        expect(storyRailLinkLabel('https://www.tiktok.com/@gazetteer/video/1')).toBe('TikTok');
+        expect(storyRailLinkLabel('https://youtu.be/abc')).toBe('YouTube');
+        expect(
+            storyRailLinkLabel('https://news.sky.com/story/minister-quits-over-budget-row-13204521'),
+        ).toBe('Sky News');
+        expect(storyRailLinkLabel('https://example.com/a/b')).toBe('example.com');
+    });
+
+    it('keeps a written note and drops the address', () => {
+        expect(storyRailLinkLabel('Worth a look\nhttps://www.rte.ie/news/politics/1')).toBe(
+            'Worth a look',
+        );
+    });
+
+    it('leaves ordinary story text alone', () => {
+        expect(storyRailLinkLabel('Good morning Dublin')).toBeNull();
+    });
+});
 
 describe('storyLinkBrandForUrl', () => {
     it('reads the hostname without www', () => {

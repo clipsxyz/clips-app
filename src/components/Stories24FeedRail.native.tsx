@@ -35,6 +35,7 @@ import Stories24MapPinIcon from './Stories24MapPinIcon.native';
 import FeedPlusIcon from './FeedPlusIcon.native';
 import Avatar from './Avatar.native';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
+import { storyRailLinkLabel } from '../utils/storyLinkBrand';
 import { UCL_SHEET_GRADIENT, UCL_SHEET_GRADIENT_LOCATIONS } from '../theme/gazetteerAmbientNative';
 import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
 import { useAuth } from '../context/Auth';
@@ -126,6 +127,8 @@ function displayRailHandle(handle: string): string {
 
 function railCaption(title: string | undefined): string {
     const text = (title || '').trim();
+    const linkLabel = storyRailLinkLabel(text);
+    if (linkLabel) return linkLabel;
     if (!text || RAIL_CAPTION_PLACEHOLDERS.has(text.toLowerCase())) return '';
     return text;
 }
