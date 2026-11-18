@@ -567,6 +567,25 @@ class StoryControllerTest extends TestCase
             ]);
     }
 
+    public function test_expired_public_story_tells_the_dm_card_it_is_gone(): void
+    {
+        $user = User::factory()->create(['is_private' => false]);
+        $story = Story::factory()->forUser($user)->create([
+            'text' => 'Yesterday',
+            'audience' => 'public',
+            'expires_at' => now()->subHour(),
+        ]);
+
+        $this->getJson(
+            '/api/public/stories?user='.rawurlencode($user->handle).'&story='.$story->id,
+        )
+            ->assertStatus(410)
+            ->assertJsonFragment([
+                'expired' => true,
+                'error' => 'Story no longer available',
+            ]);
+    }
+
     public function test_story_audience_is_visible_only_to_the_right_viewers(): void
     {
         $author = User::factory()->create(['is_private' => false]);

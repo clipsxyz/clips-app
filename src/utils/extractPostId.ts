@@ -1,3 +1,5 @@
+import { storyShareFromMessageText } from './dmStoryShare';
+
 export type SharedPostRef = { postId?: string; token?: string };
 
 /** Match public share links (`https://host/p/<token>`) emitted by buildShareablePostUrl. */
@@ -27,6 +29,8 @@ export function extractSharedPostRef(text: string): SharedPostRef | null {
 /** Extract a post id from DM text (URL, path, or known id formats). */
 export function extractPostId(text: string): string | null {
     if (!text) return null;
+    // A Stories 24 link carries a story uuid. That is not a feed post.
+    if (storyShareFromMessageText(text)) return null;
 
     const fullUrlPattern = /https?:\/\/[^\s/]+\/post\/([^\s/?&#]+?)(?:\/|\?|#|$)/i;
     let match = text.match(fullUrlPattern);

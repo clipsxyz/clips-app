@@ -1116,6 +1116,49 @@ export async function fetchPublicStory(userHandle: string, storyId: string): Pro
     return match || null;
 }
 
+/** Story card in a DM: a live story, or a flag once the 24 hours are up. */
+export async function fetchDmSharedStory(
+    userHandle: string,
+    storyId: string,
+): Promise<{ story: Story | null; expired: boolean }> {
+    const handle = (userHandle || '').trim();
+    const id = (storyId || '').trim();
+    if (!handle || !id) return { story: null, expired: true };
+
+    if (isLaravelApiEnabled()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const params = new URLSearchParams({ user: handle, story: id });
+            const response = await apiRequest(`/public/stories?${params.toString()}`);
+            if (!response || typeof response !== 'object') return { story: null, expired: true };
+            const story = mapLaravelStoryToStory(response);
+            if (story.expiresAt <= Date.now()) return { story: null, expired: true };
+            if (story.mediaUrl || story.videoPosterUrl || (story.text || '').trim()) {
+                return { story, expired: false };
+            }
+            const group = await fetchStoryGroupByHandle(handle);
+            const match = group?.stories.find((item) => item.id === id) || null;
+            if (match && match.expiresAt > Date.now()) return { story: match, expired: false };
+            return { story, expired: false };
+        } catch (error) {
+            const status = (error as { status?: number })?.status;
+            if (status === 410 || status === 404) return { story: null, expired: true };
+            try {
+                const group = await fetchStoryGroupByHandle(handle);
+                const match = group?.stories.find((item) => item.id === id) || null;
+                if (match && match.expiresAt > Date.now()) return { story: match, expired: false };
+            } catch {
+                /* the public request already failed */
+            }
+            return { story: null, expired: false };
+        }
+    }
+
+    const story = await fetchPublicStory(handle, id);
+    if (!story || story.expiresAt <= Date.now()) return { story: null, expired: true };
+    return { story, expired: false };
+}
+
 // Create a new story
 export async function createStory(
     userId: string,

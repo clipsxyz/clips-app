@@ -107,6 +107,8 @@ import DmReactionFlyOverlay, {
 } from '../components/DmReactionFlyOverlay.native';
 import DmMessagePressable from '../components/DmMessagePressable.native';
 import DmInlineVideoMessage from '../components/DmInlineVideoMessage.native';
+import DmSharedStoryCard from '../components/DmSharedStoryCard.native';
+import { storyShareFromMessageText } from '../utils/dmStoryShare';
 import IMessageDmBubbleShell from '../components/IMessageDmBubbleShell.native';
 import {
     DM_SENT_BRASS,
@@ -807,6 +809,59 @@ const DmMessageRow = React.memo(function DmMessageRow({
                             <Text style={styles.messageTimeOutside}>
                                 {ctx.formatMessageClock(item.timestamp)}
                             </Text>
+                        </View>
+                    </View>
+                </>
+            );
+        } else if (storyShareFromMessageText(item.text) && !item.imageUrl && !item.audioUrl) {
+            const storyShare = storyShareFromMessageText(item.text)!;
+            inner = (
+                <>
+                    {!isFromMe ? (
+                        <TouchableOpacity
+                            onPress={() => {
+                                if (item.senderHandle) {
+                                    navigation.navigate('ViewProfile', { handle: item.senderHandle });
+                                }
+                            }}
+                        >
+                            <Avatar
+                                src={senderAvatar}
+                                name={item.senderHandle?.split('@')[0] || 'User'}
+                                size={ox(28)}
+                            />
+                        </TouchableOpacity>
+                    ) : null}
+                    <View
+                        style={[
+                            styles.messageColumn,
+                            isFromMe ? styles.messageColumnMe : styles.messageColumnOther,
+                            styles.sharedPostColumn,
+                        ]}
+                    >
+                        <DmSharedStoryCard
+                            handle={storyShare.handle}
+                            storyId={storyShare.storyId}
+                            onPress={() =>
+                                navigation.navigate('Stories', {
+                                    openUserHandle: storyShare.handle,
+                                    openStoryId: storyShare.storyId,
+                                })
+                            }
+                        />
+                        {storyShare.caption ? (
+                            <Text
+                                style={[
+                                    styles.messageText,
+                                    styles.sharedPostCaption,
+                                    isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
+                                ]}
+                            >
+                                {storyShare.caption}
+                            </Text>
+                        ) : null}
+                        <View style={[styles.messageMetaRow, isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther]}>
+                            <Text style={styles.messageTimeOutside}>{ctx.formatMessageClock(item.timestamp)}</Text>
                         </View>
                     </View>
                 </>

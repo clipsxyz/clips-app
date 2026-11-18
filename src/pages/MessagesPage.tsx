@@ -32,6 +32,8 @@ import { getPostById, getFollowedUsers, getState, toggleLike, incrementShares } 
 import { toggleFollow, fetchUserProfile, leaveChatGroup, uploadFile } from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
+import { storyShareFromMessageText } from '../utils/dmStoryShare';
+import DmSharedStoryCard from '../components/DmSharedStoryCard';
 import ScenesModal from '../components/ScenesModal';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
@@ -111,6 +113,7 @@ function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: s
 // Helper function to extract post ID from message text
 function extractPostId(text: string): string | null {
     if (!text) return null;
+    if (storyShareFromMessageText(text)) return null;
     
     // Log the full text for debugging
     console.log('Extracting post ID from text:', text);
@@ -3095,6 +3098,32 @@ export default function MessagesPage() {
                                                     );
                                                 }
                                                 
+                                                const storyShare = storyShareFromMessageText(msg.text);
+                                                if (storyShare) {
+                                                    return (
+                                                        <div className="mb-2 flex w-full justify-end">
+                                                            <div style={{ width: threadCardMaxWidth, maxWidth: '100%' }}>
+                                                                <DmSharedStoryCard
+                                                                    handle={storyShare.handle}
+                                                                    storyId={storyShare.storyId}
+                                                                    onOpen={() =>
+                                                                        navigate('/stories', {
+                                                                            state: {
+                                                                                openUserHandle: storyShare.handle,
+                                                                                openStoryId: storyShare.storyId,
+                                                                                fromDmViewStory: true,
+                                                                            },
+                                                                        })
+                                                                    }
+                                                                />
+                                                                {storyShare.caption ? (
+                                                                    <p className="mt-1.5 whitespace-pre-wrap rounded-2xl bg-white/10 px-2.5 py-1.5 text-sm text-white">{storyShare.caption}</p>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+
                                                 // Regular message - render in bubble (only if not a post URL)
                                                 // Don't show text if it's a post URL (we show SharedPostCard or loading state instead)
                                                 if (postId) {
@@ -3488,6 +3517,35 @@ export default function MessagesPage() {
                                                     return null;
                                                 }
                                                 
+                                                const incomingStoryShare = storyShareFromMessageText(msg.text);
+                                                if (incomingStoryShare) {
+                                                    return (
+                                                        <div className="mb-2 flex w-full items-start gap-2">
+                                                            {msg.senderAvatar ? (
+                                                                <Avatar src={msg.senderAvatar} name={msg.senderHandle} size="sm" />
+                                                            ) : null}
+                                                            <div style={{ width: threadCardMaxWidth, maxWidth: '100%' }}>
+                                                                <DmSharedStoryCard
+                                                                    handle={incomingStoryShare.handle}
+                                                                    storyId={incomingStoryShare.storyId}
+                                                                    onOpen={() =>
+                                                                        navigate('/stories', {
+                                                                            state: {
+                                                                                openUserHandle: incomingStoryShare.handle,
+                                                                                openStoryId: incomingStoryShare.storyId,
+                                                                                fromDmViewStory: true,
+                                                                            },
+                                                                        })
+                                                                    }
+                                                                />
+                                                                {incomingStoryShare.caption ? (
+                                                                    <p className="mt-1.5 whitespace-pre-wrap rounded-2xl bg-white/10 px-2.5 py-1.5 text-sm text-white">{incomingStoryShare.caption}</p>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+
                                                 // Also check if text contains a post URL pattern - if so, don't show the text
                                                 // (it might be loading or the postId wasn't set properly)
                                                 const hasPostUrlPattern = msg.text && (

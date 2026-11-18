@@ -1,7 +1,7 @@
 import React from 'react';
 import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { parsePublicShareLink } from '../utils/publicShareLink';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock, FiUsers } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock, FiUsers, FiCheck } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, sortStoriesNewestFirst, getLastStoriesLoadSource, fetchStoryInsights, storyViewerIdentities } from '../api/stories';
@@ -16,7 +16,7 @@ import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollow
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { reclipPost } from '../api/posts';
-import { getAvatarForHandle } from '../api/users';
+import { getAvatarForHandle, resolveAvatarForUser } from '../api/users';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
@@ -28,7 +28,10 @@ import { profileShareHandleFromText } from '../utils/profileShareStory';
 import { extractFirstHttpUrl } from '../utils/linkPreview';
 import { siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
-import { toggleFollow } from '../api/client';
+import { toggleFollow, fetchFollowing } from '../api/client';
+import { appendMessage } from '../api/messages';
+import { buildStoryDmText } from '../utils/dmStoryShare';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post, StoryViewerIdentity } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
@@ -365,6 +368,73 @@ export default function StoriesPage() {
     const [showReplyComposer, setShowReplyComposer] = React.useState(false);
     const [replyText, setReplyText] = React.useState('');
     const [showStoryShareModal, setShowStoryShareModal] = React.useState(false);
+    const [storyDmOpen, setStoryDmOpen] = React.useState(false);
+    const [storyDmContacts, setStoryDmContacts] = React.useState<Array<{ handle: string; avatarUrl?: string }>>([]);
+    const [storyDmLoading, setStoryDmLoading] = React.useState(false);
+    const [storyDmQuery, setStoryDmQuery] = React.useState('');
+    const [storyDmSelected, setStoryDmSelected] = React.useState<string[]>([]);
+    const [storyDmNote, setStoryDmNote] = React.useState('');
+    const [storyDmSending, setStoryDmSending] = React.useState(false);
+
+    React.useEffect(() => {
+        if (showStoryShareModal) return;
+        setStoryDmOpen(false);
+        setStoryDmQuery('');
+        setStoryDmSelected([]);
+        setStoryDmNote('');
+        setStoryDmSending(false);
+    }, [showStoryShareModal]);
+
+    React.useEffect(() => {
+        if (!showStoryShareModal || !storyDmOpen || !user?.id) return;
+        let cancelled = false;
+        setStoryDmLoading(true);
+        const mine = (user.handle || '').trim().toLowerCase();
+        const apply = (next: Array<{ handle: string; avatarUrl?: string }>) => {
+            if (cancelled) return;
+            setStoryDmContacts(next.filter((contact) => contact.handle.trim().toLowerCase() !== mine));
+        };
+        const fromLocal = () => {
+            getFollowedUsers(user.id)
+                .then((handles) => apply(handles.map((handle) => ({ handle, avatarUrl: getAvatarForHandle(handle) }))))
+                .catch(() => apply([]))
+                .finally(() => {
+                    if (!cancelled) setStoryDmLoading(false);
+                });
+        };
+        if (isLaravelApiEnabled() && user.handle) {
+            fetchFollowing(user.handle, 0, 100)
+                .then((res: { items?: Array<{ handle?: string; user_handle?: string }> }) => {
+                    const apiUsers = res?.items ?? [];
+                    return getFollowedUsers(user.id).then((localHandles) => {
+                        const byHandle = new Map<string, { handle: string; avatarUrl?: string }>();
+                        for (const row of apiUsers) {
+                            const handle = String(row?.handle ?? row?.user_handle ?? '').trim();
+                            if (!handle) continue;
+                            byHandle.set(handle.toLowerCase(), {
+                                handle,
+                                avatarUrl: resolveAvatarForUser(handle, row),
+                            });
+                        }
+                        for (const handle of localHandles) {
+                            const key = handle.toLowerCase();
+                            if (byHandle.has(key)) continue;
+                            byHandle.set(key, { handle, avatarUrl: getAvatarForHandle(handle) });
+                        }
+                        apply([...byHandle.values()]);
+                    });
+                })
+                .catch(() => fromLocal())
+                .finally(() => {
+                    if (!cancelled) setStoryDmLoading(false);
+                });
+        } else {
+            fromLocal();
+        }
+        return () => {
+            cancelled = true;
+        };
+    }, [showStoryShareModal, storyDmOpen, user?.id, user?.handle]);
     const [showInsightsSheet, setShowInsightsSheet] = React.useState(false);
     const [insightsStoryId, setInsightsStoryId] = React.useState<string | null>(null);
     const [insightsTab, setInsightsTab] = React.useState<'viewers' | 'replies'>('viewers');
@@ -3343,7 +3413,19 @@ export default function StoriesPage() {
                             onClick={(e) => e.stopPropagation()}
                         >
                             <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-base font-semibold">Share story</h3>
+                                {storyDmOpen ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setStoryDmOpen(false)}
+                                        className="p-2 rounded-full hover:bg-gray-800 transition-colors"
+                                        aria-label="Back"
+                                    >
+                                        <FiChevronLeft className="w-5 h-5 text-gray-300" />
+                                    </button>
+                                ) : (
+                                    <span className="w-9" />
+                                )}
+                                <h3 className="text-base font-semibold">{storyDmOpen ? 'Send in a message' : 'Share story'}</h3>
                                 <button
                                     onClick={() => setShowStoryShareModal(false)}
                                     className="p-2 rounded-full hover:bg-gray-800 transition-colors"
@@ -3352,7 +3434,127 @@ export default function StoriesPage() {
                                 </button>
                             </div>
 
+                            {storyDmOpen ? (
+                                <div className="space-y-2">
+                                    <input
+                                        type="text"
+                                        value={storyDmQuery}
+                                        onChange={(e) => setStoryDmQuery(e.target.value)}
+                                        placeholder="Search people you follow"
+                                        className="search-field w-full rounded-xl border-0 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder:text-gray-400 outline-none"
+                                    />
+                                    <div className="max-h-64 overflow-y-auto">
+                                        {storyDmLoading ? (
+                                            <p className="px-1 py-4 text-sm text-gray-400">Loading people…</p>
+                                        ) : storyDmContacts.filter((contact) => contact.handle.toLowerCase().includes(storyDmQuery.trim().toLowerCase())).length === 0 ? (
+                                            <p className="px-1 py-4 text-sm text-gray-400">Follow someone to send this story in a message.</p>
+                                        ) : (
+                                            storyDmContacts
+                                                .filter((contact) => contact.handle.toLowerCase().includes(storyDmQuery.trim().toLowerCase()))
+                                                .map((contact) => {
+                                                    const selected = storyDmSelected.includes(contact.handle);
+                                                    return (
+                                                    <button
+                                                        key={contact.handle}
+                                                        type="button"
+                                                        disabled={storyDmSending}
+                                                        onClick={() => {
+                                                            setStoryDmSelected((prev) => (
+                                                                prev.includes(contact.handle)
+                                                                    ? prev.filter((item) => item !== contact.handle)
+                                                                    : [...prev, contact.handle]
+                                                            ));
+                                                        }}
+                                                        className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left hover:bg-gray-800 disabled:opacity-60"
+                                                    >
+                                                        <Avatar src={contact.avatarUrl} name={contact.handle.split('@')[0]} size="sm" />
+                                                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                                                            {contact.handle.split('@')[0] || contact.handle}
+                                                        </span>
+                                                        {selected ? (
+                                                            <FiCheck className="h-4 w-4 shrink-0 text-white" />
+                                                        ) : (
+                                                            <span className="h-4 w-4 shrink-0 rounded-full border border-white/40" />
+                                                        )}
+                                                    </button>
+                                                    );
+                                                })
+                                        )}
+                                    </div>
+                                    {storyDmSelected.length > 0 ? (
+                                        <div className="border-t border-white/10 pt-3">
+                                            <p className="mb-2 truncate text-xs text-gray-300">
+                                                To: {storyDmSelected.map((item) => item.split('@')[0]).join(', ')}
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={storyDmNote}
+                                                    onChange={(e) => setStoryDmNote(e.target.value)}
+                                                    placeholder="Include message..."
+                                                    className="search-field min-w-0 flex-1 rounded-full border-0 bg-gray-800 px-3 py-2 text-sm text-white placeholder:text-gray-400 outline-none"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    disabled={storyDmSending || !user?.handle}
+                                                    onClick={() => {
+                                                        if (!user?.handle) {
+                                                            showToast?.('Sign in to send this story in a message.');
+                                                            return;
+                                                        }
+                                                        const url = getCurrentStoryShareUrl();
+                                                        const author = currentGroup?.userHandle || '';
+                                                        const text = buildStoryDmText(storyDmNote, author, url);
+                                                        const recipients = [...storyDmSelected];
+                                                        setStoryDmSending(true);
+                                                        void (async () => {
+                                                            try {
+                                                                for (const recipientHandle of recipients) {
+                                                                    await appendMessage(user.handle, recipientHandle, { text });
+                                                                }
+                                                                showToast?.(
+                                                                    recipients.length === 1
+                                                                        ? `Story sent to ${recipients[0].split('@')[0] || recipients[0]}`
+                                                                        : `Story sent to ${recipients.length} people`,
+                                                                );
+                                                                setShowStoryShareModal(false);
+                                                            } catch (err) {
+                                                                console.error('Send story to DM failed:', err);
+                                                                showToast?.('Could not send. Please try again.');
+                                                            } finally {
+                                                                setStoryDmSending(false);
+                                                            }
+                                                        })();
+                                                    }}
+                                                    className="shrink-0 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+                                                >
+                                                    {storyDmSending ? 'Sending…' : 'Send'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : (
                             <div className="space-y-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (!user?.handle) {
+                                            showToast?.('Sign in to send this story in a message.');
+                                            return;
+                                        }
+                                        setStoryDmOpen(true);
+                                    }}
+                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                                >
+                                    <span className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+                                        <FiMessageCircle className="w-4 h-4" />
+                                    </span>
+                                    <div className="flex-1 text-left">
+                                        <div className="text-sm font-semibold">Direct message</div>
+                                        <div className="text-xs text-gray-400">Send this story in a chat</div>
+                                    </div>
+                                </button>
                                 {/* Copy Link */}
                                 <button
                                     onClick={async () => {
@@ -3472,6 +3674,7 @@ export default function StoriesPage() {
                                     </div>
                                 </button>
                             </div>
+                            )}
                         </div>
                     </div>
                 )}

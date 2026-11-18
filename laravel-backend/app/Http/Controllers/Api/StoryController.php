@@ -257,16 +257,25 @@ class StoryController extends Controller
         $story = Story::query()
             ->where('id', $storyId)
             ->where('user_id', $user->id)
-            ->active()
-            ->where(function ($q) {
-                $q->where('audience', 'public')->orWhereNull('audience');
-            })
             ->withCount(['reactions', 'replies', 'views'])
             ->with('user:id,handle,display_name,avatar_url')
             ->first();
 
         if (! $story) {
             return response()->json(['error' => 'Story not found'], 404);
+        }
+
+        $audience = $story->audience;
+        $isPublicAudience = $audience === 'public' || $audience === null;
+        if (! $isPublicAudience) {
+            return response()->json(['error' => 'Story not found'], 404);
+        }
+
+        if ($story->isExpired()) {
+            return response()->json([
+                'error' => 'Story no longer available',
+                'expired' => true,
+            ], 410);
         }
 
         return response()->json($this->presentStory($story, false));

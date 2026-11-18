@@ -11,6 +11,19 @@ describe('extractPostId', () => {
     it('returns null when no post id is present', () => {
         expect(extractPostId('hey there')).toBeNull();
     });
+
+    it('does not treat a Stories 24 link uuid as a post', () => {
+        expect(
+            extractPostId(
+                'Check out this story by @Gavin@CA\nhttps://clips.app/stories?user=Gavin%40CA&story=e685933f-6882-48b2-8416-65a9a8cfa586',
+            ),
+        ).toBeNull();
+        expect(
+            extractSharedPostRef(
+                'https://clips.app/stories?user=Gavin%40CA&story=e685933f-6882-48b2-8416-65a9a8cfa586',
+            ),
+        ).toBeNull();
+    });
 });
 
 describe('extractSharedPostRef', () => {
