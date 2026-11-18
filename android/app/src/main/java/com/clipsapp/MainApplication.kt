@@ -7,6 +7,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.clipsapp.billing.GazetteerStoreBillingPackage
+import com.clipsapp.dm.DmDeviceFilesPackage
 import com.reactnativecompressor.CompressorPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -23,6 +24,9 @@ class MainApplication : Application(), ReactApplication {
           }
           if (none { it is GazetteerStoreBillingPackage }) {
             add(GazetteerStoreBillingPackage())
+          }
+          if (none { it is DmDeviceFilesPackage }) {
+            add(DmDeviceFilesPackage())
           }
         },
     )

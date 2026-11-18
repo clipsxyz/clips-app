@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark, FiHeart, FiRepeat, FiShare2, FiUsers } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiCheck, FiBell, FiBellOff, FiTrash2, FiBookmark, FiHeart, FiRepeat, FiShare2, FiUsers } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
@@ -166,14 +166,12 @@ function ConversationItem({
     onPin, 
     navigate,
     currentUserHandle,
-    onFollow,
     onToggleMute,
     onDeleteConversation,
     onMarkRead,
     onMarkUnread,
     isSwipeOpen,
     onSwipeOpenChange,
-    compactPhone,
     onOpenChatInfo,
     getAvatarSrc,
 }: { 
@@ -199,11 +197,10 @@ function ConversationItem({
     const SWIPE_OPEN_THRESHOLD_RATIO = viewportWidth < 360 ? 0.26 : viewportWidth < 430 ? 0.3 : 0.35;
     const rowId = inboxConversationRowId(conv);
     const isGroupRow = conv.kind === 'group';
-    const displayTitle = isGroupRow ? (conv.groupName || 'Group') : conv.otherHandle;
-    const isCurrentUser = !isGroupRow && currentUserHandle === conv.otherHandle;
+    const displayTitle = isGroupRow ? (conv.groupName || 'Group chat') : displayHandle(conv.otherHandle);
+    const preview = conversationPreviewText(conv, currentUserHandle);
+    const timestamp = compactInboxTime(conv.lastMessage?.timestamp);
     const hasStory = !isGroupRow && (conv.hasUnviewedStories || false);
-    const isFollowing = conv.isFollowing || false;
-    const [showFollowCheck, setShowFollowCheck] = React.useState(isFollowing);
     const [swipeOffset, setSwipeOffset] = React.useState(0);
     const [pulseOpen, setPulseOpen] = React.useState(false);
     const touchStartXRef = React.useRef<number | null>(null);
@@ -213,15 +210,6 @@ function ConversationItem({
     const touchStartTsRef = React.useRef<number | null>(null);
     const swipeStartOffsetRef = React.useRef(0);
     const isSwipingRef = React.useRef(false);
-
-    // Show follow checkmark briefly after following
-    React.useEffect(() => {
-        if (isFollowing) {
-            setShowFollowCheck(true);
-        } else {
-            setShowFollowCheck(false);
-        }
-    }, [isFollowing]);
 
     React.useEffect(() => {
         if (isSwipeOpen) {
@@ -245,13 +233,6 @@ function ConversationItem({
         } else {
             // Navigate to DM conversation
             navigate(`/messages/${encodeURIComponent(conv.otherHandle)}`);
-        }
-    };
-
-    const handleFollowClick = async (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (onFollow) {
-            await onFollow(conv.otherHandle);
         }
     };
 
@@ -335,7 +316,7 @@ function ConversationItem({
     const rowShadow = revealProgress > 0 ? '0 8px 24px rgba(255, 255, 255, 0.08)' : 'none';
 
     return (
-        <div className="relative overflow-hidden rounded-lg" data-conversation-row="true">
+        <div className="relative overflow-hidden" data-conversation-row="true">
             <div
                 className="pointer-events-none absolute inset-0 rounded-lg"
                 style={{
@@ -408,30 +389,24 @@ function ConversationItem({
             </div>
 
             <div
-                className={`relative z-10 flex items-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group bg-white dark:bg-[#070a12] ${
-                    compactPhone ? 'gap-2.5 py-2.5 px-1.5' : 'gap-3 py-3 px-2'
-                }`}
+                className="relative z-10 flex items-center gap-3.5 border-b border-white/[0.06] bg-transparent px-4 py-3"
                 style={{
                     transform: `translateX(-${swipeOffset}px) scale(${rowScale})`,
                     transformOrigin: 'right center',
-                    boxShadow: pulseOpen ? '0 0 0 2px rgba(255, 255, 255, 0.35), 0 10px 24px rgba(255, 255, 255, 0.12)' : rowShadow,
+                    boxShadow: pulseOpen ? '0 0 0 2px rgba(255, 255, 255, 0.35)' : rowShadow,
                     transition: isSwipingRef.current ? 'none' : 'transform 180ms ease, box-shadow 180ms ease',
                 }}
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
                 onTouchCancel={handleTouchEnd}
-            >
-            <div
-                className="pointer-events-none absolute inset-0 rounded-lg"
-                style={{
-                    opacity: pulseOpen ? 0.22 : 0,
-                    background: 'linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.14) 100%)',
-                    transition: 'opacity 140ms ease',
+                onContextMenu={(event) => {
+                    event.preventDefault();
+                    closeSwipeActions();
+                    onOpenChatInfo?.(conv);
                 }}
-            />
-            {/* Avatar with story/follow - separate from conversation button */}
-            <div className="relative overflow-visible flex-shrink-0">
+            >
+            <div className="relative h-14 w-14 flex-shrink-0 overflow-visible">
                 <Avatar
                     name={displayTitle}
                     src={
@@ -442,72 +417,23 @@ function ConversationItem({
                               getAvatarForHandle(conv.otherHandle) ||
                               undefined
                     }
-                    size="md"
+                    size={52}
+                    hideBorder={!hasStory}
                     hasStory={hasStory}
                     onClick={handleAvatarClick}
                 />
-                {/* + icon overlay on profile picture to follow (TikTok style) */}
-                {!isGroupRow && !isCurrentUser && onFollow && (isFollowing === false || isFollowing === undefined) && (
-                    <button
-                        onClick={handleFollowClick}
-                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white hover:bg-white/90 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
-                        aria-label="Follow user"
-                    >
-                        <FiPlus className="w-3 h-3 text-gray-900" strokeWidth={2.5} />
-                    </button>
-                )}
-                {/* Checkmark icon when following (replaces + icon) */}
-                {!isGroupRow && !isCurrentUser && onFollow && isFollowing && showFollowCheck && (
-                    <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
-                        <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
-                    </div>
-                )}
             </div>
-            {/* Conversation content - clickable to open DM */}
             <button
+                type="button"
                 onClick={handleConversationClick}
-                className={`flex items-center flex-1 min-w-0 text-left ${compactPhone ? 'gap-2.5' : 'gap-3'}`}
+                className="min-w-0 flex-1 text-left"
             >
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className={`font-medium truncate ${compactPhone ? 'text-[13px]' : ''}`}>{displayTitle}</span>
-                        {conv.isPinned && (
-                            <FiBookmark className="w-3 h-3 text-gray-800 fill-gray-800 dark:text-white dark:fill-white flex-shrink-0" />
-                        )}
-                    </div>
-                    <div className={`text-gray-500 truncate ${compactPhone ? 'text-[11px]' : 'text-xs'}`}>
-                        {conv.lastMessage?.text || 'Photo'}
-                    </div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="truncate text-[16px] font-semibold text-white">{displayTitle}</span>
+                    <span className="shrink-0 text-[13px] text-[#8E8E93]">{timestamp}</span>
                 </div>
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <div className="text-[10px] text-gray-400">
-                        {conv.lastMessage ? timeAgo(conv.lastMessage.timestamp) : ''}
-                    </div>
-                    {conv.unread > 0 && (
-                        <span className="px-1.5 py-0.5 bg-neutral-900 text-white dark:bg-white dark:text-gray-900 text-[10px] rounded-full min-w-[18px] text-center font-semibold">
-                            {conv.unread > 9 ? '9+' : conv.unread}
-                        </span>
-                    )}
-                </div>
+                <div className="truncate text-[14px] text-[#8E8E93]">{preview}</div>
             </button>
-            <div className={`flex items-center gap-1 transition-opacity ${compactPhone ? 'pr-0.5' : ''}`}>
-                <button
-                    type="button"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        closeSwipeActions();
-                        onOpenChatInfo?.(conv);
-                    }}
-                    className={`rounded-full text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200 transition-colors ${
-                        compactPhone ? 'p-1.5' : 'p-2'
-                    }`}
-                    title="Chat info"
-                    aria-label="Chat info and options"
-                >
-                    <FiMoreHorizontal className="w-4 h-4" />
-                </button>
-            </div>
             </div>
         </div>
     );
@@ -528,8 +454,7 @@ export default function InboxPage() {
     const [loading, setLoading] = React.useState(true);
     const [loadError, setLoadError] = React.useState<string | null>(null);
     const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages' | 'groups'>('messages');
-    const [messageFilter, setMessageFilter] = React.useState<'all' | 'groups' | 'unread' | 'requests' | 'pinned'>('all');
-    const [conversationQuery, setConversationQuery] = React.useState('');
+    const [messageFilter, setMessageFilter] = React.useState<'all' | 'requests'>('all');
     const [openSwipeHandle, setOpenSwipeHandle] = React.useState<string | null>(null);
     const [inboxChatInfo, setInboxChatInfo] = React.useState<ConversationSummary | null>(null);
     const [compactPhone, setCompactPhone] = React.useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
@@ -621,7 +546,7 @@ export default function InboxPage() {
     React.useEffect(() => {
         setOpenSwipeHandle(null);
         setInboxChatInfo(null);
-    }, [activeTab, messageFilter, conversationQuery]);
+    }, [activeTab, messageFilter]);
 
     React.useEffect(() => {
         const onResize = () => setCompactPhone(typeof window !== 'undefined' ? window.innerWidth <= 390 : false);
@@ -1072,18 +997,11 @@ export default function InboxPage() {
             notifications: unreadNotifications,
         });
     }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications]);
-    const normalizedQuery = conversationQuery.trim().toLowerCase();
-    const queriedItems = normalizedQuery
-        ? items.filter((c) => {
-            const hay = `${c.otherHandle} ${c.groupName || ''} ${c.lastMessage?.text || ''}`.toLowerCase();
-            return hay.includes(normalizedQuery);
-        })
-        : items;
-    const pinnedItems = queriedItems.filter(c => c.isPinned);
-    const requestItems = queriedItems.filter(c => c.isRequest);
-    const regularItems = queriedItems.filter(c => !c.isPinned && !c.isRequest);
-    const unreadItems = queriedItems.filter(c => c.unread > 0);
-    const groupItems = queriedItems.filter(c => c.kind === 'group');
+    const requestItems = items.filter((c) => c.kind !== 'group' && !!c.isRequest);
+    const chatItems = items.filter((c) => !(c.kind !== 'group' && c.isRequest));
+    const pinnedItems = chatItems.filter((c) => c.isPinned);
+    const regularItems = chatItems.filter((c) => !c.isPinned);
+    const groupItems = items.filter((c) => c.kind === 'group');
     const unreadGroupMessagesTotal = groupItems.reduce((sum, c) => sum + c.unread, 0);
     const seenInsightIds = React.useMemo(
         () => (user?.handle ? getSeenInsightStoryIds(user.handle) : new Set<string>()),
@@ -1302,15 +1220,32 @@ export default function InboxPage() {
 
     return (
         <div className={compactPhone ? 'p-3' : 'p-4'}>
-            <div className="flex items-center gap-2 mb-4">
+            <div className="mb-4 flex items-center gap-2">
                 <button
                     onClick={() => navigate('/feed')}
-                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    className="rounded-full p-2 transition-colors hover:bg-white/10"
                     aria-label="Back to feed"
                 >
-                    <FiChevronLeft className="w-5 h-5" />
+                    <FiChevronLeft className="h-5 w-5" />
                 </button>
-                <h1 className="text-xl font-semibold">Notifications</h1>
+                <h1 className="flex-1 text-[22px] font-bold text-white">
+                    {activeTab === 'messages' && messageFilter === 'requests'
+                        ? 'Requests'
+                        : activeTab === 'notifications'
+                          ? 'Notifications'
+                          : activeTab === 'insights'
+                            ? 'Insights'
+                            : 'Messages'}
+                </h1>
+                {activeTab === 'messages' && requestItems.length > 0 ? (
+                    <button
+                        type="button"
+                        onClick={() => setMessageFilter((prev) => (prev === 'requests' ? 'all' : 'requests'))}
+                        className={`text-[15px] font-semibold ${messageFilter === 'requests' ? 'text-white' : 'text-white/60'}`}
+                    >
+                        {messageFilter === 'requests' ? 'Chats' : `Requests (${requestItems.length})`}
+                    </button>
+                ) : null}
             </div>
 
             {/* Stories row (TikTok / Instagram style) */}
@@ -1474,13 +1409,13 @@ export default function InboxPage() {
                     </div>
                 </div>
             ) : activeTab === 'messages' ? (
-                queriedItems.length === 0 ? (
-                    <div className="text-gray-500 text-center py-8">
-                        {conversationQuery.trim() ? 'No conversations match your search.' : 'No messages yet.'}
+                (messageFilter === 'requests' ? requestItems : chatItems).length === 0 ? (
+                    <div className="py-8 text-center text-[#8E8E93]">
+                        {messageFilter === 'requests' ? 'No message requests.' : 'No messages yet.'}
                     </div>
                 ) : (
                     <div
-                        className={compactPhone ? 'space-y-2.5' : 'space-y-3'}
+                        className={compactPhone ? '-mx-3' : '-mx-4'}
                         onClickCapture={(e) => {
                             if (!openSwipeHandle) return;
                             const target = e.target as HTMLElement | null;
@@ -1494,55 +1429,12 @@ export default function InboxPage() {
                             setOpenSwipeHandle(null);
                         }}
                     >
-                        <div className={`flex items-center gap-2 rounded-xl border border-white/10 bg-[#09090d] ${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
-                            <FiMessageCircle className="w-4 h-4 text-white" />
-                            <input
-                                value={conversationQuery}
-                                onChange={(e) => setConversationQuery(e.target.value)}
-                                placeholder="Search conversations"
-                                className={`flex-1 bg-transparent text-white placeholder:text-gray-500 focus:outline-none ${compactPhone ? 'text-[13px]' : 'text-sm'}`}
-                            />
-                            {conversationQuery && (
-                                <button
-                                    type="button"
-                                    onClick={() => setConversationQuery('')}
-                                    className="p-1 text-gray-400 hover:text-gray-200"
-                                    aria-label="Clear search"
-                                >
-                                    <FiX className="w-4 h-4" />
-                                </button>
-                            )}
-                        </div>
-
-                        <div className={`flex overflow-x-auto scrollbar-hide pb-1 ${compactPhone ? 'gap-1.5' : 'gap-2'}`}>
-                            {([
-                                { id: 'all' as const, label: `All (${queriedItems.length})` },
-                                { id: 'groups' as const, label: `Groups (${groupItems.length})` },
-                                { id: 'unread' as const, label: `Unread (${unreadItems.length})` },
-                                { id: 'requests' as const, label: `Requests (${requestItems.length})` },
-                                { id: 'pinned' as const, label: `Pinned (${pinnedItems.length})` },
-                            ]).map((chip) => (
-                                <button
-                                    key={chip.id}
-                                    type="button"
-                                    onClick={() => setMessageFilter(chip.id)}
-                                    className={`${compactPhone ? 'px-2.5 py-1.5 text-[10px] min-h-[32px]' : 'px-3 py-1.5 text-[11px]'} rounded-full font-medium whitespace-nowrap border transition-colors ${
-                                        messageFilter === chip.id
-                                            ? 'bg-white text-gray-900 border-white'
-                                            : 'bg-black/40 text-gray-300 border-white/15 hover:border-white/50'
-                                    }`}
-                                >
-                                    {chip.label}
-                                </button>
-                            ))}
-                        </div>
-
                         {messageFilter === 'all' && (
-                            <div className="space-y-1">
+                            <div>
                         {/* Pinned Conversations */}
                         {pinnedItems.length > 0 && (
-                            <div className="mb-4">
-                                <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Pinned</div>
+                            <div>
+                                <div className="px-3.5 pb-1.5 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#9CA3AF]">Pinned</div>
                                 {pinnedItems.map(conv => (
                                     <ConversationItem
                                         key={inboxConversationRowId(conv)}
@@ -1576,38 +1468,9 @@ export default function InboxPage() {
                             </div>
                         )}
                         
-                        {/* Message Requests */}
-                        {requestItems.length > 0 && (
-                            <div className="mb-4">
-                                <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Message Requests</div>
-                                {requestItems.map(conv => (
-                                    <ConversationItem
-                                        key={inboxConversationRowId(conv)}
-                                        conv={conv}
-                                        onAcceptRequest={() => {
-                                            if (user?.handle) {
-                                                acceptMessageRequest(user.handle, conv.otherHandle);
-                                                loadData();
-                                            }
-                                        }}
-                                        navigate={navigate}
-                                        currentUserHandle={user?.handle}
-                                        onFollow={handleFollow}
-                                        onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
-                                        onDeleteConversation={() => handleDeleteConversation(conv)}
-                                        onMarkRead={() => handleMarkConversationRead(conv)}
-                                        onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                        isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
-                                        onSwipeOpenChange={setOpenSwipeHandle}
-                                        onOpenChatInfo={openInboxChatInfo}
-                                        compactPhone={compactPhone}
-                                        getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
-                                    />
-                                ))}
-                            </div>
-                        )}
-                        
-                        {/* Regular Conversations */}
+                        {regularItems.length > 0 && pinnedItems.length > 0 ? (
+                            <div className="px-3.5 pb-1.5 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#9CA3AF]">Messages</div>
+                        ) : null}
                         {regularItems.map(conv => (
                             <ConversationItem
                                 key={inboxConversationRowId(conv)}
@@ -1635,142 +1498,30 @@ export default function InboxPage() {
                     </div>
                         )}
 
-                        {messageFilter === 'unread' && (
-                            unreadItems.length > 0 ? (
-                                <div className="space-y-1">
-                                    {unreadItems.map(conv => (
-                                        <ConversationItem
-                                            key={inboxConversationRowId(conv)}
-                                            conv={conv}
-                                            onPin={conv.kind === 'group' ? undefined : () => {
-                                                if (user?.handle) {
-                                                    pinConversation(user.handle, conv.otherHandle);
-                                                    loadData();
-                                                }
-                                            }}
-                                            navigate={navigate}
-                                            currentUserHandle={user?.handle}
-                                            onFollow={handleFollow}
-                                            onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
-                                            onDeleteConversation={() => handleDeleteConversation(conv)}
-                                            onMarkRead={() => handleMarkConversationRead(conv)}
-                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
-                                            onSwipeOpenChange={setOpenSwipeHandle}
-                                            onOpenChatInfo={openInboxChatInfo}
-                                            compactPhone={compactPhone}
-                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
-                                        />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400">
-                                    You&apos;re all caught up.
-                                </div>
-                            )
-                        )}
+                        {messageFilter === 'requests' && requestItems.map(conv => (
+                            <ConversationItem
+                                key={inboxConversationRowId(conv)}
+                                conv={conv}
+                                onAcceptRequest={() => {
+                                    if (user?.handle) {
+                                        acceptMessageRequest(user.handle, conv.otherHandle);
+                                        loadData();
+                                    }
+                                }}
+                                navigate={navigate}
+                                currentUserHandle={user?.handle}
+                                onFollow={handleFollow}
+                                onToggleMute={() => handleToggleMuteConversation(conv)}
+                                onDeleteConversation={() => handleDeleteConversation(conv)}
+                                onMarkRead={() => handleMarkConversationRead(conv)}
+                                onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
+                                onSwipeOpenChange={setOpenSwipeHandle}
+                                onOpenChatInfo={openInboxChatInfo}
+                                getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
+                            />
+                        ))}
 
-                        {messageFilter === 'requests' && (
-                            requestItems.length > 0 ? (
-                                <div className="space-y-1">
-                                    {requestItems.map(conv => (
-                                        <ConversationItem
-                                            key={inboxConversationRowId(conv)}
-                                            conv={conv}
-                                            onAcceptRequest={() => {
-                                                if (user?.handle) {
-                                                    acceptMessageRequest(user.handle, conv.otherHandle);
-                                                    loadData();
-                                                }
-                                            }}
-                                            navigate={navigate}
-                                            currentUserHandle={user?.handle}
-                                            onFollow={handleFollow}
-                                            onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
-                                            onDeleteConversation={() => handleDeleteConversation(conv)}
-                                            onMarkRead={() => handleMarkConversationRead(conv)}
-                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
-                                            onSwipeOpenChange={setOpenSwipeHandle}
-                                            onOpenChatInfo={openInboxChatInfo}
-                                            compactPhone={compactPhone}
-                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
-                                        />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400">
-                                    No message requests.
-                                </div>
-                            )
-                        )}
-
-                        {messageFilter === 'pinned' && (
-                            pinnedItems.length > 0 ? (
-                                <div className="space-y-1">
-                                    {pinnedItems.map(conv => (
-                                        <ConversationItem
-                                            key={inboxConversationRowId(conv)}
-                                            conv={conv}
-                                            onPin={conv.kind === 'group' ? undefined : () => {
-                                                if (user?.handle) {
-                                                    unpinConversation(user.handle, conv.otherHandle);
-                                                    loadData();
-                                                }
-                                            }}
-                                            navigate={navigate}
-                                            currentUserHandle={user?.handle}
-                                            onFollow={handleFollow}
-                                            onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
-                                            onDeleteConversation={() => handleDeleteConversation(conv)}
-                                            onMarkRead={() => handleMarkConversationRead(conv)}
-                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
-                                            onSwipeOpenChange={setOpenSwipeHandle}
-                                            onOpenChatInfo={openInboxChatInfo}
-                                            compactPhone={compactPhone}
-                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
-                                        />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400">
-                                    No pinned conversations.
-                                </div>
-                            )
-                        )}
-
-                        {messageFilter === 'groups' && (
-                            groupItems.length > 0 ? (
-                                <div className="space-y-1">
-                                    {groupItems.map(conv => (
-                                        <ConversationItem
-                                            key={inboxConversationRowId(conv)}
-                                            conv={conv}
-                                            onPin={undefined}
-                                            navigate={navigate}
-                                            currentUserHandle={user?.handle}
-                                            onFollow={handleFollow}
-                                            onToggleMute={undefined}
-                                            onDeleteConversation={() => handleDeleteConversation(conv)}
-                                            onMarkRead={() => handleMarkConversationRead(conv)}
-                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
-                                            onSwipeOpenChange={setOpenSwipeHandle}
-                                            onOpenChatInfo={openInboxChatInfo}
-                                            compactPhone={compactPhone}
-                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
-                                        />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400 leading-relaxed">
-                                    No group chats yet. Use <span className="text-white/90">New group</span> on your profile or{' '}
-                                    <span className="text-white/90">Create group</span> on your own post (⋯ menu), then invite people from the{' '}
-                                    <span className="text-white/90">+</span> button in the group or from their profile.
-                                </div>
-                            )
-                        )}
                     </div>
                 )
             ) : activeTab === 'notifications' ? (
@@ -1919,7 +1670,7 @@ export default function InboxPage() {
             ) : activeTab === 'groups' ? (
                 groupItems.length > 0 ? (
                     <div
-                        className={compactPhone ? 'space-y-2.5' : 'space-y-3'}
+                        className={compactPhone ? '-mx-3' : '-mx-4'}
                         onClickCapture={(e) => {
                             if (!openSwipeHandle) return;
                             const target = e.target as HTMLElement | null;

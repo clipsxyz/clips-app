@@ -263,12 +263,12 @@ export function DmSharedPostPreviewCard({ postId, token, userId, onTap }: Previe
 
 const styles = StyleSheet.create({
     tapWrap: {
-        width: '100%',
-        maxWidth: DM_MEDIA_MAX_WIDTH,
+        width: DM_MEDIA_MAX_WIDTH,
+        maxWidth: '100%',
     },
     glassCard: {
-        width: '100%',
-        maxWidth: DM_MEDIA_MAX_WIDTH,
+        width: DM_MEDIA_MAX_WIDTH,
+        maxWidth: '100%',
         borderRadius: ox(18),
         overflow: 'hidden',
         borderWidth: 1,
@@ -380,8 +380,8 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     previewCard: {
-        width: '100%',
-        maxWidth: DM_MEDIA_MAX_WIDTH,
+        width: DM_MEDIA_MAX_WIDTH,
+        maxWidth: '100%',
         borderRadius: ox(18),
         overflow: 'hidden',
         borderWidth: 1,

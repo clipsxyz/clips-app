@@ -1,15 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 /** Instagram-style received bubble (charcoal). */
 export const DM_RECEIVED = '#262626';
 
-/** View Profile / passport sender fills. */
-export const DM_SENT_PASSPORT = PASSPORT_PALETTE.wavePrimary; // #3d9b8f
+/** Sea glass is the camera-border spectrum. Brass stays the warm metal. */
+export const DM_SENT_PASSPORT = '#22C55E';
 export const DM_SENT_BRASS = '#c4a574';
 
-/** Soft passport wash for gradient sender bubbles (matches View Profile ambient). */
-export const DM_SENT_PASSPORT_GRADIENT = ['#164858', '#1f6b63', '#3d9b8f'] as const;
+export const DM_SENT_PASSPORT_GRADIENT = ['#22C55E', '#FFD400', '#FF4D9A'] as const;
 export const DM_SENT_BRASS_GRADIENT = ['#3a2e1c', '#8a7348', '#c4a574'] as const;
 
 /** @deprecated use DM_SENT_PASSPORT — kept for call sites during rename. */

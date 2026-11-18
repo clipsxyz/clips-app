@@ -8,6 +8,7 @@ import {
     TouchableOpacity,
     Image,
     KeyboardAvoidingView,
+    Keyboard,
     Modal,
     Platform,
     ActivityIndicator,
@@ -26,6 +27,14 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
+import { launchNativeCamera } from '../utils/launchNativeCamera';
+import { ensureCameraCapturePermission, ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import {
+    listDmRecentMedia,
+    materializeDmFile,
+    pickDmDocument,
+    type DmRecentFile,
+} from '../utils/dmDeviceFilesNative';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import { useAuth } from '../context/Auth';
@@ -121,10 +130,44 @@ function isPublicMessageImageUrl(url: string): boolean {
     return /^https?:\/\//i.test(trimmed) && trimmed.length <= 500;
 }
 
-async function hostDmImageUrl(localUrl: string): Promise<string> {
+const DM_CAMERA_VIDEO_SEC = 15;
+
+type DmComposeDraft = {
+    imageUrl: string;
+    caption: string;
+    mime?: string;
+    fileName?: string;
+    previewUri?: string;
+    isVideo?: boolean;
+};
+
+function dmMediaIsVideo(mime?: string, name?: string, uri?: string): boolean {
+    const hint = `${mime || ''} ${name || ''} ${uri || ''}`.toLowerCase();
+    return hint.includes('video/') || /\.(mp4|mov|m4v|webm|3gp)(\?|#|$)/i.test(hint);
+}
+
+function dmMediaIsVisual(mime?: string, name?: string, uri?: string): boolean {
+    const hint = `${mime || ''} ${name || ''} ${uri || ''}`.toLowerCase();
+    return hint.includes('image/') || dmMediaIsVideo(mime, name, uri) || /\.(jpe?g|png|gif|webp)(\?|#|$)/i.test(hint);
+}
+
+function cameraClipSeconds(raw: unknown): number {
+    const n = Number(raw || 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return n > 1000 ? n / 1000 : n;
+}
+
+function formatRecentClip(durationMs: number): string {
+    const total = Math.max(0, Math.round(durationMs / 1000));
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+async function hostDmImageUrl(localUrl: string, hint?: { mime?: string; fileName?: string }): Promise<string> {
     const trimmed = String(localUrl || '').trim();
     if (!trimmed) {
-        throw new Error('No photo to send.');
+        throw new Error('Nothing to send.');
     }
     if (isPublicMessageImageUrl(trimmed) && !/^(file|content|ph|blob):/i.test(trimmed) && !trimmed.startsWith('data:')) {
         return trimmed;
@@ -133,12 +176,23 @@ async function hostDmImageUrl(localUrl: string): Promise<string> {
         return trimmed;
     }
     if (trimmed.startsWith('data:')) {
-        throw new Error('Could not upload this photo. Pick it again from your library.');
+        throw new Error('Could not upload this file. Pick it again.');
     }
-    const upload = await uploadFileFromUri(trimmed, 'image/jpeg', `dm-${Date.now()}.jpg`);
+    const isVideo = dmMediaIsVideo(hint?.mime, hint?.fileName, trimmed);
+    const upload = await uploadFileFromUri(
+        trimmed,
+        isVideo ? 'video/mp4' : hint?.mime && hint.mime.startsWith('image/') ? hint.mime : 'image/jpeg',
+        isVideo
+            ? hint?.fileName && /\.(mp4|mov|m4v|webm)$/i.test(hint.fileName)
+                ? hint.fileName
+                : `dm-${Date.now()}.mp4`
+            : hint?.fileName && /\.(jpe?g|png|gif|webp)$/i.test(hint.fileName)
+              ? hint.fileName
+              : `dm-${Date.now()}.jpg`,
+    );
     const hosted = String(upload.fileUrl || upload.url || '').trim();
     if (!isPublicMessageImageUrl(hosted)) {
-        throw new Error('Upload did not return a public image URL.');
+        throw new Error('Upload did not return a public file URL.');
     }
     return hosted;
 }
@@ -773,7 +827,11 @@ const DmMessageRow = React.memo(function DmMessageRow({
                             style={[
                                 styles.messageText,
                                 isMediaOnlyMessage ? styles.messageTextPlain : null,
-                                isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
+                                isFromMe
+                                    ? dmSentStyle === 'blue'
+                                        ? styles.messageTextOnSpectrum
+                                        : styles.messageTextFromMe
+                                    : styles.messageTextFromOther,
                             ]}
                         >
                             {item.text}
@@ -1030,7 +1088,10 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [inviteSearching, setInviteSearching] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [isBlocked, setIsBlocked] = useState(false);
-    const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string } | null>(null);
+    const [imageCompose, setImageCompose] = useState<DmComposeDraft | null>(null);
+    const [attachSheetOpen, setAttachSheetOpen] = useState(false);
+    const [recentFiles, setRecentFiles] = useState<DmRecentFile[]>([]);
+    const [recentFilesLoading, setRecentFilesLoading] = useState(false);
     const [messageReactions, setMessageReactions] = useState<Record<string, Array<{ emoji: string; users: string[] }>>>({});
     const [showStickerPicker, setShowStickerPicker] = useState(false);
     const [stickerTargetMessageId, setStickerTargetMessageId] = useState<string | null>(null);
@@ -2555,16 +2616,94 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
     };
 
-    const handleImageClick = () => {
+    const presentDmCompose = (draft: Omit<DmComposeDraft, 'caption'>) => {
+        setImageCompose({ ...draft, caption: '' });
+    };
+
+    const openAttachSheet = () => {
+        if (!user?.handle) return;
+        Keyboard.dismiss();
+        setAttachSheetOpen(true);
+        setRecentFilesLoading(true);
+        void (async () => {
+            try {
+                const allowed = await ensureGalleryMediaPermission();
+                if (!allowed) {
+                    setRecentFiles([]);
+                    return;
+                }
+                setRecentFiles(await listDmRecentMedia(24));
+            } catch (err) {
+                console.warn('DM recent files failed', err);
+                setRecentFiles([]);
+            } finally {
+                setRecentFilesLoading(false);
+            }
+        })();
+    };
+
+    const runAfterAttachSheet = (action: () => void) => {
+        setAttachSheetOpen(false);
+        setTimeout(action, 280);
+    };
+
+    const openDmCamera = () => {
+        if (!user?.handle) return;
+        void (async () => {
+            const allowed = await ensureCameraCapturePermission('video');
+            if (!allowed) {
+                showAlert({
+                    title: 'Camera access needed',
+                    message: 'Allow the camera and microphone so you can take a photo or a 15 second clip.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
+            launchNativeCamera(
+                { mediaType: 'mixed', durationLimitSec: DM_CAMERA_VIDEO_SEC, saveToPhotos: true, cameraType: 'back' },
+                (response) => {
+                    if (response.didCancel) return;
+                    if (response.errorCode) {
+                        showAlert({
+                            title: 'Camera error',
+                            message: response.errorMessage || 'Could not open the camera.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                        return;
+                    }
+                    const asset = response.assets?.[0];
+                    const uri = String(asset?.uri || '').trim();
+                    if (!uri) return;
+                    const mime = String(asset?.type || '');
+                    const fileName = asset?.fileName || undefined;
+                    const isVideo = dmMediaIsVideo(mime, fileName, uri);
+                    const seconds = cameraClipSeconds(asset?.duration);
+                    if (isVideo && seconds > DM_CAMERA_VIDEO_SEC + 0.4) {
+                        showAlert({
+                            title: '15 second limit',
+                            message: 'Camera clips in chat are limited to 15 seconds. Record a shorter one.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                        return;
+                    }
+                    presentDmCompose({ imageUrl: uri, mime, fileName, isVideo });
+                },
+            );
+        })();
+    };
+
+    const openDmGallery = () => {
         if (!user?.handle) return;
         void (async () => {
             try {
-                const picked = await pickFromFullGallery(1, { mediaType: 'photo' });
+                const picked = await pickFromFullGallery(1, { mediaType: 'any' });
                 if (picked === 'denied') {
                     showAlert({
                         title: 'Gallery access needed',
-                        message:
-                            'Allow access to your photos in Settings so you can attach an image to this chat.',
+                        message: 'Allow access to your photos and videos so you can attach one to this chat.',
                         icon: 'alert',
                         confirmButtonText: 'OK',
                     });
@@ -2572,30 +2711,127 @@ export default function MessagesScreen({ route, navigation }: any) {
                 }
                 if (picked === 'cancel') return;
                 const asset = picked[0];
-                if (!asset) return;
-                const mime = String(asset.type || '').toLowerCase();
-                const uri = String(asset.uri || '');
-                if (mime.startsWith('video/') || /\.(mp4|mov|m4v|webm|3gp)(\?|#|$)/i.test(uri)) {
-                    showAlert({
-                        title: 'Images only',
-                        message: 'Choose a photo from your camera roll. Videos cannot be sent from chat.',
-                        icon: 'alert',
-                        confirmButtonText: 'OK',
-                    });
-                    return;
-                }
+                const uri = String(asset?.uri || '').trim();
                 if (!uri) return;
-                setImageCompose({ imageUrl: uri, caption: '' });
+                const mime = String(asset?.type || '');
+                const fileName = asset?.fileName || undefined;
+                const localUri = await materializeDmFile(uri);
+                presentDmCompose({
+                    imageUrl: localUri,
+                    mime,
+                    fileName,
+                    isVideo: dmMediaIsVideo(mime, fileName, uri),
+                });
             } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : 'Could not open your photo library.';
                 showAlert({
-                    title: 'Image error',
-                    message,
+                    title: 'Gallery error',
+                    message: err instanceof Error ? err.message : 'Could not open your gallery.',
                     icon: 'alert',
                     confirmButtonText: 'OK',
                 });
             }
         })();
+    };
+
+    const sendDmFileNote = async (localUri: string, mime: string, fileName: string) => {
+        if (!user?.handle) return;
+        let hosted = localUri;
+        try {
+            if (isLaravelApiEnabled()) {
+                const upload = await uploadFileFromUri(localUri, mime || 'application/octet-stream', fileName || `dm-${Date.now()}`);
+                hosted = String(upload.fileUrl || upload.url || '').trim();
+                if (!isPublicMessageImageUrl(hosted)) {
+                    throw new Error('Upload did not return a public file URL.');
+                }
+            }
+        } catch (error) {
+            showAlert({
+                title: 'Upload failed',
+                message: error instanceof Error ? error.message : 'Could not upload this file.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
+        const replyToPayload = buildReplyToPayload();
+        const text = `📎 ${fileName || 'File'}\n${hosted}`;
+        const optimistic: ChatMessage = {
+            id: `${Date.now()}-file`,
+            senderHandle: user.handle,
+            text,
+            timestamp: Date.now(),
+            replyTo: replyToPayload,
+        };
+        shouldAutoScrollRef.current = true;
+        setMessages((prev) => upsertChatMessage(prev, optimistic));
+        try {
+            const serverMsg =
+                isGroupThread && chatGroupId
+                    ? await appendGroupChatMessage(user.handle, chatGroupId, { text, replyTo: replyToPayload })
+                    : await appendMessage(user.handle, handle, { text, replyTo: replyToPayload });
+            reconcileSentMessage(optimistic, serverMsg);
+        } catch (error) {
+            console.error('Error sending file message:', error);
+            showAlert({
+                title: 'Send failed',
+                message: 'Could not send that file.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        } finally {
+            setReplyingTo(null);
+        }
+    };
+
+    const openDmDocument = () => {
+        if (!user?.handle) return;
+        void (async () => {
+            try {
+                const picked = await pickDmDocument();
+                if (!picked) return;
+                if (dmMediaIsVisual(picked.mime, picked.name, picked.uri)) {
+                    presentDmCompose({
+                        imageUrl: picked.uri,
+                        mime: picked.mime,
+                        fileName: picked.name,
+                        isVideo: dmMediaIsVideo(picked.mime, picked.name, picked.uri),
+                    });
+                    return;
+                }
+                await sendDmFileNote(picked.uri, picked.mime, picked.name);
+            } catch (err: unknown) {
+                showAlert({
+                    title: 'File error',
+                    message: err instanceof Error ? err.message : 'Could not open your files.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+            }
+        })();
+    };
+
+    const openRecentDmFile = (item: DmRecentFile) => {
+        runAfterAttachSheet(() => {
+            void (async () => {
+                try {
+                    const localUri = await materializeDmFile(item.uri);
+                    presentDmCompose({
+                        imageUrl: localUri,
+                        mime: item.mime,
+                        fileName: item.name,
+                        previewUri: item.thumbUri,
+                        isVideo: item.isVideo,
+                    });
+                } catch (err: unknown) {
+                    showAlert({
+                        title: 'File error',
+                        message: err instanceof Error ? err.message : 'Could not open that file.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                }
+            })();
+        });
     };
 
     const handleCancelImageCompose = () => {
@@ -2609,7 +2845,10 @@ export default function MessagesScreen({ route, navigation }: any) {
         const replyToPayload = buildReplyToPayload();
         let hostedImageUrl: string;
         try {
-            hostedImageUrl = await hostDmImageUrl(localImageUrl);
+            hostedImageUrl = await hostDmImageUrl(localImageUrl, {
+                mime: imageCompose.mime,
+                fileName: imageCompose.fileName,
+            });
         } catch (error) {
             console.error('Error uploading DM image:', error);
             showAlert({
@@ -3134,12 +3373,7 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     return (
         <GazetteerScreenShell ambient={false} style={styles.pageShell}>
-            <LinearGradient
-                colors={['rgba(32,38,48,0.82)', 'rgba(11,14,19,0.94)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={styles.header}
-            >
+            <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBackBtn} hitSlop={8}>
                     <Icon name="chevron-back" size={ox(26)} color="#FFFFFF" />
                 </TouchableOpacity>
@@ -3240,7 +3474,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         <Icon name="ellipsis-horizontal" size={ox(22)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
-            </LinearGradient>
+            </View>
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -3451,30 +3685,55 @@ export default function MessagesScreen({ route, navigation }: any) {
                             </View>
                         ) : (
                             <>
-                                <Avatar
-                                    src={user?.avatarUrl}
-                                    name={user?.name || user?.handle || 'You'}
-                                    size={32}
-                                />
+                                <TouchableOpacity
+                                    onPress={openDmCamera}
+                                    hitSlop={8}
+                                    accessibilityLabel="Open camera"
+                                    style={styles.composerCameraBtn}
+                                >
+                                    <LinearGradient
+                                        colors={['#22C55E', '#FFD400', '#FF4D9A']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={styles.composerCameraEdge}
+                                    >
+                                        <View style={styles.composerCameraFace}>
+                                            <Icon name="camera-outline" size={ox(22)} color="#F5F5F5" />
+                                        </View>
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={openAttachSheet}
+                                    hitSlop={8}
+                                    accessibilityLabel="Attach a file"
+                                    style={styles.composerClipBtn}
+                                >
+                                    <View style={styles.composerClipEdge}>
+                                        <View style={styles.composerClipFace}>
+                                            <Icon name="attach-outline" size={ox(22)} color="#F5F5F5" />
+                                        </View>
+                                    </View>
+                                </TouchableOpacity>
                                 <View style={styles.inputShell}>
                                     <TextInput
                                         ref={composerInputRef}
                                         value={messageText}
                                         onChangeText={setMessageText}
                                         placeholder={composerPlaceholder}
-                                        placeholderTextColor="#8B98A5"
+                                        placeholderTextColor="#8E8E93"
                                         style={styles.input}
                                         multiline
                                         maxLength={1000}
                                     />
-                                    <TouchableOpacity
-                                        onPress={handleImageClick}
-                                        hitSlop={8}
-                                        accessibilityLabel="Attach photo"
-                                        style={styles.composerCameraBtn}
-                                    >
-                                        <Icon name="camera-outline" size={ox(20)} color="#D1D5DB" />
-                                    </TouchableOpacity>
+                                    {messageText.trim() && !(ENABLE_VOICE_NOTES && isRecordingVoice) ? (
+                                        <TouchableOpacity
+                                            onPress={handleSend}
+                                            style={styles.sendButton}
+                                            accessibilityLabel="Send"
+                                        >
+                                            <Icon name="send" size={ox(16)} color="#FFFFFF" />
+                                        </TouchableOpacity>
+                                    ) : null}
                                 </View>
                             </>
                         )}
@@ -3500,11 +3759,6 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 </LinearGradient>
                             )}
                         </View>
-                        ) : null}
-                        {messageText.trim() && !(ENABLE_VOICE_NOTES && isRecordingVoice) ? (
-                            <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
-                                <Icon name="send" size={ox(20)} color="#000000" />
-                            </TouchableOpacity>
                         ) : null}
                     </View>
                 </View>
@@ -3819,6 +4073,98 @@ export default function MessagesScreen({ route, navigation }: any) {
             </View>
 
             <Modal
+                visible={attachSheetOpen}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setAttachSheetOpen(false)}
+                statusBarTranslucent
+            >
+                <View style={styles.attachSheetOverlay}>
+                    <TouchableOpacity
+                        style={styles.attachSheetBackdrop}
+                        activeOpacity={1}
+                        onPress={() => setAttachSheetOpen(false)}
+                    />
+                    <View style={[styles.attachSheet, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+                        <View style={styles.attachSheetHandle} />
+                        <View style={styles.attachActionRow}>
+                            <TouchableOpacity
+                                style={styles.attachAction}
+                                onPress={() => runAfterAttachSheet(openDmGallery)}
+                                accessibilityLabel="Gallery"
+                            >
+                                <View style={[styles.attachActionIcon, styles.attachActionGallery]}>
+                                    <Icon name="images" size={ox(22)} color="#53BDEB" />
+                                </View>
+                                <Text style={styles.attachActionLabel}>Gallery</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.attachAction}
+                                onPress={() => runAfterAttachSheet(openDmCamera)}
+                                accessibilityLabel="Camera"
+                            >
+                                <View style={[styles.attachActionIcon, styles.attachActionCamera]}>
+                                    <Icon name="camera" size={ox(22)} color="#FF4D9A" />
+                                </View>
+                                <Text style={styles.attachActionLabel}>Camera</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.attachAction}
+                                onPress={() => runAfterAttachSheet(openDmDocument)}
+                                accessibilityLabel="Document"
+                            >
+                                <View style={[styles.attachActionIcon, styles.attachActionDocument]}>
+                                    <Icon name="document-text" size={ox(22)} color="#A78BFA" />
+                                </View>
+                                <Text style={styles.attachActionLabel}>Document</Text>
+                            </TouchableOpacity>
+                        </View>
+                        {recentFilesLoading ? (
+                            <View style={styles.attachRecentLoading}>
+                                <ActivityIndicator color="#FFFFFF" />
+                            </View>
+                        ) : recentFiles.length > 0 ? (
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.attachRecentRow}
+                            >
+                                {recentFiles.map((item) => (
+                                    <TouchableOpacity
+                                        key={item.uri}
+                                        style={styles.attachRecentCell}
+                                        onPress={() => openRecentDmFile(item)}
+                                        accessibilityLabel={item.isVideo ? 'Send video' : 'Send photo'}
+                                    >
+                                        {item.thumbUri ? (
+                                            <Image source={{ uri: item.thumbUri }} style={styles.attachRecentImage} />
+                                        ) : (
+                                            <View style={styles.attachRecentFallback}>
+                                                <Icon
+                                                    name={item.isVideo ? 'videocam' : 'image'}
+                                                    size={ox(22)}
+                                                    color="#FFFFFF"
+                                                />
+                                            </View>
+                                        )}
+                                        {item.isVideo ? (
+                                            <Text style={styles.attachRecentDuration}>
+                                                {formatRecentClip(item.durationMs)}
+                                            </Text>
+                                        ) : null}
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        ) : (
+                            <Text style={styles.attachRecentEmpty}>
+                                Recent photos and videos from this phone show up here.
+                            </Text>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
                 visible={imageCompose != null}
                 transparent
                 animationType="slide"
@@ -3849,14 +4195,22 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 <View style={styles.imageComposeHandle} />
                             </View>
                             <Text style={styles.imageComposeGazetteerLabel}>Gazetteer says</Text>
-                            <Text style={styles.imageComposeTitle}>Image preview</Text>
+                            <Text style={styles.imageComposeTitle}>
+                                {imageCompose?.isVideo ? 'Video preview' : 'Image preview'}
+                            </Text>
                             <View style={styles.imageComposeRow}>
                                 <View style={styles.imageComposeThumb}>
-                                    <Image
-                                        source={{ uri: imageCompose?.imageUrl }}
-                                        style={styles.imageComposePreview}
-                                        resizeMode="cover"
-                                    />
+                                    {imageCompose?.isVideo && !imageCompose.previewUri ? (
+                                        <View style={styles.imageComposeVideoFace}>
+                                            <Icon name="videocam" size={ox(28)} color="#FFFFFF" />
+                                        </View>
+                                    ) : (
+                                        <Image
+                                            source={{ uri: imageCompose?.previewUri || imageCompose?.imageUrl }}
+                                            style={styles.imageComposePreview}
+                                            resizeMode="cover"
+                                        />
+                                    )}
                                 </View>
                                 <View style={styles.imageComposeBody}>
                                     <TextInput
@@ -3954,8 +4308,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: ox(12),
         paddingVertical: ox(10),
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: '#000000',
     },
     headerBackBtn: {
         width: ox(36),
@@ -4115,6 +4468,9 @@ const styles = StyleSheet.create({
     messageTextFromMe: {
         color: '#FFFFFF',
     },
+    messageTextOnSpectrum: {
+        color: '#111111',
+    },
     messageTextFromOther: {
         color: '#F9FAFB',
     },
@@ -4254,17 +4610,15 @@ const styles = StyleSheet.create({
         marginTop: ox(4),
     },
     inputContainer: {
-        paddingHorizontal: 14,
-        paddingTop: 6,
+        paddingHorizontal: 10,
+        paddingTop: 8,
         paddingBottom: 0,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: 'rgba(12,15,20,0.92)',
+        backgroundColor: '#000000',
     },
     inputRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
+        alignItems: 'flex-end',
+        gap: 4,
     },
     composerContextWrap: {
         flexDirection: 'row',
@@ -4296,35 +4650,167 @@ const styles = StyleSheet.create({
     inputShell: {
         flex: 1,
         flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
-        paddingLeft: 14,
+        alignItems: 'flex-end',
+        backgroundColor: '#1C1C1E',
+        borderRadius: 22,
+        paddingLeft: 16,
         paddingRight: 6,
-        minHeight: 40,
+        paddingVertical: 6,
+        minHeight: 44,
     },
     composerCameraBtn: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 44,
+        height: 44,
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
     },
+    composerCameraEdge: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        padding: 2,
+    },
+    composerCameraFace: {
+        flex: 1,
+        borderRadius: 10,
+        backgroundColor: '#000000',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    composerClipBtn: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+    },
+    composerClipEdge: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        padding: 2,
+        backgroundColor: '#FFFFFF',
+    },
+    composerClipFace: {
+        flex: 1,
+        borderRadius: 10,
+        backgroundColor: '#000000',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    attachSheetOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    attachSheetBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    attachSheet: {
+        backgroundColor: '#111B21',
+        borderTopLeftRadius: 18,
+        borderTopRightRadius: 18,
+        paddingTop: 8,
+        paddingHorizontal: 8,
+    },
+    attachSheetHandle: {
+        alignSelf: 'center',
+        width: 36,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.35)',
+        marginBottom: 14,
+    },
+    attachActionRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        paddingHorizontal: 8,
+        marginBottom: 16,
+    },
+    attachAction: {
+        width: 84,
+        alignItems: 'center',
+        gap: 8,
+    },
+    attachActionIcon: {
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#1F2C34',
+    },
+    attachActionGallery: {},
+    attachActionCamera: {},
+    attachActionDocument: {},
+    attachActionLabel: {
+        color: '#E9EDEF',
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    attachRecentRow: {
+        paddingHorizontal: 8,
+        paddingBottom: 8,
+        gap: 6,
+    },
+    attachRecentCell: {
+        width: 96,
+        height: 128,
+        borderRadius: 8,
+        overflow: 'hidden',
+        backgroundColor: '#0B141A',
+        marginRight: 6,
+    },
+    attachRecentImage: {
+        width: '100%',
+        height: '100%',
+    },
+    attachRecentFallback: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    attachRecentDuration: {
+        position: 'absolute',
+        left: 6,
+        bottom: 6,
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+        textShadowColor: 'rgba(0,0,0,0.8)',
+        textShadowRadius: 4,
+    },
+    attachRecentLoading: {
+        height: 128,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    attachRecentEmpty: {
+        color: '#8696A0',
+        fontSize: 13,
+        paddingHorizontal: 16,
+        paddingBottom: 18,
+    },
+    imageComposeVideoFace: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#111827',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     input: {
         flex: 1,
         minWidth: 0,
-        minHeight: 40,
-        paddingVertical: 10,
+        minHeight: 32,
+        paddingVertical: 6,
         paddingHorizontal: 0,
         margin: 0,
         backgroundColor: 'transparent',
         borderWidth: 0,
         color: '#FFFFFF',
-        fontSize: 15,
-        maxHeight: 100,
+        fontSize: 16,
+        maxHeight: 108,
     },
     composerMicButton: {
         width: ox(40),
@@ -4360,10 +4846,12 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     sendButton: {
-        width: ox(40),
-        height: ox(40),
-        borderRadius: ox(20),
-        backgroundColor: '#FFFFFF',
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        marginBottom: 0,
+        marginLeft: 6,
+        backgroundColor: '#3d9b8f',
         justifyContent: 'center',
         alignItems: 'center',
     },

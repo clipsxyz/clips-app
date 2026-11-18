@@ -9,7 +9,7 @@ function nativeInt(value: unknown, fallback = 0): number {
     return Math.trunc(n) | 0;
 }
 
-export type NativeCameraCapture = 'photo' | 'video';
+export type NativeCameraCapture = 'photo' | 'video' | 'mixed';
 
 export type LaunchNativeCameraInput = {
     mediaType: NativeCameraCapture;
@@ -26,14 +26,16 @@ export type LaunchNativeCameraInput = {
  */
 export function buildNativeCameraOptions(input: LaunchNativeCameraInput): CameraOptions {
     const isVideo = input.mediaType === 'video';
-    const durationLimit = isVideo
-        ? nativeInt(input.durationLimitSec ?? VIDEO_DURATION_LIMIT_SEC, VIDEO_DURATION_LIMIT_SEC)
+    const isMixed = input.mediaType === 'mixed';
+    const durationFallback = isMixed ? 15 : VIDEO_DURATION_LIMIT_SEC;
+    const durationLimit = isVideo || isMixed
+        ? nativeInt(input.durationLimitSec ?? durationFallback, durationFallback)
         : 0;
 
     return {
-        mediaType: isVideo ? 'video' : 'photo',
+        mediaType: isMixed ? 'mixed' : isVideo ? 'video' : 'photo',
         // PhotoQuality only lists tenths in its TS union; native accepts any 0..1 double.
-        quality: Number(input.quality ?? (isVideo ? 0.8 : 0.9)) as PhotoQuality,
+        quality: Number(input.quality ?? (isVideo || isMixed ? 0.8 : 0.9)) as PhotoQuality,
         videoQuality: 'high',
         maxWidth: nativeInt(0),
         maxHeight: nativeInt(0),

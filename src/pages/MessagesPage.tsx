@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiCamera, FiTrash2, FiPlay, FiPause, FiSquare, FiUser, FiAlertCircle, FiXCircle, FiCopy } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiCamera, FiTrash2, FiPlay, FiPause, FiSquare, FiUser, FiAlertCircle, FiXCircle, FiCopy, FiPaperclip, FiFileText } from 'react-icons/fi';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane } from 'react-icons/fa';
 import Avatar from '../components/Avatar';
@@ -630,6 +630,9 @@ export default function MessagesPage() {
     const [sharedPosts, setSharedPosts] = useState<Record<string, Post>>({});
     const [otherUserPlacesTraveled, setOtherUserPlacesTraveled] = useState<string[] | undefined>(undefined);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const cameraInputRef = React.useRef<HTMLInputElement>(null);
+    const documentInputRef = React.useRef<HTMLInputElement>(null);
+    const [attachSheetOpen, setAttachSheetOpen] = useState(false);
     const listRef = React.useRef<HTMLDivElement>(null);
 
     // Context menu state
@@ -741,7 +744,7 @@ export default function MessagesPage() {
     const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
     const [inviteMemberOpen, setInviteMemberOpen] = useState(false);
     const [compactPhone, setCompactPhone] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
-    const threadCardMaxWidth = compactPhone ? '86vw' : '448px';
+    const threadCardMaxWidth = 'min(200px, 78%)';
     const [groupDisplayName, setGroupDisplayName] = useState<string>('Group');
     const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
 
@@ -2160,32 +2163,71 @@ export default function MessagesPage() {
         await appendToThread({ text: sticker });
     };
 
-    const handleImageClick = () => {
-        fileInputRef.current?.click();
-    };
+    const readVideoDuration = (file: File) =>
+        new Promise<number>((resolve) => {
+            const url = URL.createObjectURL(file);
+            const video = document.createElement('video');
+            video.preload = 'metadata';
+            const finish = (value: number) => {
+                URL.revokeObjectURL(url);
+                resolve(value);
+            };
+            video.onloadedmetadata = () => finish(Number.isFinite(video.duration) ? video.duration : 0);
+            video.onerror = () => finish(0);
+            video.src = url;
+        });
 
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        // Reset file input to allow selecting the same file again
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
+    const stageDmFile = async (file: File, fromCamera: boolean) => {
+        const mime = String(file.type || '').toLowerCase();
+        const isVideo = mime.startsWith('video/');
+        const isImage = mime.startsWith('image/');
+        if (fromCamera && isVideo) {
+            const duration = await readVideoDuration(file);
+            if (duration > 15.4) {
+                showToast?.('Camera clips in chat are limited to 15 seconds.');
+                return;
+            }
         }
-
-        if (!String(file.type || '').toLowerCase().startsWith('image/')) {
-            showToast?.('Choose a photo. Videos cannot be sent from chat.');
+        if (!isImage && !isVideo) {
+            if (!user?.handle || (!handle && !groupId)) return;
+            const tempId = `temp-${Date.now()}-file`;
+            try {
+                let hosted = '';
+                if (isLaravelApiEnabled()) {
+                    const upload = await uploadFile(file);
+                    hosted = String(upload?.fileUrl || upload?.url || '').trim();
+                    if (!/^https?:\/\//i.test(hosted)) throw new Error('Upload did not return a public file URL.');
+                }
+                const text = hosted ? `📎 ${file.name}\n${hosted}` : `📎 ${file.name}`;
+                setMessages((prev) =>
+                    [...prev, {
+                        id: tempId,
+                        senderHandle: user.handle,
+                        text,
+                        timestamp: Date.now(),
+                        isFromMe: true,
+                        senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                        isSystemMessage: false,
+                    }].sort((a, b) => a.timestamp - b.timestamp),
+                );
+                const realMessage = await appendToThread({ text });
+                setMessages((prev) => prev.map((message) => (message.id === tempId ? { ...realMessage, isFromMe: true, senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle) } : message)));
+            } catch (error) {
+                console.error('Error sending file:', error);
+                setMessages((prev) => prev.filter((message) => message.id !== tempId));
+                showToast?.('Could not send that file. Try again.');
+            }
             return;
         }
+        if (!user?.handle || (!handle && !groupId)) return;
+        setImageCompose({ imageUrl: URL.createObjectURL(file), caption: '', file });
+    };
 
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const imageUrl = reader.result as string;
-            if (!user?.handle || (!handle && !groupId)) return;
-            // Show image compose UI: preview + optional caption before sending
-            setImageCompose({ imageUrl, caption: '', file });
-        };
-        reader.readAsDataURL(file);
+    const handlePickedDmFile = (e: React.ChangeEvent<HTMLInputElement>, fromCamera: boolean) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        void stageDmFile(file, fromCamera);
     };
 
     const handleCancelImageCompose = () => {
@@ -2748,10 +2790,7 @@ export default function MessagesPage() {
     return (
         <div className="h-full min-h-0 bg-black text-white flex flex-col">
             {/* Header */}
-            <div
-                className="shrink-0 z-[120] isolate border-b border-white/[0.12]"
-                style={{ background: 'linear-gradient(180deg, rgba(32,38,48,0.82) 0%, rgba(11,14,19,0.94) 100%)' }}
-            >
+            <div className="shrink-0 z-[120] isolate bg-black">
                 <div className="relative z-10 flex items-center px-3 py-2.5">
                     <button
                         onClick={() => navigate(-1)}
@@ -3126,7 +3165,10 @@ export default function MessagesPage() {
                                                 
                                                 const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
-                                                    <div className="ml-auto flex max-w-[78%] items-end gap-2">
+                                                    <div
+                                                        className={`ml-auto flex items-end gap-2 ${msg.imageUrl ? 'w-full' : 'max-w-[78%]'}`}
+                                                        style={msg.imageUrl ? { width: threadCardMaxWidth, maxWidth: threadCardMaxWidth } : undefined}
+                                                    >
                                                         <div className="flex flex-col items-end gap-1 min-w-0 flex-1">
                                                             <IMessageDmBubbleShell
                                                                 isFromMe
@@ -3225,7 +3267,7 @@ export default function MessagesPage() {
                                                             )}
                                                             {msg.text && (
                                                                 <div>
-                                                                    <p className="select-none text-[15px] leading-[21px] text-white" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
+                                                                    <p className={`select-none text-[15px] leading-[21px] ${dmSentStyle === 'blue' ? 'text-[#111111]' : 'text-white'}`} style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
                                                                         {translatedMessages[msg.id] || msg.text}
                                                                     </p>
                                                                     {translatedMessages[msg.id] && (
@@ -3515,7 +3557,10 @@ export default function MessagesPage() {
                                                 
                                                 const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
-                                                    <div className="flex max-w-[78%] items-end gap-2">
+                                                    <div
+                                                        className={`flex items-end gap-2 ${msg.imageUrl ? 'w-full' : 'max-w-[78%]'}`}
+                                                        style={msg.imageUrl ? { width: threadCardMaxWidth, maxWidth: threadCardMaxWidth } : undefined}
+                                                    >
                                                         <Avatar
                                                             src={msg.senderAvatar || otherUserAvatar || getAvatarForHandle(msg.senderHandle)}
                                                             name={(msg.senderHandle || handle || '').split('@')[0] || 'User'}
@@ -3714,7 +3759,7 @@ export default function MessagesPage() {
             </div>
 
             {/* Input bar — grayscale chrome only (bubbles keep blue/green preference) */}
-            <div className="z-20 shrink-0 border-t border-white/[0.12] bg-[rgba(12,15,20,0.92)] pb-[max(6px,env(safe-area-inset-bottom))]">
+            <div className="z-20 shrink-0 bg-black pb-[max(8px,env(safe-area-inset-bottom))]">
                 {/* Reply Preview - show screenshot/thumbnail when replying to shared post (MP4 or image) */}
                 {replyingTo && (() => {
                     const replyPostId = replyingTo.postId || extractPostId(replyingTo.text || '');
@@ -3775,7 +3820,11 @@ export default function MessagesPage() {
                     <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
                         <div className="flex items-center gap-3">
                             <div className="flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-950">
-                                <img src={imageCompose.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                                {imageCompose.file.type.startsWith('video/') ? (
+                                    <video src={imageCompose.imageUrl} className="w-full h-full object-cover" muted playsInline />
+                                ) : (
+                                    <img src={imageCompose.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                                )}
                             </div>
                             <div className="flex-1 min-w-0 flex flex-col gap-2">
                                 <input
@@ -3876,8 +3925,8 @@ export default function MessagesPage() {
                     </div>
                 ) : null}
                 {!ENABLE_VOICE_NOTES || !voiceDraft ? (
-                <div className={`flex flex-col ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
-                    <div className="flex min-w-0 items-center gap-2.5 pb-px">
+                <div className="flex flex-col px-2.5 pt-2">
+                    <div className="flex min-w-0 items-end gap-1 pb-px">
                         {ENABLE_VOICE_NOTES && isRecording ? (
                             <div className="flex-1 flex items-center min-h-[44px] px-3 rounded-[24px] border-2 border-white bg-[#09090b] gap-3">
                                 <button
@@ -3902,13 +3951,34 @@ export default function MessagesPage() {
                             </div>
                         ) : (
                             <>
-                                <Avatar
-                                    src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
-                                    name={user?.name || user?.handle || 'You'}
-                                    size="sm"
-                                    className="h-8 w-8 shrink-0"
-                                />
-                                <div className="flex min-h-10 min-w-0 flex-1 items-center rounded-full border border-white/[0.12] bg-white/[0.08] pl-3.5 pr-1.5">
+                                <button
+                                    type="button"
+                                    onClick={() => cameraInputRef.current?.click()}
+                                    className="flex h-11 w-11 shrink-0 items-center justify-center"
+                                    aria-label="Open camera"
+                                >
+                                    <span
+                                        className="flex h-10 w-10 items-center justify-center rounded-[12px] p-0.5"
+                                        style={{ background: 'linear-gradient(135deg, #22C55E, #FFD400, #FF4D9A)' }}
+                                    >
+                                        <span className="flex h-full w-full items-center justify-center rounded-[10px] bg-black text-[#F5F5F5]">
+                                            <FiCamera className="h-[22px] w-[22px]" />
+                                        </span>
+                                    </span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setAttachSheetOpen(true)}
+                                    className="flex h-11 w-11 shrink-0 items-center justify-center"
+                                    aria-label="Attach a file"
+                                >
+                                    <span className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-white p-0.5">
+                                        <span className="flex h-full w-full items-center justify-center rounded-[10px] bg-black text-[#F5F5F5]">
+                                            <FiPaperclip className="h-[22px] w-[22px]" />
+                                        </span>
+                                    </span>
+                                </button>
+                                <div className="flex min-h-11 min-w-0 flex-1 items-end rounded-[22px] bg-[#1C1C1E] py-1.5 pl-4 pr-1.5">
                                     <input
                                         type="text"
                                         value={messageText}
@@ -3921,16 +3991,18 @@ export default function MessagesPage() {
                                             }
                                         }}
                                         placeholder={editingMessage ? 'Edit message…' : 'Message…'}
-                                        className="min-w-0 flex-1 border-0 bg-transparent py-2.5 text-[15px] text-white placeholder:text-[#8B98A5] shadow-none outline-none ring-0 focus:border-0 focus:shadow-none focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:shadow-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                        className="search-field min-w-0 flex-1 border-0 bg-transparent py-1.5 text-[16px] text-white placeholder:text-[#8E8E93] shadow-none outline-none ring-0 focus:border-0 focus:shadow-none focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:shadow-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={handleImageClick}
-                                        className="flex-shrink-0 p-2 text-neutral-300 hover:text-white"
-                                        aria-label="Attach photo"
-                                    >
-                                        <FiCamera className="w-5 h-5" />
-                                    </button>
+                                    {messageText.trim() && !(ENABLE_VOICE_NOTES && isRecording) ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleSend}
+                                            className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#3d9b8f] text-white"
+                                            aria-label="Send"
+                                        >
+                                            <FiSend className="h-4 w-4" />
+                                        </button>
+                                    ) : null}
                                 </div>
                             </>
                         )}
@@ -3957,27 +4029,88 @@ export default function MessagesPage() {
                             )}
                         </button>
                         ) : null}
-                        {messageText.trim() && !(ENABLE_VOICE_NOTES && isRecording) && (
-                            <button
-                                type="button"
-                                onClick={handleSend}
-                                className="flex-shrink-0 rounded-full bg-white p-2.5 text-black hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-sm"
-                                aria-label="Send"
-                            >
-                                <FiSend className="w-5 h-5 sm:w-6 sm:h-6" />
-                            </button>
-                        )}
                     </div>
                     <input
                         type="file"
                         ref={fileInputRef}
-                        onChange={handleImageChange}
-                        accept="image/*"
+                        onChange={(e) => handlePickedDmFile(e, false)}
+                        accept="image/*,video/*"
+                        className="hidden"
+                    />
+                    <input
+                        type="file"
+                        ref={cameraInputRef}
+                        onChange={(e) => handlePickedDmFile(e, true)}
+                        accept="image/*,video/*"
+                        capture="environment"
+                        className="hidden"
+                    />
+                    <input
+                        type="file"
+                        ref={documentInputRef}
+                        onChange={(e) => handlePickedDmFile(e, false)}
                         className="hidden"
                     />
                 </div>
                 ) : null}
             </div>
+
+            {attachSheetOpen ? (
+                <div
+                    className="fixed inset-0 z-50 flex items-end justify-center bg-black/45"
+                    onClick={() => setAttachSheetOpen(false)}
+                >
+                    <div
+                        className="w-full max-w-md rounded-t-2xl bg-[#111B21] px-3 pt-2 pb-[max(16px,env(safe-area-inset-bottom))]"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-label="Attach a file"
+                    >
+                        <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-white/35" />
+                        <div className="mb-3 flex justify-around">
+                            <button
+                                type="button"
+                                className="flex w-24 flex-col items-center gap-2 text-[12px] font-medium text-[#E9EDEF]"
+                                onClick={() => {
+                                    setAttachSheetOpen(false);
+                                    fileInputRef.current?.click();
+                                }}
+                            >
+                                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#1F2C34] text-[#53BDEB]">
+                                    <FiImage className="h-6 w-6" />
+                                </span>
+                                Gallery
+                            </button>
+                            <button
+                                type="button"
+                                className="flex w-24 flex-col items-center gap-2 text-[12px] font-medium text-[#E9EDEF]"
+                                onClick={() => {
+                                    setAttachSheetOpen(false);
+                                    cameraInputRef.current?.click();
+                                }}
+                            >
+                                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#1F2C34] text-[#FF4D9A]">
+                                    <FiCamera className="h-6 w-6" />
+                                </span>
+                                Camera
+                            </button>
+                            <button
+                                type="button"
+                                className="flex w-24 flex-col items-center gap-2 text-[12px] font-medium text-[#E9EDEF]"
+                                onClick={() => {
+                                    setAttachSheetOpen(false);
+                                    documentInputRef.current?.click();
+                                }}
+                            >
+                                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#1F2C34] text-[#A78BFA]">
+                                    <FiFileText className="h-6 w-6" />
+                                </span>
+                                Document
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
 
             {contextMenu?.message && (
                 <div
@@ -4420,7 +4553,7 @@ export default function MessagesPage() {
                                                 setDmSentBubblePreference('blue');
                                             }}
                                             className="flex-1 rounded-[10px] py-2.5 text-sm font-semibold"
-                                            style={dmSentStyle === 'blue' ? { backgroundColor: '#3d9b8f', color: '#FFFFFF' } : { color: '#9CA3AF' }}
+                                            style={dmSentStyle === 'blue' ? { background: 'linear-gradient(135deg, #22C55E, #FFD400, #FF4D9A)', color: '#111111' } : { color: '#9CA3AF' }}
                                         >
                                             Sea glass
                                         </button>
