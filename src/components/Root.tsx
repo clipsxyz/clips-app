@@ -38,6 +38,7 @@ import ChangePhoneNumberPage from '../pages/ChangePhoneNumberPage';
 import PublicPostPage from '../pages/PublicPostPage';
 import PostDetailPage from '../pages/PostDetailPage';
 import PortraitEnforcer from './PortraitEnforcer';
+import GazetteerSheetHost from './GazetteerSheetHost';
 
 
 function ErrorFallback({ error, resetError }: { error: Error; resetError: () => void }) {
@@ -65,6 +66,7 @@ export default function Root() {
             <AuthProvider>
                 <ThemeProvider>
                     <PortraitEnforcer />
+                    <GazetteerSheetHost />
                     <BrowserRouter future={{ v7_relativeSplatPath: true }}>
                         <Routes>
                             <Route path="/splash" element={<SplashPage />} />

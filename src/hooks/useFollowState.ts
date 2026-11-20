@@ -22,6 +22,8 @@ export type FollowStatusPayload = {
     handle: string;
     isFollowing: boolean;
     hasPendingRequest?: boolean;
+    /** Feed hydration must not refetch Stories once per post. */
+    skipStoriesRefresh?: boolean;
 };
 
 export type FollowStateValue = {
@@ -46,8 +48,10 @@ export function emitFollowStatusChanged(payload: FollowStatusPayload): void {
     const key = normalizeHandle(payload.handle);
     if (!key) return;
     const entry: FollowStatusPayload = { ...payload, handle: key };
+    delete entry.skipStoriesRefresh;
     cache.set(key, entry);
     listeners.forEach((listener) => listener(entry));
+    if (payload.skipStoriesRefresh) return;
     // Follow graph changed — Stories 24 must refetch so the new author appears
     // on every location feed without waiting for the (often-disabled) poll.
     emitStoriesRefresh();
@@ -102,6 +106,10 @@ export function useFollowState(opts: {
     // already moved the author back to Follow.
     const cached = handle ? cache.get(handle) : undefined;
     if (cached && matchesHook(cached, handle, userId)) {
+        // A fresh request on this card wins over a feed cache that still says Follow.
+        if (opts.hasPendingRequest === true && cached.isFollowing !== true) {
+            return { isFollowing: false, hasPendingRequest: true };
+        }
         // A confirmed follow on this card wins over a stale Follow broadcast from another post.
         if (opts.isFollowing === true && cached.isFollowing !== true) {
             return {

@@ -6,6 +6,7 @@ import {
     hasPendingFollowRequest,
     isProfilePrivate,
     removeFollowRequest,
+    setProfilePrivacy,
 } from '../api/privacy';
 import { emitFollowStatusChanged } from '../hooks/useFollowState';
 
@@ -83,6 +84,10 @@ async function runFollowOrRequest(opts: {
             try {
                 const result = await apiClient.toggleFollow(targetHandle);
                 if (result && typeof result.following === 'boolean') {
+                    if (result.status === 'pending') {
+                        setProfilePrivacy(targetHandle, true);
+                        if (viewer) createFollowRequest(viewer, targetHandle);
+                    }
                     setFollowState(userId, targetHandle, result.following);
                     if (surfaceErrors && result.following !== true && result.status !== 'pending') {
                         throw new Error('Could not update follow');
@@ -115,6 +120,7 @@ async function runFollowOrRequest(opts: {
         try {
             const result = await apiClient.toggleFollow(targetHandle);
             if (result?.status === 'pending') {
+                setProfilePrivacy(targetHandle, true);
                 createFollowRequest(viewer, targetHandle);
                 setFollowState(userId, targetHandle, false);
                 return { following: false, requested: true };

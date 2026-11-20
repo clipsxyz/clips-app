@@ -19,7 +19,8 @@ import { useAuth } from '../context/Auth';
 import { unifiedSearch, type SearchSections } from '../api/search';
 import { searchLocations, searchLocalGazetteer, type LocationSuggestion } from '../api/locations';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
-import { hasPendingFollowRequest } from '../api/privacy';
+import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
+import { confirmPrivateAccountFollow } from '../components/GazetteerSheetHost';
 import { followOrRequest } from '../utils/followOrRequest';
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
@@ -412,6 +413,10 @@ export default function SearchPage() {
         try {
             const wasFollowing = localFollowState[handle] === true;
             const wasRequested = localRequestState[handle] === true || Boolean(user.handle && hasPendingFollowRequest(user.handle, handle));
+            if (!wasFollowing && !wasRequested && isProfilePrivate(handle)) {
+                const confirmed = await confirmPrivateAccountFollow();
+                if (!confirmed) return;
+            }
             const nextFollowing = wasFollowing ? false : wasRequested ? false : true;
             const result = await followOrRequest({
                 userId: String(user.id),
@@ -421,12 +426,6 @@ export default function SearchPage() {
             });
             setLocalFollowState((prev) => ({ ...prev, [handle]: result.following }));
             setLocalRequestState((prev) => ({ ...prev, [handle]: result.requested }));
-            if (result.requested && !wasRequested) {
-                setAlertSheet({
-                    title: 'Follow Request Sent',
-                    message: `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
-                });
-            }
         } catch {
             setAlertSheet({ title: 'Action failed', message: 'Could not update follow status right now.' });
         } finally {

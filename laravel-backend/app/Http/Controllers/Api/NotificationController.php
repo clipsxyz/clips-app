@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Notification;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -56,10 +57,51 @@ class NotificationController extends Controller
         }
 
         return response()->json([
-            'items' => $items,
+            'items' => $this->notificationItemsWithActors($items),
             'nextCursor' => $nextCursor,
             'hasMore' => $nextCursor !== null,
         ]);
+    }
+
+    /**
+     * Attach the requester's name and avatar so a follow request can be identified
+     * and opened without a second profile lookup. Private accounts still return
+     * their public name; the profile screen decides whether the posts are visible.
+     */
+    private function notificationItemsWithActors($items)
+    {
+        $handles = $items
+            ->pluck('from_handle')
+            ->map(fn ($handle) => trim((string) $handle))
+            ->filter()
+            ->unique(fn ($handle) => strtolower($handle))
+            ->values();
+
+        $actors = collect();
+        if ($handles->isNotEmpty()) {
+            $actors = User::query()
+                ->where(function ($query) use ($handles) {
+                    foreach ($handles as $handle) {
+                        $query->orWhereRaw('LOWER(handle) = ?', [strtolower($handle)]);
+                    }
+                })
+                ->get(['handle', 'display_name', 'avatar_url', 'is_private']);
+        }
+
+        $byHandle = [];
+        foreach ($actors as $actor) {
+            $byHandle[strtolower((string) $actor->handle)] = $actor;
+        }
+
+        return $items->map(function (Notification $notification) use ($byHandle) {
+            $row = $notification->toArray();
+            $actor = $byHandle[strtolower(trim((string) $notification->from_handle))] ?? null;
+            $row['from_display_name'] = $actor?->display_name ?: null;
+            $row['from_avatar_url'] = $actor?->avatar_url ?: null;
+            $row['from_is_private'] = $actor ? (bool) $actor->is_private : null;
+
+            return $row;
+        })->values();
     }
 
     /**

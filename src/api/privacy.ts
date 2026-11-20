@@ -226,6 +226,16 @@ export function hasPendingFollowRequest(fromHandle: string, toHandle: string): b
   return hasPending;
 }
 
+/** Drop a pending request toward this author, whoever sent it on this device. */
+export function clearFollowRequestTo(toHandle: string): void {
+  const toKey = normalizeHandleForPrivacy(toHandle);
+  if (!toKey) return;
+  const requests = getFollowRequests().filter(
+    (req) => normalizeHandleForPrivacy(req.toHandle) !== toKey,
+  );
+  saveFollowRequests(requests);
+}
+
 // Create a follow request
 export function createFollowRequest(fromHandle: string, toHandle: string): void {
   const fromKey = normalizeHandleForPrivacy(fromHandle);

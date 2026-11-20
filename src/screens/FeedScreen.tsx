@@ -325,6 +325,34 @@ import {
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { onFollowStatusChanged } from '../hooks/useFollowState';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
+
+function confirmPrivateAccountFollow() {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (ok) => {
+            if (settled) return;
+            settled = true;
+            resolve(ok);
+        };
+        gazetteerAlert(
+            'This Account is Private',
+            "To view this user's profile you must be following them.",
+            [
+                { text: 'Cancel', style: 'cancel', onPress: () => finish(false) },
+                { text: 'Follow', onPress: () => finish(true) },
+            ],
+            { onDismiss: () => finish(false) },
+        );
+    });
+}
+
+async function shouldSendFollow(handle, viewerHandle, isFollowing, alreadyRequested) {
+    if (isFollowing) return true;
+    if (alreadyRequested) return false;
+    if (viewerHandle && handle && hasPendingFollowRequest(viewerHandle, handle)) return false;
+    if (!handle || !isProfilePrivate(handle)) return true;
+    return confirmPrivateAccountFollow();
+}
 import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard.native';
 import SuggestedPlacesFeedSection from '../components/SuggestedPlacesFeedSection.native';
 import LocalBusinessSuggestionCard from '../components/LocalBusinessSuggestionCard.native';
@@ -4793,6 +4821,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const handleSuggestedCardFollow = React.useCallback(
         async (post: Post) => {
             if (!user) return;
+            if (!(await shouldSendFollow(post.userHandle, user.handle, post.isFollowing === true, post.isFollowRequested === true))) return;
             try {
                 const updated = await toggleFollowForPost(userId, post.id, post.userHandle, user.handle);
                 const isFollowRequested = Boolean(
@@ -4925,6 +4954,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             onFollow: async () => {
                 const p = imageFullscreenPostRef.current;
                 if (!p || !user?.handle || p.userHandle === user.handle) return;
+                if (!(await shouldSendFollow(p.userHandle, user.handle, p.isFollowing === true, p.isFollowRequested === true))) return;
                 const updated = await toggleFollowForPost(userId, p.id, p.userHandle, user.handle);
                 const nextFollowing = updated.isFollowing === true;
                 const isFollowRequested = Boolean(
@@ -5009,6 +5039,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         suggestion={sug}
                         onFollow={async (post) => {
                             if (!user) return;
+                            if (!(await shouldSendFollow(post.userHandle, user.handle, post.isFollowing === true, post.isFollowRequested === true))) return;
                             try {
                                 const updated = await toggleFollowForPost(
                                     userId,
@@ -5340,7 +5371,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onLikeBurst={showFeedLikeBurst}
                     onFollow={async () => {
                         if (isPendingUpload || !user) return;
-                        const { profileHandle: followHandle, authorFollowing } = getReclipDisplay(mergedPost);
+                        const { profileHandle: followHandle, authorFollowing, isReclip } = getReclipDisplay(mergedPost);
+                        const alreadyRequested = isReclip
+                            ? mergedPost.originalAuthorFollowRequested === true
+                            : mergedPost.isFollowRequested === true;
+                        if (!(await shouldSendFollow(followHandle, user.handle, authorFollowing === true, alreadyRequested))) return;
                         try {
                             const updated = await toggleFollowForPost(
                                 userId,

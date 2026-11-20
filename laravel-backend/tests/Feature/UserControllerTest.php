@@ -252,6 +252,61 @@ class UserControllerTest extends TestCase
         ]);
     }
 
+    public function test_cancelling_a_pending_follow_removes_the_request_notification(): void
+    {
+        $follower = User::factory()->create(['is_private' => false]);
+        $following = User::factory()->create(['is_private' => true, 'handle' => 'Owner@Dublin']);
+
+        $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/users/'.$following->handle.'/follow')
+            ->assertStatus(200)
+            ->assertJson(['status' => 'pending']);
+
+        $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/users/owner@dublin/follow')
+            ->assertStatus(200)
+            ->assertJson(['status' => 'unfollowed']);
+
+        $this->assertDatabaseMissing('user_follows', [
+            'follower_id' => $follower->id,
+            'following_id' => $following->id,
+        ]);
+        $this->assertDatabaseMissing('notifications', [
+            'user_id' => $following->id,
+            'type' => 'follow_request',
+        ]);
+    }
+
+    public function test_owner_can_accept_a_follow_request_regardless_of_handle_case(): void
+    {
+        $follower = User::factory()->create(['is_private' => false, 'handle' => 'Gavin@CA']);
+        $following = User::factory()->create(['is_private' => true]);
+
+        $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/users/'.$following->handle.'/follow')
+            ->assertStatus(200);
+
+        $this->actingAs($following, 'sanctum')
+            ->postJson('/api/users/gavin@ca/follow/accept')
+            ->assertStatus(200)
+            ->assertJson(['status' => 'accepted']);
+
+        $this->assertDatabaseHas('user_follows', [
+            'follower_id' => $follower->id,
+            'following_id' => $following->id,
+            'status' => 'accepted',
+        ]);
+        $this->assertDatabaseMissing('notifications', [
+            'user_id' => $following->id,
+            'type' => 'follow_request',
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $follower->id,
+            'type' => 'follow_accepted',
+            'from_handle' => $following->handle,
+        ]);
+    }
+
     public function test_can_accept_follow_request_for_private_user(): void
     {
         $follower = User::factory()->create(['is_private' => false]);
@@ -317,6 +372,11 @@ class UserControllerTest extends TestCase
             'user_id' => $following->id,
             'type' => 'follow_request',
             'from_handle' => $follower->handle,
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $follower->id,
+            'type' => 'follow_denied',
+            'from_handle' => $following->handle,
         ]);
     }
 

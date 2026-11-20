@@ -404,8 +404,10 @@ export default function ViewProfilePage() {
       });
       setIsFollowing(result.following);
       setHasPendingRequest(result.requested);
-      if (result.requested && !wasRequested) {
-        setAlert({ title: 'Follow Request Sent', message: 'Your follow request has been sent.', icon: 'success' });
+      if (result.requested) {
+        setProfileIsPrivate(true);
+        setProfilePrivacy(handleToUse, true);
+        setCanView(false);
       }
       if (!result.following && !result.requested && wasFollowing) {
         clearProfilePostNotifyForCreator(String(user.id), user.handle, handleToUse);
@@ -672,13 +674,23 @@ export default function ViewProfilePage() {
           <FiLock className="mb-4 h-16 w-16 text-[#9CA3AF]" />
           <h1 className="text-xl font-bold">This Account is Private</h1>
           <p className="mt-2 text-sm text-[#9CA3AF]">To view this user's profile you must be following them.</p>
-          {!hasPendingRequest ? (
-            <button type="button" onClick={() => void handleFollow()} className="mt-6 min-w-[140px] rounded-[14px] bg-[#3d9b8f] px-6 py-2.5 text-sm font-semibold text-white">
-              Follow
-            </button>
-          ) : (
-            <p className="mt-6 text-sm text-[#9CA3AF]">Follow request sent</p>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (hasPendingRequest) {
+                setAlert({
+                  title: 'Follow Request Sent',
+                  message: 'Your follow request has been sent. They can accept or deny it.',
+                  icon: 'info',
+                });
+                return;
+              }
+              void handleFollow();
+            }}
+            className="mt-6 min-w-[160px] rounded-full bg-white px-6 py-3 text-sm font-bold text-[#03091B]"
+          >
+            {hasPendingRequest ? 'Requested' : 'Follow'}
+          </button>
         </div>
       </div>
     );

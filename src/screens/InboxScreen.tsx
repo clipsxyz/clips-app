@@ -66,6 +66,7 @@ import { acceptFollowRequest as acceptFollowRequestApi, denyFollowRequest as den
 import { getFollowedUsers } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
 import { notificationKindIonicon, notificationKindLabel } from '../utils/notificationKind';
+import { followRequestIdentity } from '../utils/followRequestNotification';
 import {
     isFollowInboxNotification,
     isPostRelatedInboxNotification,
@@ -812,6 +813,12 @@ export default function InboxScreen({ navigation, route }: any) {
         navigateRoot('Messages', params);
     };
 
+    const openRequesterProfile = (handle?: string) => {
+        const value = String(handle || '').trim();
+        if (!value) return;
+        navigateRoot('ViewProfile', { handle: value });
+    };
+
     const handleNotificationPress = (notif: Notification) => {
         const isSyntheticConvNotif = notif.id.startsWith('conv-notif-');
         const route = resolveInboxNotificationRoute(notif);
@@ -907,7 +914,7 @@ export default function InboxScreen({ navigation, route }: any) {
             await loadData();
             setInboxAlert({
                 title: 'Follow request accepted',
-                message: `You are now following ${notif.fromHandle}.`,
+                message: `${(notif.fromDisplayName || notif.fromHandle || 'They').trim()} is now following you.`,
                 icon: 'success',
                 confirmButtonText: 'OK',
             });
@@ -1136,8 +1143,12 @@ export default function InboxScreen({ navigation, route }: any) {
                 return notif.message || 'Commented on your post';
             case 'dm':
                 return notif.message || 'Sent you a message';
-            case 'follow_request':
-                return `wants to follow you`;
+            case 'follow_request': {
+                const who = followRequestIdentity(notif);
+                return who.handle
+                    ? `${who.handle} wants to follow you`
+                    : `${who.title} wants to follow you`;
+            }
             case 'new_post':
                 return notif.message || 'posted a new clip';
             case 'group_invite':
@@ -1509,6 +1520,7 @@ export default function InboxScreen({ navigation, route }: any) {
                     }
                     renderItem={({ item }) => {
                         const inviteId = item.type === 'group_invite' ? item.chatGroupInviteId : undefined;
+                        const requester = item.type === 'follow_request' ? followRequestIdentity(item) : null;
                         const row = (
                         <Pressable
                             onPress={() => handleNotificationPress(item)}
@@ -1519,10 +1531,17 @@ export default function InboxScreen({ navigation, route }: any) {
                             ]}
                         >
                             <View style={styles.itemIcon}>
+                                <TouchableOpacity
+                                    disabled={item.type !== 'follow_request' || !item.fromHandle}
+                                    activeOpacity={item.type === 'follow_request' ? 0.7 : 1}
+                                    onPress={() => {
+                                        if (item.type === 'follow_request') openRequesterProfile(item.fromHandle);
+                                    }}
+                                >
                                 <View style={styles.notificationAvatarWrap}>
                                     <Avatar
-                                        src={dmAvatarMap[item.fromHandle] || getAvatarForHandle(item.fromHandle)}
-                                        name={item.fromHandle}
+                                        src={item.fromAvatarUrl || dmAvatarMap[item.fromHandle] || getAvatarForHandle(item.fromHandle)}
+                                        name={item.fromDisplayName || item.fromHandle}
                                         size={ox(40)}
                                         cornerRadius={ox(12)}
                                     />
@@ -1535,14 +1554,42 @@ export default function InboxScreen({ navigation, route }: any) {
                                     </View>
                                     {!item.read ? <View style={styles.unreadDot} pointerEvents="none" /> : null}
                                 </View>
+                                </TouchableOpacity>
                             </View>
                             <View style={styles.itemContent}>
-                                <Text style={styles.itemTitle} numberOfLines={1}>
-                                    {item.groupName || item.fromHandle}
-                                </Text>
-                                <Text style={styles.itemMessage} numberOfLines={2}>
-                                    {formatNotificationMessage(item)}
-                                </Text>
+                                {requester ? (
+                                    <TouchableOpacity
+                                        activeOpacity={0.7}
+                                        disabled={!item.fromHandle}
+                                        onPress={() => openRequesterProfile(item.fromHandle)}
+                                    >
+                                        <Text style={styles.itemTitle} numberOfLines={1}>
+                                            {requester.title}
+                                        </Text>
+                                        {requester.showHandle ? (
+                                            <Text style={styles.itemMessage} numberOfLines={1}>
+                                                {requester.handle}
+                                            </Text>
+                                        ) : null}
+                                        <Text style={styles.itemMessage} numberOfLines={2}>
+                                            wants to follow you
+                                        </Text>
+                                        {requester.isPrivate ? (
+                                            <Text style={styles.followRequestPrivate} numberOfLines={1}>
+                                                Private profile
+                                            </Text>
+                                        ) : null}
+                                    </TouchableOpacity>
+                                ) : (
+                                    <>
+                                        <Text style={styles.itemTitle} numberOfLines={1}>
+                                            {item.groupName || item.fromHandle}
+                                        </Text>
+                                        <Text style={styles.itemMessage} numberOfLines={2}>
+                                            {formatNotificationMessage(item)}
+                                        </Text>
+                                    </>
+                                )}
                                 {!!item.storyId && unavailableStoryIds.has(item.storyId) && (
                                     <View style={styles.storyUnavailableChip}>
                                         <Text style={styles.storyUnavailableChipText}>Story unavailable</Text>
@@ -1551,6 +1598,13 @@ export default function InboxScreen({ navigation, route }: any) {
                                 <Text style={styles.itemTime}>{timeAgo(item.timestamp)}</Text>
                                 {item.type === 'follow_request' && (
                                     <View style={styles.followRequestActions}>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestViewBtn]}
+                                            disabled={!item.fromHandle}
+                                            onPress={() => openRequesterProfile(item.fromHandle)}
+                                        >
+                                            <Text style={styles.followRequestViewText}>View profile</Text>
+                                        </TouchableOpacity>
                                         <TouchableOpacity
                                             style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
                                             onPress={() => { void handleAcceptFollowRequest(item); }}
@@ -2375,10 +2429,27 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: '#070a12',
     },
+    followRequestPrivate: {
+        marginTop: ox(2),
+        color: '#F8D26A',
+        fontSize: ox(11),
+        fontWeight: '600',
+    },
     followRequestActions: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         gap: ox(8),
         marginTop: ox(8),
+    },
+    followRequestViewBtn: {
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.35)',
+    },
+    followRequestViewText: {
+        color: '#FFFFFF',
+        fontSize: ox(12),
+        fontWeight: '700',
     },
     followRequestBtn: {
         borderRadius: ox(8),

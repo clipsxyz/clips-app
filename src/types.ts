@@ -155,6 +155,13 @@ export type Post = {
   stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
   isBookmarked: boolean;
   isFollowing: boolean;
+  /** Author's profile is private. The feed follow button uses this before the local privacy cache. */
+  authorIsPrivate?: boolean;
+  originalAuthorIsPrivate?: boolean;
+  /** Viewer has a pending follow request for this post's author. */
+  isFollowRequested?: boolean;
+  /** Viewer has a pending follow request for a reclip's original author. */
+  originalAuthorFollowRequested?: boolean;
   /** True when the post author follows the current user (mutual follow → show DM icon). */
   authorFollowsYou?: boolean;
   userLiked: boolean;

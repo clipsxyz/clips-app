@@ -33,6 +33,7 @@ import {
     publishInboxUnreadParts,
 } from '../utils/inboxUnread';
 import { notificationKindLabel, resolveNotificationKind } from '../utils/notificationKind';
+import { followRequestIdentity } from '../utils/followRequestNotification';
 import {
     isFollowInboxNotification,
     isPostRelatedInboxNotification,
@@ -1104,8 +1105,12 @@ export default function InboxPage() {
                 return notif.message || 'Commented on your post';
             case 'dm':
                 return notif.message || 'Sent you a message';
-            case 'follow_request':
-                return `wants to follow you`;
+            case 'follow_request': {
+                const who = followRequestIdentity(notif);
+                return who.handle
+                    ? `${who.handle} wants to follow you`
+                    : `${who.title} wants to follow you`;
+            }
             case 'new_post':
                 return notif.message || 'posted a new clip';
             case 'like':
@@ -1157,20 +1162,9 @@ export default function InboxPage() {
         if (!user?.handle || !user?.id) return;
         
         try {
-            // Accept the follow request via API
+            // Accept the follow request via API. They follow you; do not follow them back.
             const { acceptFollowRequest: acceptFollowRequestAPI } = await import('../api/client');
-            const encodedHandle = encodeURIComponent(notif.fromHandle);
-            
-            await acceptFollowRequestAPI(encodedHandle);
-            
-            // Add to followed users (using the posts API state)
-            const { toggleFollowForPost } = await import('../api/posts');
-            const { posts } = await import('../api/posts');
-            // Find a post by this user to toggle follow
-            const userPost = posts.find(p => p.userHandle === notif.fromHandle);
-            if (userPost) {
-                await toggleFollowForPost(user.id, userPost.id);
-            }
+            await acceptFollowRequestAPI(notif.fromHandle);
             
             // Create notification for the requester that their follow request was accepted
             try {
@@ -1188,9 +1182,10 @@ export default function InboxPage() {
             await deleteNotification(notif.id, user.handle);
             await loadData();
             
+            const requesterName = (notif.fromDisplayName || notif.fromHandle || 'They').trim();
             Swal.fire(bottomSheet({
                 title: 'Follow Request Accepted',
-                message: `You are now following ${notif.fromHandle}`,
+                message: `${requesterName} is now following you`,
                 icon: 'success',
             }));
         } catch (error) {
@@ -1206,9 +1201,7 @@ export default function InboxPage() {
         try {
             // Deny the follow request via API
             const { denyFollowRequest: denyFollowRequestAPI } = await import('../api/client');
-            const encodedHandle = encodeURIComponent(notif.fromHandle);
-            
-            await denyFollowRequestAPI(encodedHandle);
+            await denyFollowRequestAPI(notif.fromHandle);
             
             await deleteNotification(notif.id, user.handle);
             await loadData();
@@ -1544,127 +1537,166 @@ export default function InboxPage() {
                                 </button>
                             </div>
                         )}
-                        {notifications.map(notif => (
+                        {notifications.map(notif => {
+                            const requester = notif.type === 'follow_request' ? followRequestIdentity(notif) : null;
+                            return (
                             <div
                                 key={notif.id}
-                                className={`w-full flex items-center justify-between gap-3 rounded-xl bg-[#161b22] p-3 mb-2 border ${
+                                className={`w-full rounded-xl bg-[#161b22] p-3 mb-2 border ${
                                     notif.read
                                         ? 'border-white/5'
                                         : 'border-l-4 border-l-emerald-400 border-white/10'
                                 }`}
                             >
-                                <button
-                                    type="button"
-                                    onClick={() => handleNotificationClick(notif)}
-                                    className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer"
-                                >
-                                    <div className="flex-shrink-0">
-                                        {getNotificationIcon(notif)}
-                                    </div>
-                                    <Avatar
-                                        name={notif.groupName || notif.fromHandle}
-                                        src={notif.chatGroupId ? undefined : (dmAvatarMap[notif.fromHandle] || getAvatarForHandle(notif.fromHandle))}
-                                        size="sm"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="font-medium truncate text-white">
-                                            {notif.groupName || notif.fromHandle}
+                                <div className="flex items-start gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleNotificationClick(notif)}
+                                        className="flex min-w-0 flex-1 items-start gap-3 text-left cursor-pointer"
+                                    >
+                                        <div className="mt-1 flex-shrink-0">
+                                            {getNotificationIcon(notif)}
                                         </div>
-                                        <div className="text-xs text-gray-400 truncate">
-                                            {formatNotificationMessage(notif)}
-                                        </div>
-                                        {notif.storyId && (
-                                            unavailableStoryIds.has(notif.storyId) ? (
-                                                <div className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-1">
-                                                    <span className="text-[10px] text-red-300">Story unavailable</span>
-                                                </div>
-                                            ) : notif.imageUrl ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (!notif.storyId) return;
-                                                        if (storyThumbLongPressTriggeredRef.current) {
+                                        <Avatar
+                                            name={notif.fromDisplayName || notif.groupName || notif.fromHandle}
+                                            src={notif.chatGroupId ? undefined : (notif.fromAvatarUrl || dmAvatarMap[notif.fromHandle] || getAvatarForHandle(notif.fromHandle))}
+                                            size="sm"
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            {requester ? (
+                                                <>
+                                                    <div className="font-medium truncate text-white">
+                                                        {requester.title}
+                                                    </div>
+                                                    {requester.showHandle ? (
+                                                        <div className="text-xs text-gray-300 truncate">
+                                                            {requester.handle}
+                                                        </div>
+                                                    ) : null}
+                                                    <div className="text-xs text-gray-400 truncate">
+                                                        wants to follow you
+                                                    </div>
+                                                    {requester.isPrivate ? (
+                                                        <div className="text-[11px] font-semibold text-[#F8D26A] truncate">
+                                                            Private profile
+                                                        </div>
+                                                    ) : null}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className="font-medium truncate text-white">
+                                                        {notif.groupName || notif.fromHandle}
+                                                    </div>
+                                                    <div className="text-xs text-gray-400 truncate">
+                                                        {formatNotificationMessage(notif)}
+                                                    </div>
+                                                </>
+                                            )}
+                                            {notif.storyId && (
+                                                unavailableStoryIds.has(notif.storyId) ? (
+                                                    <div className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-1">
+                                                        <span className="text-[10px] text-red-300">Story unavailable</span>
+                                                    </div>
+                                                ) : notif.imageUrl ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (!notif.storyId) return;
+                                                            if (storyThumbLongPressTriggeredRef.current) {
+                                                                storyThumbLongPressTriggeredRef.current = false;
+                                                                return;
+                                                            }
+                                                            openStoryFromNotification(notif.fromHandle, notif.storyId);
+                                                        }}
+                                                        onPointerDown={(e) => {
+                                                            e.stopPropagation();
+                                                            if (!notif.storyId) return;
                                                             storyThumbLongPressTriggeredRef.current = false;
-                                                            return;
-                                                        }
-                                                        openStoryFromNotification(notif.fromHandle, notif.storyId);
-                                                    }}
-                                                    onPointerDown={(e) => {
-                                                        e.stopPropagation();
-                                                        if (!notif.storyId) return;
-                                                        storyThumbLongPressTriggeredRef.current = false;
-                                                        clearStoryThumbLongPressTimer();
-                                                        storyThumbLongPressTimerRef.current = window.setTimeout(() => {
-                                                            storyThumbLongPressTriggeredRef.current = true;
-                                                            setStoryThumbMenu({ fromHandle: notif.fromHandle, storyId: notif.storyId! });
-                                                        }, 420);
-                                                    }}
-                                                    onPointerUp={clearStoryThumbLongPressTimer}
-                                                    onPointerCancel={clearStoryThumbLongPressTimer}
-                                                    onPointerLeave={clearStoryThumbLongPressTimer}
-                                                    onContextMenu={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        if (!notif.storyId) return;
-                                                        setStoryThumbMenu({ fromHandle: notif.fromHandle, storyId: notif.storyId });
-                                                    }}
-                                                    className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-1.5 py-1 hover:bg-white/10 transition-colors"
-                                                    aria-label="Open story that was replied to"
-                                                >
-                                                    <StoryReplyThumb imageUrl={notif.imageUrl} />
-                                                    <span className="text-[10px] text-white/70">
-                                                        {notif.storyContextOwner ? `Shared from @${notif.storyContextOwner}` : 'Story context'}
-                                                    </span>
-                                                </button>
-                                            ) : null
-                                        )}
-                                    </div>
-                                    <div className="flex flex-col items-end gap-1">
+                                                            clearStoryThumbLongPressTimer();
+                                                            storyThumbLongPressTimerRef.current = window.setTimeout(() => {
+                                                                storyThumbLongPressTriggeredRef.current = true;
+                                                                setStoryThumbMenu({ fromHandle: notif.fromHandle, storyId: notif.storyId! });
+                                                            }, 420);
+                                                        }}
+                                                        onPointerUp={clearStoryThumbLongPressTimer}
+                                                        onPointerCancel={clearStoryThumbLongPressTimer}
+                                                        onPointerLeave={clearStoryThumbLongPressTimer}
+                                                        onContextMenu={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            if (!notif.storyId) return;
+                                                            setStoryThumbMenu({ fromHandle: notif.fromHandle, storyId: notif.storyId });
+                                                        }}
+                                                        className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-1.5 py-1 hover:bg-white/10 transition-colors"
+                                                        aria-label="Open story that was replied to"
+                                                    >
+                                                        <StoryReplyThumb imageUrl={notif.imageUrl} />
+                                                        <span className="text-[10px] text-white/70">
+                                                            {notif.storyContextOwner ? `Shared from @${notif.storyContextOwner}` : 'Story context'}
+                                                        </span>
+                                                    </button>
+                                                ) : null
+                                            )}
+                                        </div>
+                                    </button>
+                                    <div className="flex shrink-0 flex-col items-end gap-1">
                                         <div className="text-[10px] text-gray-400">
                                             {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </div>
                                         {!notif.read && (
                                             <span className="w-2 h-2 bg-white rounded-full"></span>
                                         )}
+                                        <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none bg-white/10 text-white/80 border border-white/15">
+                                            {notificationKindLabel(notif)}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            aria-label="Delete notification"
+                                            className="p-1.5 text-gray-400 hover:text-white"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                void deleteNotification(notif.id, user.handle).then(() => {
+                                                    setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+                                                });
+                                            }}
+                                        >
+                                            <FiTrash2 className="w-4 h-4" />
+                                        </button>
                                     </div>
-                                </button>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none bg-white/10 text-white/80 border border-white/15">
-                                        {notificationKindLabel(notif)}
-                                    </span>
-                                    {notif.type === 'follow_request' && (
-                                        <>
-                                            <button
-                                                onClick={(e) => handleAcceptFollowRequest(notif, e)}
-                                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-medium transition-colors"
-                                            >
-                                                Accept
-                                            </button>
-                                            <button
-                                                onClick={(e) => handleDenyFollowRequest(notif, e)}
-                                                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
-                                            >
-                                                Deny
-                                            </button>
-                                        </>
-                                    )}
-                                    <button
-                                        type="button"
-                                        aria-label="Delete notification"
-                                        className="p-1.5 text-gray-400 hover:text-white"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            void deleteNotification(notif.id, user.handle).then(() => {
-                                                setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
-                                            });
-                                        }}
-                                    >
-                                        <FiTrash2 className="w-4 h-4" />
-                                    </button>
                                 </div>
+                                {notif.type === 'follow_request' && (
+                                    <div className="mt-2 flex flex-wrap items-center gap-2 pl-[4.75rem]">
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (!notif.fromHandle) return;
+                                                navigate(`/user/${encodeURIComponent(notif.fromHandle)}`);
+                                            }}
+                                            className="rounded-lg border border-white/35 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-white/10"
+                                        >
+                                            View profile
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleAcceptFollowRequest(notif, e)}
+                                            className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[#111827] transition-colors hover:bg-white/90"
+                                        >
+                                            Accept
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleDenyFollowRequest(notif, e)}
+                                            className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-[#E5E7EB] transition-colors hover:bg-white/15"
+                                        >
+                                            Deny
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )
             ) : activeTab === 'groups' ? (

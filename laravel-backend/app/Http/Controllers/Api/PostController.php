@@ -292,6 +292,9 @@ class PostController extends Controller
                 : ($post->relationLoaded('user') && $post->user && $post->user->relationLoaded('followers')
                 ? $post->user->followers->isNotEmpty()
                 : $post->isFollowingAuthor($viewer));
+            if (array_key_exists('has_pending_follow', $attrs)) {
+                $postData['has_pending_follow'] = (bool) $attrs['has_pending_follow'];
+            }
             $postData['author_follows_you'] = array_key_exists('author_follows_you', $attrs)
                 ? (bool) $attrs['author_follows_you']
                 : $post->authorFollowsViewer($viewer);
@@ -324,6 +327,9 @@ class PostController extends Controller
 
         $author = $post->relationLoaded('user') ? $post->user : null;
         $authorAttrs = $author ? $author->getAttributes() : [];
+        if ($author && array_key_exists('is_private', $authorAttrs)) {
+            $postData['author_is_private'] = (bool) $author->is_private;
+        }
         if (array_key_exists('allow_comments', $authorAttrs) || array_key_exists('comment_audience', $authorAttrs)) {
             $allow = array_key_exists('allow_comments', $authorAttrs) ? (bool) $authorAttrs['allow_comments'] : true;
             $audience = (string) ($authorAttrs['comment_audience'] ?? 'everyone');
@@ -340,11 +346,17 @@ class PostController extends Controller
         if ($post->is_reclipped && $post->original_post_id) {
             $original = $post->relationLoaded('originalPost') ? $post->originalPost : null;
             if ($original && ! $original->relationLoaded('user')) {
-                $original->load('user:id,handle,avatar_url');
+                $original->load('user:id,handle,avatar_url,is_private');
             }
             $originalUser = $original?->user;
             if ($originalUser && is_string($originalUser->avatar_url) && $originalUser->avatar_url !== '') {
                 $postData['original_user_avatar_url'] = $originalUser->avatar_url;
+            }
+            if ($originalUser && array_key_exists('is_private', $originalUser->getAttributes())) {
+                $postData['original_author_is_private'] = (bool) $originalUser->is_private;
+            }
+            if (array_key_exists('original_author_has_pending_follow', $attrs)) {
+                $postData['original_author_has_pending_follow'] = (bool) $attrs['original_author_has_pending_follow'];
             }
             if (array_key_exists('original_author_is_following', $attrs)) {
                 $postData['original_author_is_following'] = (bool) $attrs['original_author_is_following'];
@@ -423,7 +435,7 @@ class PostController extends Controller
         // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
         // Location feeds: only original posts from that location.
         $query = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience,is_private', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url,is_private'])
             ->withCount(Post::engagementWithCounts());
 
         if ($filter === 'Following' && $userId) {
@@ -453,11 +465,19 @@ class PostController extends Controller
                     [$userId]
                 )
                 ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'pending') as has_pending_follow",
+                    [$userId]
+                )
+                ->selectRaw(
                     "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
                     [$userId]
                 )
                 ->selectRaw(
                     "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'accepted') as original_author_is_following",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'pending') as original_author_has_pending_follow",
                     [$userId]
                 );
         }
@@ -558,7 +578,7 @@ class PostController extends Controller
         $userId = $request->get('userId');
         $hasViewer = ! empty($userId);
 
-        $query = Post::with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url'])
+        $query = Post::with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience,is_private', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url,is_private'])
             ->withCount(Post::engagementWithCounts());
 
         if ($hasViewer) {
@@ -578,11 +598,19 @@ class PostController extends Controller
                     [$userId]
                 )
                 ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'pending') as has_pending_follow",
+                    [$userId]
+                )
+                ->selectRaw(
                     "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
                     [$userId]
                 )
                 ->selectRaw(
                     "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'accepted') as original_author_is_following",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'pending') as original_author_has_pending_follow",
                     [$userId]
                 );
         }
@@ -603,7 +631,7 @@ class PostController extends Controller
         }
 
         $post = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience'])
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience,is_private'])
             ->withCount(Post::engagementWithCounts())
             ->where('public_share_token', $token)
             ->first();
@@ -1261,7 +1289,7 @@ class PostController extends Controller
             }
         }
 
-        $post->load(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience', 'taggedUsers:id,handle,display_name,avatar_url']);
+        $post->load(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,allow_comments,comment_audience,is_private', 'taggedUsers:id,handle,display_name,avatar_url']);
         $post->loadCount(Post::engagementWithCounts());
         Post::bumpFeedCache();
         $postData = self::toApiArray($post, $user instanceof User ? $user : null);

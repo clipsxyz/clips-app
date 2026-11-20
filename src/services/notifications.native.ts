@@ -301,6 +301,21 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     }
     const data = parsed.data;
     const type = String(data.type || data.notificationType || '').toLowerCase();
+    if (type === 'follow_accepted' || type === 'follow_denied') {
+      const handle = String(data.fromHandle || data.from_handle || '');
+      if (handle) {
+        void import('../api/privacy').then(({ clearFollowRequestTo }) => {
+          clearFollowRequestTo(handle);
+        });
+        void import('../hooks/useFollowState').then(({ emitFollowStatusChanged }) => {
+          emitFollowStatusChanged({
+            handle,
+            isFollowing: type === 'follow_accepted',
+            hasPendingRequest: false,
+          });
+        });
+      }
+    }
     void import('../utils/dispatchBrowserEvent').then(({ dispatchBrowserEvent }) => {
       if (type === 'dm' || type === 'message' || type === 'group_chat' || type === 'sticker' || type === 'reply') {
         dispatchBrowserEvent('conversationUpdated', {

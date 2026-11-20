@@ -68,12 +68,16 @@ export default function FeedPostHeader({
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const viewer = viewerHandle ?? user?.handle;
     const isFollowingFromProps = authorFollowing;
+    const serverRequested = isReclip
+        ? post.originalAuthorFollowRequested === true
+        : post.isFollowRequested === true;
     const hasPendingRequestFromProps = Boolean(
         !isCurrentUser &&
             !isFollowingFromProps &&
-            viewer &&
-            isProfilePrivate(safeProfileHandle) &&
-            hasPendingFollowRequest(viewer, safeProfileHandle),
+            (serverRequested ||
+                (viewer &&
+                    isProfilePrivate(safeProfileHandle) &&
+                    hasPendingFollowRequest(viewer, safeProfileHandle))),
     );
     // Live follow state keyed on the author handle: a follow/unfollow on View Profile
     // (or a quick menu) updates this header immediately, without a feed refetch.

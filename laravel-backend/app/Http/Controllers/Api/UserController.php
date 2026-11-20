@@ -216,6 +216,13 @@ class UserController extends Controller
                     ->where('follower_id', $follower->id)
                     ->where('following_id', $following->id)
                     ->delete();
+
+                if ($existingFollow->status === 'pending') {
+                    Notification::where('user_id', $following->id)
+                        ->where('type', 'follow_request')
+                        ->whereRaw('LOWER(from_handle) = ?', [strtolower((string) $follower->handle)])
+                        ->delete();
+                }
                 
                 // Only decrement counts if it was accepted
                 if ($existingFollow->status === 'accepted') {
@@ -394,7 +401,7 @@ class UserController extends Controller
     public function acceptFollowRequest(Request $request, string $handle): JsonResponse
     {
         $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
+            'handle' => 'required|string'
         ]);
 
         if ($validator->fails()) {
@@ -402,7 +409,10 @@ class UserController extends Controller
         }
 
         $user = Auth::user();
-        $requester = User::where('handle', $handle)->firstOrFail();
+        $requester = User::whereRaw('LOWER(handle) = ?', [strtolower($handle)])->first();
+        if (! $requester) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
 
         $result = DB::transaction(function () use ($user, $requester) {
             $followRequest = DB::table('user_follows')
@@ -428,7 +438,7 @@ class UserController extends Controller
             // Delete the notification
             Notification::where('user_id', $user->id)
                 ->where('type', 'follow_request')
-                ->where('from_handle', $requester->handle)
+                ->whereRaw('LOWER(from_handle) = ?', [strtolower((string) $requester->handle)])
                 ->delete();
 
             return ['status' => 'accepted', 'message' => 'Follow request accepted'];
@@ -439,6 +449,7 @@ class UserController extends Controller
         }
 
         StoryService::forgetRailCacheForUser((string) $requester->id);
+        (new \App\Services\InteractionPushService)->notifyFollowDecision($user, $requester, true);
 
         return response()->json($result);
     }
@@ -449,7 +460,7 @@ class UserController extends Controller
     public function denyFollowRequest(Request $request, string $handle): JsonResponse
     {
         $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
+            'handle' => 'required|string'
         ]);
 
         if ($validator->fails()) {
@@ -457,7 +468,10 @@ class UserController extends Controller
         }
 
         $user = Auth::user();
-        $requester = User::where('handle', $handle)->firstOrFail();
+        $requester = User::whereRaw('LOWER(handle) = ?', [strtolower($handle)])->first();
+        if (! $requester) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
 
         $result = DB::transaction(function () use ($user, $requester) {
             $followRequest = DB::table('user_follows')
@@ -479,7 +493,7 @@ class UserController extends Controller
             // Delete the notification
             Notification::where('user_id', $user->id)
                 ->where('type', 'follow_request')
-                ->where('from_handle', $requester->handle)
+                ->whereRaw('LOWER(from_handle) = ?', [strtolower((string) $requester->handle)])
                 ->delete();
 
             return ['status' => 'denied', 'message' => 'Follow request denied'];
@@ -490,6 +504,7 @@ class UserController extends Controller
         }
 
         StoryService::forgetRailCacheForUser((string) $requester->id);
+        (new \App\Services\InteractionPushService)->notifyFollowDecision($user, $requester, false);
 
         return response()->json($result);
     }

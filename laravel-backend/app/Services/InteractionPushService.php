@@ -313,6 +313,35 @@ class InteractionPushService
         );
     }
 
+    public function notifyFollowDecision(User $owner, User $requester, bool $accepted): void
+    {
+        if ($owner->id === $requester->id) {
+            return;
+        }
+        if (! $this->prefAllows($requester, $accepted ? 'follows' : 'followRequests')) {
+            return;
+        }
+
+        $handle = (string) $owner->handle;
+        $type = $accepted ? 'follow_accepted' : 'follow_denied';
+        $message = $accepted
+            ? "{$handle} accepted your follow request"
+            : "{$handle} denied your follow request";
+
+        $this->createAndPush(
+            recipient: $requester,
+            type: $type,
+            fromHandle: $handle,
+            message: $message,
+            title: $accepted ? 'Follow request accepted' : 'Follow request denied',
+            body: $message,
+            data: [
+                'type' => $type,
+                'fromHandle' => $handle,
+            ]
+        );
+    }
+
     public function notifyFollow(User $actor, User $recipient): void
     {
         if ($actor->id === $recipient->id) {

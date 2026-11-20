@@ -20,10 +20,12 @@ import { postHasVideoMedia } from '../utils/postMedia';
 import { mapApiLinkPreview } from '../utils/linkPreview';
 import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
 import {
+  clearFollowRequestTo,
   createFollowRequest,
   hasPendingFollowRequest,
   isProfilePrivate,
   removeFollowRequest,
+  setProfilePrivacy,
 } from './privacy';
 import { setAvatarForHandle } from './users';
 import { emitFollowStatusChanged } from '../hooks/useFollowState';
@@ -1586,6 +1588,39 @@ export function transformLaravelPost(response: any): Post {
     }
   }
 
+  const mappedHandle = response.user_handle || response.userHandle;
+  const authorPrivate = response.author_is_private ?? response.authorIsPrivate;
+  if (typeof authorPrivate === 'boolean' && mappedHandle && isProfilePrivate(String(mappedHandle)) !== authorPrivate) {
+    setProfilePrivacy(String(mappedHandle), authorPrivate);
+  }
+  const originalPrivate = response.original_author_is_private ?? response.originalAuthorIsPrivate;
+  const originalHandle = response.original_user_handle || response.originalUserHandle;
+  if (typeof originalPrivate === 'boolean' && originalHandle && isProfilePrivate(String(originalHandle)) !== originalPrivate) {
+    setProfilePrivacy(String(originalHandle), originalPrivate);
+  }
+  const pendingFollow = response.has_pending_follow ?? response.hasPendingFollow;
+  const followingAuthor = Boolean(response.is_following || response.isFollowing);
+  if (mappedHandle && typeof pendingFollow === 'boolean') {
+    if (followingAuthor || pendingFollow === false) clearFollowRequestTo(String(mappedHandle));
+    emitFollowStatusChanged({
+      handle: String(mappedHandle),
+      isFollowing: followingAuthor,
+      hasPendingRequest: !followingAuthor && pendingFollow === true,
+      skipStoriesRefresh: true,
+    });
+  }
+  const originalPending = response.original_author_has_pending_follow ?? response.originalAuthorHasPendingFollow;
+  const originalFollowing = Boolean(response.original_author_is_following ?? response.originalAuthorIsFollowing);
+  if (originalHandle && typeof originalPending === 'boolean') {
+    if (originalFollowing || originalPending === false) clearFollowRequestTo(String(originalHandle));
+    emitFollowStatusChanged({
+      handle: String(originalHandle),
+      isFollowing: originalFollowing,
+      hasPendingRequest: !originalFollowing && originalPending === true,
+      skipStoriesRefresh: true,
+    });
+  }
+
   return {
     id: response.id,
     publicShareToken: response.public_share_token || response.publicShareToken,
@@ -1660,6 +1695,12 @@ width: response.width ?? existing?.width,
     ),
     isBookmarked: response.is_bookmarked || false,
     isFollowing: response.is_following || false,
+    authorIsPrivate: typeof authorPrivate === 'boolean' ? authorPrivate : undefined,
+    originalAuthorIsPrivate: typeof originalPrivate === 'boolean' ? originalPrivate : undefined,
+    isFollowRequested: Boolean(response.has_pending_follow ?? response.hasPendingFollow),
+    originalAuthorFollowRequested: Boolean(
+      response.original_author_has_pending_follow ?? response.originalAuthorHasPendingFollow,
+    ),
     allowComments: response.allow_comments ?? response.allowComments,
     commentAudience: response.comment_audience || response.commentAudience,
     authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
@@ -2768,10 +2809,16 @@ export async function toggleFollowForPost(
       try {
         const result = await apiClient.toggleFollow(handle);
         if (result?.status === 'pending') {
-          createFollowRequest(viewer, handle);
+          setProfilePrivacy(handle, true);
+          if (viewer) createFollowRequest(viewer, handle);
           setFollowStateKey(s.follows, handle, false);
           saveFollowsToStorage(userId, s.follows);
-          if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+          emitFollowStatusChanged({
+            handle,
+            isFollowing: false,
+            hasPendingRequest: true,
+          });
+          if (p) return { ...decorateForUser(userId, p), isFollowing: false, isFollowRequested: true };
           return {
             id,
             userHandle: handle,
@@ -2856,10 +2903,17 @@ export async function toggleFollowForPost(
     try {
       const result = await apiClient.toggleFollow(handle);
       if (result?.status === 'pending') {
-        createFollowRequest(viewer, handle);
+        setProfilePrivacy(handle, true);
+        if (viewer) createFollowRequest(viewer, handle);
         setFollowStateKey(s.follows, handle, false);
         saveFollowsToStorage(userId, s.follows);
-        return applyFollowState(false);
+        emitFollowStatusChanged({
+          handle,
+          isFollowing: false,
+          hasPendingRequest: true,
+        });
+        const requested = applyFollowState(false);
+        return { ...requested, isFollowRequested: true };
       }
       if (typeof result?.following === 'boolean') {
         setFollowStateKey(s.follows, handle, result.following);

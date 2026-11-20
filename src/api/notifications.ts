@@ -33,6 +33,9 @@ export interface Notification {
     chatGroupId?: string;
     chatGroupInviteId?: string;
     groupName?: string;
+    fromDisplayName?: string;
+    fromAvatarUrl?: string;
+    fromIsPrivate?: boolean;
     timestamp: number;
     read: boolean;
 }
@@ -166,6 +169,12 @@ export function normalizeLaravelNotification(n: Record<string, any>, forHandle: 
         chatGroupId: chatGroupId || undefined,
         chatGroupInviteId: chatGroupInviteId || undefined,
         groupName: groupName || undefined,
+        fromDisplayName: n.from_display_name || n.fromDisplayName || undefined,
+        fromAvatarUrl: n.from_avatar_url || n.fromAvatarUrl || undefined,
+        fromIsPrivate:
+            typeof (n.from_is_private ?? n.fromIsPrivate) === 'boolean'
+                ? Boolean(n.from_is_private ?? n.fromIsPrivate)
+                : undefined,
         timestamp: n.created_at ? new Date(n.created_at).getTime() : n.timestamp || Date.now(),
         read: !!n.read,
     };

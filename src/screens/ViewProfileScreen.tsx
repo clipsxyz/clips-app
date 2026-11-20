@@ -1091,16 +1091,23 @@ const result = await followOrRequest({
                     <Text style={styles.privateSubtext}>
                         To view this user's profile you must be following them.
                     </Text>
-                    {!hasPendingRequest ? (
-                        <TouchableOpacity
-                            onPress={handleFollow}
-                            style={[styles.followButton, styles.privateFollowButton]}
-                        >
-                            <Text style={styles.privateFollowButtonText}>Follow</Text>
-                        </TouchableOpacity>
-                    ) : (
-                        <Text style={styles.privatePendingText}>Follow request sent</Text>
-                    )}
+                    <TouchableOpacity
+                        onPress={() => {
+                            if (hasPendingRequest) {
+                                gazetteerAlert(
+                                    'Follow Request Sent',
+                                    'Your follow request has been sent. They can accept or deny it.',
+                                );
+                                return;
+                            }
+                            void handleFollow();
+                        }}
+                        style={[styles.followButton, styles.privateFollowButton]}
+                    >
+                        <Text style={styles.privateFollowButtonText}>
+                            {hasPendingRequest ? 'Requested' : 'Follow'}
+                        </Text>
+                    </TouchableOpacity>
                 </View>
                 </LinearGradient>
             </GazetteerScreenShell>

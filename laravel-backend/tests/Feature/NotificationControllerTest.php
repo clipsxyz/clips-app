@@ -212,6 +212,52 @@ class NotificationControllerTest extends TestCase
             ]);
     }
 
+    public function test_notification_list_names_the_person_who_asked_to_follow(): void
+    {
+        $owner = User::factory()->create();
+        $requester = User::factory()->create([
+            'display_name' => 'Barry Lawlor',
+            'is_private' => false,
+        ]);
+        $privateRequester = User::factory()->create([
+            'display_name' => 'Private Pat',
+            'is_private' => true,
+        ]);
+
+        Notification::query()->create([
+            'user_id' => $owner->id,
+            'type' => 'follow_request',
+            'from_handle' => $requester->handle,
+            'to_handle' => $owner->handle,
+            'message' => $requester->handle.' wants to follow you',
+            'read' => false,
+        ]);
+        Notification::query()->create([
+            'user_id' => $owner->id,
+            'type' => 'follow_request',
+            'from_handle' => $privateRequester->handle,
+            'to_handle' => $owner->handle,
+            'message' => $privateRequester->handle.' wants to follow you',
+            'read' => false,
+        ]);
+
+        $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonFragment([
+                'type' => 'follow_request',
+                'from_handle' => $requester->handle,
+                'from_display_name' => 'Barry Lawlor',
+                'from_is_private' => false,
+            ])
+            ->assertJsonFragment([
+                'type' => 'follow_request',
+                'from_handle' => $privateRequester->handle,
+                'from_display_name' => 'Private Pat',
+                'from_is_private' => true,
+            ]);
+    }
+
     public function test_unread_count_excludes_thread_activity_notifications(): void
     {
         $user = User::factory()->create();

@@ -55,7 +55,7 @@ import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, unifyLoadedFeedFollow, getState, setFollowState, setReclipState, getFollowState, hasExplicitFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
-import { onFollowStatusChanged, useFollowState } from './hooks/useFollowState';
+import { emitFollowStatusChanged, onFollowStatusChanged, useFollowState } from './hooks/useFollowState';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe, updateAuthProfile } from './api/client';
 import { rewriteMediaUrlForClient } from './api/apiBaseUrl';
@@ -110,6 +110,7 @@ import { FEED_UI } from './constants/feedUiTokens';
 import { feedCardAspectRatio } from './utils/mediaAspectRatio';
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
+import { confirmPrivateAccountFollow } from './components/GazetteerSheetHost';
 import { showToast } from './utils/toast';
 import { markFeedPostArchived, isFeedPostArchived, setPostNotificationsPref, hasPostNotificationsPref } from './utils/feedPostPrefs';
 import { TEXT_STORY_TEMPLATES } from './textStoryTemplates';
@@ -1615,9 +1616,14 @@ function PostHeader({
   const serverFollowing = isReclippedPost
     ? post.originalAuthorIsFollowing === true
     : !!post.isFollowing;
+  const serverRequested = isReclippedPost
+    ? post.originalAuthorFollowRequested === true
+    : post.isFollowRequested === true;
   const liveFollow = useFollowState({
     handle: profileTargetHandle,
     isFollowing: serverFollowing,
+    hasPendingRequest:
+      serverRequested || hasPendingFollowRequest(user?.handle || '', profileTargetHandle),
   });
   const isFollowingThisUser = liveFollow.isFollowing;
 
@@ -1693,10 +1699,7 @@ function PostHeader({
     };
   }, [profileMenuOpen]);
 
-  const followRequested =
-    !subjectIsViewer &&
-    !isFollowingThisUser &&
-    hasPendingFollowRequest(user?.handle || '', profileTargetHandle);
+  const followRequested = !subjectIsViewer && !isFollowingThisUser && liveFollow.hasPendingRequest;
   const quickActionClass = 'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-[#F9FAFB]';
   const profileQuickMenu = profileMenuOpen ? (
     <>
@@ -8706,6 +8709,36 @@ function FeedPageWrapper() {
 
   const followInFlightRef = React.useRef(new Set<string>());
 
+  function markHandleFollowRequested(handle: string) {
+    const lower = handle.trim().toLowerCase();
+    if (!lower) return;
+    emitFollowStatusChanged({
+      handle,
+      isFollowing: false,
+      hasPendingRequest: true,
+    });
+    setPages((prev) =>
+      prev.map((page) =>
+        page.map((post) => {
+          const author = String(post.userHandle || '').trim().toLowerCase();
+          const original = String(post.originalUserHandle || '').trim().toLowerCase();
+          if (author === lower) {
+            return { ...post, isFollowing: false, isFollowRequested: true, authorIsPrivate: true };
+          }
+          if (original === lower) {
+            return {
+              ...post,
+              originalAuthorIsFollowing: false,
+              originalAuthorFollowRequested: true,
+              originalAuthorIsPrivate: true,
+            };
+          }
+          return post;
+        }),
+      ),
+    );
+  }
+
   async function handleMainFeedFollow(p: Post): Promise<void> {
           const followKey = String(p.userHandle || '').trim().toLowerCase();
           if (followKey && followInFlightRef.current.has(followKey)) return;
@@ -8737,17 +8770,24 @@ function FeedPageWrapper() {
               }
 
               const wasFollowing = p.isFollowing;
-              if (!wasFollowing) {
-                setFollowState(userId, p.userHandle, true);
-                updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
-              }
-
-              const { isProfilePrivate } = await import('./api/privacy');
+              const { isProfilePrivate, setProfilePrivacy } = await import('./api/privacy');
               const { toggleFollow } = await import('./api/client');
               const { createFollowRequest, hasPendingFollowRequest, removeFollowRequest } = await import('./api/privacy');
               const { createNotification } = await import('./api/notifications');
               const { getFollowedUsers } = await import('./api/posts');
-              const profilePrivate = isProfilePrivate(p.userHandle);
+              const profilePrivate = p.authorIsPrivate === true || isProfilePrivate(p.userHandle);
+              const alreadyRequested = Boolean(
+                p.isFollowRequested ||
+                  (user?.handle && hasPendingFollowRequest(user.handle, p.userHandle)),
+              );
+              if (!wasFollowing && alreadyRequested) return;
+              if (!wasFollowing && profilePrivate && !alreadyRequested) {
+                const confirmed = await confirmPrivateAccountFollow();
+                if (!confirmed) return;
+              } else if (!wasFollowing) {
+                setFollowState(userId, p.userHandle, true);
+                updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+              }
 
               // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
               const useLaravelApi =
@@ -8827,11 +8867,6 @@ function FeedPageWrapper() {
               });
               
               if (profilePrivate && hasPending && user?.handle) {
-                await Swal.fire(bottomSheet({
-                  title: 'Follow Request Already Sent',
-                  message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
-                  icon: 'alert',
-                }));
                 return;
               } else if (profilePrivate && !hasPending && user?.handle) {
                 // Private profile - create follow request
@@ -8844,46 +8879,17 @@ function FeedPageWrapper() {
                 // Double-check that there's no pending request right before creating
                 const doubleCheckPending = hasPendingFollowRequest(user?.handle || '', p.userHandle);
                 if (doubleCheckPending) {
-                  console.warn('Found pending request on double-check, showing pending message instead of creating new request');
-                  await Swal.fire(bottomSheet({
-                    title: 'Follow Request Already Sent',
-                    message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
-                    icon: 'alert',
-                  }));
                   return;
                 }
                 
                 try {
-                  const encodedHandle = encodeURIComponent(p.userHandle);
-                  console.log('Calling toggleFollow API for private profile:', encodedHandle);
-                  const result = await toggleFollow(encodedHandle);
-                  console.log('toggleFollow API result:', result);
-                  
-                  if (result.status === 'pending' && user?.handle) {
-                    console.log('API returned pending status, creating follow request in localStorage');
+                  const result = await toggleFollow(p.userHandle);
+
+                  if (result?.status === 'pending' && user?.handle) {
+                    setProfilePrivacy(p.userHandle, true);
                     createFollowRequest(user.handle, p.userHandle);
-                    
-                    // Create notification - show Follow Request Sent popup
-                    try {
-                      await createNotification({
-                        type: 'follow_request',
-                        fromHandle: user.handle,
-                        toHandle: p.userHandle,
-                        message: `${user.handle} wants to follow you`
-                      });
-                    } catch (error) {
-                      console.warn('Failed to create follow request notification:', error);
-                    }
-                    
-                    await Swal.fire(bottomSheet({
-                      title: 'Follow Request Sent',
-                      message: 'Your follow request has been sent. You will be notified when they accept.',
-                      icon: 'alert',
-                    }));
-                    
-                    // Don't update isFollowing to true - keep it false for pending request
-                    updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: false }));
-                  } else if (result.status === 'accepted' || result.following === true) {
+                    markHandleFollowRequested(p.userHandle);
+                  } else if (result?.status === 'accepted' || result?.following === true) {
                     // Public profile - follow immediately (backend is authoritative)
                     const newFollowingState = true;
                     setFollowState(userId, p.userHandle, newFollowingState);
@@ -8900,12 +8906,6 @@ function FeedPageWrapper() {
                     // Check again if request was created between the initial check and now
                     const recheckPending = hasPendingFollowRequest(user.handle, p.userHandle);
                     if (recheckPending) {
-                      console.log('Mock fallback: Found pending request on recheck, showing pending message');
-                      await Swal.fire(bottomSheet({
-                        title: 'Follow Request Already Sent',
-                        message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
-                        icon: 'alert',
-                      }));
                       return;
                     }
                     
@@ -8929,14 +8929,8 @@ function FeedPageWrapper() {
                       } catch (error) {
                         console.warn('Failed to create follow request notification:', error);
                       }
-                      
-                      await Swal.fire(bottomSheet({
-                        title: 'Follow Request Sent',
-                        message: 'Your follow request has been sent. You will be notified when they accept.',
-                        icon: 'alert',
-                      }));
-                      
-                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: false }));
+
+                      markHandleFollowRequested(p.userHandle);
                     }
                   } else {
                     // For other errors, fall back to normal follow
@@ -8961,15 +8955,18 @@ function FeedPageWrapper() {
                     ? false
                     : result?.following === true || result?.status === 'accepted' || result?.status !== 'unfollowed';
                   if (pending && user?.handle) {
+                    setProfilePrivacy(p.userHandle, true);
                     createFollowRequest(user.handle, p.userHandle);
+                    markHandleFollowRequested(p.userHandle);
+                  } else {
+                    setFollowState(userId, p.userHandle, nowFollowing);
                   }
-                  setFollowState(userId, p.userHandle, nowFollowing);
                   const lower = p.userHandle.trim().toLowerCase();
                   setPages((prev) =>
                     prev.map((page) =>
                       page.map((post) =>
                         post.userHandle && post.userHandle.trim().toLowerCase() === lower
-                          ? { ...post, isFollowing: nowFollowing }
+                          ? { ...post, isFollowing: nowFollowing, isFollowRequested: pending }
                           : post,
                       ),
                     ),
@@ -9856,47 +9853,27 @@ function FeedPageWrapper() {
               }
             }}
             onFollow={async () => {
-              const { isProfilePrivate, createFollowRequest, hasPendingFollowRequest } = await import('./api/privacy');
+              const { isProfilePrivate, setProfilePrivacy, createFollowRequest, hasPendingFollowRequest } = await import('./api/privacy');
               const { toggleFollow } = await import('./api/client');
-              const { createNotification } = await import('./api/notifications');
 
-              const profilePrivate = isProfilePrivate(p.userHandle);
+              const profilePrivate = p.authorIsPrivate === true || isProfilePrivate(p.userHandle);
 
-              // Private profile: create/request-only flow for this secondary feed as well
+              // Private profile: the card asks them to follow, then the server notifies the owner.
               if (profilePrivate && user?.handle) {
-                const hasPending = hasPendingFollowRequest(user.handle, p.userHandle);
+                const hasPending = p.isFollowRequested === true || hasPendingFollowRequest(user.handle, p.userHandle);
                 if (hasPending) {
-                  await Swal.fire(bottomSheet({
-                    title: 'Follow Request Already Sent',
-                    message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
-                    icon: 'alert',
-                  }));
-                  return false; // not following yet â€“ request pending
+                  return false;
                 }
 
-                // Create new follow request (local + optional notification)
-                createFollowRequest(user.handle, p.userHandle);
-                setFollowState(userId, p.userHandle, false);
-                try {
-                  await createNotification({
-                    type: 'follow_request',
-                    fromHandle: user.handle,
-                    toHandle: p.userHandle,
-                    message: `${user.handle} wants to follow you`
-                  });
-                } catch {
-                  // non-fatal
+                const confirmed = await confirmPrivateAccountFollow();
+                if (!confirmed) return false;
+                const result = await toggleFollow(p.userHandle);
+                if (result?.status === 'pending') {
+                  setProfilePrivacy(p.userHandle, true);
+                  createFollowRequest(user.handle, p.userHandle);
+                  markHandleFollowRequested(p.userHandle);
                 }
-                try {
-                  await Swal.fire(bottomSheet({
-                    title: 'Follow Request Sent',
-                    message: 'Your follow request has been sent. You will be notified when they accept.',
-                    icon: 'alert',
-                  }));
-                } catch {
-                  // ensure we still return false if Swal fails
-                }
-                return false; // not following yet â€“ request sent, awaiting acceptance
+                return false;
               }
 
               // PUBLIC PROFILES â€“ in mock-only mode skip API and use local follow state
