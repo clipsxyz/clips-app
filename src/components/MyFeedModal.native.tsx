@@ -379,7 +379,13 @@ function MyFeedModal({
                 onClose={() => setCreateGroupOpen(false)}
                 onCreated={(g) => {
                     setCreateGroupOpen(false);
-                    navigation.navigate('Messages', { chatGroupId: g.id, kind: 'group' });
+                    navigation.navigate('Messages', {
+                        chatGroupId: g.id,
+                        kind: 'group',
+                        groupName: g.name,
+                        communityCreated: true,
+                        communityCreatedName: g.name,
+                    });
                 }}
             />
         </>

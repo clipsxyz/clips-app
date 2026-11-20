@@ -342,6 +342,37 @@ class InteractionPushService
         );
     }
 
+    public function notifyMessageReaction(User $actor, User $recipient, string $emoji, ?string $chatGroupId = null): void
+    {
+        if ($actor->id === $recipient->id) {
+            return;
+        }
+        if (! $this->prefAllows($recipient, 'message_reactions')) {
+            return;
+        }
+
+        $label = $this->actorLabel($actor);
+        $text = "{$label} reacted {$emoji} to your message";
+        $data = [
+            'type' => 'message_reaction',
+            'fromHandle' => (string) $actor->handle,
+        ];
+        if ($chatGroupId) {
+            $data['chatGroupId'] = $chatGroupId;
+        }
+
+        $this->createAndPush(
+            recipient: $recipient,
+            type: 'message_reaction',
+            fromHandle: (string) $actor->handle,
+            message: $text,
+            title: 'New reaction',
+            body: $text,
+            data: $data,
+            chatGroupId: $chatGroupId,
+        );
+    }
+
     public function notifyFollow(User $actor, User $recipient): void
     {
         if ($actor->id === $recipient->id) {
@@ -378,9 +409,10 @@ class InteractionPushService
         array $data,
         ?string $postId = null,
         ?string $commentId = null,
+        ?string $chatGroupId = null,
     ): void {
         try {
-            Notification::create([
+            $attributes = [
                 'user_id' => $recipient->id,
                 'type' => $type,
                 'from_handle' => $fromHandle,
@@ -389,7 +421,11 @@ class InteractionPushService
                 'post_id' => $postId,
                 'comment_id' => $commentId,
                 'read' => false,
-            ]);
+            ];
+            if ($chatGroupId && Schema::hasColumn('notifications', 'chat_group_id')) {
+                $attributes['chat_group_id'] = $chatGroupId;
+            }
+            Notification::create($attributes);
         } catch (\Throwable $e) {
             Log::warning('Failed to persist notification', [
                 'type' => $type,

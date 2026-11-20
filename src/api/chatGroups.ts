@@ -136,6 +136,81 @@ export async function deleteChatGroup(groupId: string): Promise<unknown> {
   return client.deleteChatGroup(groupId);
 }
 
+export interface ChatGroupMemberRow {
+  user_id: string;
+  handle: string;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  role: string;
+  is_creator: boolean;
+}
+
+export interface ChatGroupMembersPayload {
+  name: string;
+  creator_id: string;
+  is_admin: boolean;
+  items: ChatGroupMemberRow[];
+}
+
+function normalizeMember(raw: unknown): ChatGroupMemberRow | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as Record<string, unknown>;
+  const userId = String(row.user_id || row.userId || '').trim();
+  if (!userId) return null;
+  return {
+    user_id: userId,
+    handle: String(row.handle || '').trim(),
+    display_name: (row.display_name || row.displayName || null) as string | null,
+    avatar_url: (row.avatar_url || row.avatarUrl || null) as string | null,
+    role: String(row.role || 'member'),
+    is_creator: row.is_creator === true || row.isCreator === true,
+  };
+}
+
+export function chatGroupApiError(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { error?: string; message?: string } }).response;
+    if (typeof response?.message === 'string' && response.message.trim()) return response.message;
+    if (typeof response?.error === 'string' && response.error.trim()) return response.error;
+  }
+  if (error instanceof Error && error.message && error.message !== 'CONNECTION_REFUSED') return error.message;
+  return fallback;
+}
+
+export async function fetchChatGroupMembers(groupId: string): Promise<ChatGroupMembersPayload> {
+  if (!isLaravelApiEnabled() || !hasAuthToken()) {
+    return { name: '', creator_id: '', is_admin: false, items: [] };
+  }
+  const res = (await client.fetchChatGroupMembers(groupId)) as {
+    name?: string;
+    creator_id?: string;
+    is_admin?: boolean;
+    items?: unknown[];
+  };
+  return {
+    name: String(res?.name || ''),
+    creator_id: String(res?.creator_id || ''),
+    is_admin: res?.is_admin === true,
+    items: (res?.items ?? []).map(normalizeMember).filter((row): row is ChatGroupMemberRow => !!row),
+  };
+}
+
+export async function renameChatGroup(groupId: string, name: string): Promise<{ id: string; name: string }> {
+  return client.renameChatGroup(groupId, name) as Promise<{ id: string; name: string }>;
+}
+
+export async function removeChatGroupMember(groupId: string, userId: string): Promise<unknown> {
+  return client.removeChatGroupMember(groupId, userId);
+}
+
+export async function setChatGroupMemberRole(
+  groupId: string,
+  userId: string,
+  role: 'admin' | 'member',
+): Promise<unknown> {
+  return client.setChatGroupMemberRole(groupId, userId, role);
+}
+
 export async function fetchPendingGroupInvites(): Promise<ChatGroupInviteRow[]> {
   if (!isLaravelApiEnabled() || !hasAuthToken()) return [];
   try {

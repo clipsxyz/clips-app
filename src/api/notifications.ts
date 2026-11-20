@@ -33,6 +33,7 @@ export interface Notification {
     chatGroupId?: string;
     chatGroupInviteId?: string;
     groupName?: string;
+    inviteStatus?: string;
     fromDisplayName?: string;
     fromAvatarUrl?: string;
     fromIsPrivate?: boolean;
@@ -169,6 +170,7 @@ export function normalizeLaravelNotification(n: Record<string, any>, forHandle: 
         chatGroupId: chatGroupId || undefined,
         chatGroupInviteId: chatGroupInviteId || undefined,
         groupName: groupName || undefined,
+        inviteStatus: n.invite_status || n.inviteStatus || undefined,
         fromDisplayName: n.from_display_name || n.fromDisplayName || undefined,
         fromAvatarUrl: n.from_avatar_url || n.fromAvatarUrl || undefined,
         fromIsPrivate:

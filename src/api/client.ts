@@ -1451,6 +1451,13 @@ export async function sendGroupMessage(
     });
 }
 
+export async function toggleMessageReaction(messageId: string, emoji: string) {
+    return apiRequest(`/messages/${encodeURIComponent(messageId)}/reactions`, {
+        method: 'POST',
+        body: JSON.stringify({ emoji }),
+    });
+}
+
 export async function markGroupConversationRead(groupId: string) {
     return apiRequest(`/messages/group/${encodeURIComponent(groupId)}/read`, {
         method: 'POST',
@@ -1474,6 +1481,34 @@ export async function createChatGroupApi(name: string, avatarUrl?: string | null
 
 export async function deleteChatGroup(id: string) {
     return apiRequest(`/chat-groups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function fetchChatGroupMembers(id: string) {
+    return apiRequest(`/chat-groups/${encodeURIComponent(id)}/members`);
+}
+
+export async function renameChatGroup(id: string, name: string) {
+    return apiRequest(`/chat-groups/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+    });
+}
+
+export async function removeChatGroupMember(groupId: string, userId: string) {
+    return apiRequest(
+        `/chat-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}/remove`,
+        { method: 'POST' },
+    );
+}
+
+export async function setChatGroupMemberRole(groupId: string, userId: string, role: 'admin' | 'member') {
+    return apiRequest(
+        `/chat-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}/role`,
+        {
+            method: 'POST',
+            body: JSON.stringify({ role }),
+        },
+    );
 }
 
 export async function leaveChatGroup(id: string) {

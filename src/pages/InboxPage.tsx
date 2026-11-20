@@ -34,11 +34,21 @@ import {
 } from '../utils/inboxUnread';
 import { notificationKindLabel, resolveNotificationKind } from '../utils/notificationKind';
 import { followRequestIdentity } from '../utils/followRequestNotification';
+import { groupInvitePresentation } from '../utils/groupInviteNotification';
+import {
+    acceptChatGroupInvite,
+    declineChatGroupInvite,
+    fetchPendingGroupInvites,
+    pendingInviteGroupName,
+    pendingInviteInviterHandle,
+    type ChatGroupInviteRow,
+} from '../api/chatGroups';
 import {
     isFollowInboxNotification,
     isPostRelatedInboxNotification,
     resolveInboxNotificationRoute,
 } from '../utils/inboxNotificationNav';
+import { groupNotificationsIntoSections } from '../utils/notificationSections';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -327,8 +337,9 @@ function ConversationItem({
                 }}
             />
             <div
-                className="absolute inset-y-0 right-0 flex items-stretch z-0"
+                className="absolute inset-y-0 right-0 z-0 flex items-stretch"
                 style={{
+                    width: SWIPE_ACTION_WIDTH,
                     opacity: revealProgress > 0.02 ? 1 : 0,
                     pointerEvents: revealProgress > 0.02 ? 'auto' : 'none',
                     transition: isSwipingRef.current ? 'none' : 'opacity 140ms ease',
@@ -341,7 +352,7 @@ function ConversationItem({
                             onPin();
                             closeSwipeActions();
                         }}
-                        className="w-14 bg-white/20 text-[11px] font-semibold text-white"
+                        className="min-w-0 flex-1 bg-white/20 px-1 text-[10px] font-semibold leading-tight text-white"
                         title={conv.isPinned ? 'Unpin conversation' : 'Pin conversation'}
                     >
                         {conv.isPinned ? 'Unpin' : 'Pin'}
@@ -355,7 +366,7 @@ function ConversationItem({
                             else onMarkUnread?.();
                             closeSwipeActions();
                         }}
-                        className="w-14 bg-white/25 text-[11px] font-semibold text-white"
+                        className="min-w-0 flex-1 bg-white/25 px-1 text-[10px] font-semibold leading-tight text-white"
                         title={conv.unread > 0 ? 'Mark as read' : 'Mark as unread'}
                     >
                         {conv.unread > 0 ? 'Read' : 'Unread'}
@@ -368,7 +379,7 @@ function ConversationItem({
                             onToggleMute();
                             closeSwipeActions();
                         }}
-                        className="w-14 bg-white/15 text-[11px] font-semibold text-white"
+                        className="min-w-0 flex-1 bg-white/15 px-1 text-[10px] font-semibold leading-tight text-white"
                         title={conv.isMuted ? 'Unmute conversation' : 'Mute conversation'}
                     >
                         {conv.isMuted ? 'Unmute' : 'Mute'}
@@ -381,7 +392,7 @@ function ConversationItem({
                             onDeleteConversation();
                             closeSwipeActions();
                         }}
-                        className="w-14 bg-red-600/90 text-[11px] font-semibold text-white"
+                        className="min-w-0 flex-1 bg-red-600/90 px-1 text-[10px] font-semibold leading-tight text-white"
                         title={isGroupRow ? 'Leave group' : 'Delete conversation'}
                     >
                         {isGroupRow ? 'Leave' : 'Delete'}
@@ -430,10 +441,17 @@ function ConversationItem({
                 className="min-w-0 flex-1 text-left"
             >
                 <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="truncate text-[16px] font-semibold text-white">{displayTitle}</span>
+                    <span className={`truncate text-[16px] text-white ${conv.unread > 0 ? 'font-bold' : 'font-semibold'}`}>{displayTitle}</span>
                     <span className="shrink-0 text-[13px] text-[#8E8E93]">{timestamp}</span>
                 </div>
-                <div className="truncate text-[14px] text-[#8E8E93]">{preview}</div>
+                <div className="flex items-center gap-2">
+                    <div className={`min-w-0 flex-1 truncate text-[14px] ${conv.unread > 0 ? 'font-semibold text-white' : 'text-[#8E8E93]'}`}>{preview}</div>
+                    {conv.unread > 0 ? (
+                        <span className="shrink-0 min-w-[18px] rounded-full bg-white px-1.5 text-center text-[11px] font-bold leading-[18px] text-black">
+                            {conv.unread > 99 ? '99+' : conv.unread}
+                        </span>
+                    ) : null}
+                </div>
             </button>
             </div>
         </div>
@@ -452,6 +470,7 @@ export default function InboxPage() {
     const [unavailableStoryIds, setUnavailableStoryIds] = React.useState<Set<string>>(new Set());
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
+    const [pendingInvites, setPendingInvites] = React.useState<ChatGroupInviteRow[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [loadError, setLoadError] = React.useState<string | null>(null);
     const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages' | 'groups'>('messages');
@@ -636,12 +655,16 @@ export default function InboxPage() {
         if (!user?.handle) return;
         setLoadError(null);
         try {
-            const [notifs, storyInsights, conversations, followedUsers] = await Promise.all([
+            const [notifs, storyInsights, conversations, followedUsers, pending] = await Promise.all([
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
                 listConversations(user.handle),
                 user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[]),
+                fetchPendingGroupInvites().catch(() => [] as ChatGroupInviteRow[]),
             ]);
+            const pendingRows = Array.isArray(pending) ? pending : [];
+            const pendingIds = new Set(pendingRows.map((invite) => invite.id));
+            setPendingInvites(pendingRows);
             
             // Add follow status to conversations
             const conversationsWithFollowStatus = conversations.map(conv => ({
@@ -707,12 +730,17 @@ export default function InboxPage() {
             
             // Combine notifications and conversations, sorted by timestamp (newest first)
             const allNotifications = [
-                ...notifs.filter(
-                    (n) =>
+                ...notifs.filter((n) => {
+                    if (n.type === 'group_invite') {
+                        if (n.inviteStatus && n.inviteStatus !== 'pending') return false;
+                        if (n.chatGroupInviteId && pendingIds.has(n.chatGroupInviteId)) return false;
+                    }
+                    return (
                         countsTowardInboxNotificationBadge(n.type) ||
                         isPostRelatedInboxNotification(n) ||
-                        isFollowInboxNotification(n),
-                ),
+                        isFollowInboxNotification(n)
+                    );
+                }),
                 ...conversationNotifications,
             ].sort((a, b) => b.timestamp - a.timestamp);
 
@@ -994,16 +1022,16 @@ export default function InboxPage() {
         publishInboxUnreadParts({
             handle: user.handle,
             messages: unreadMessages,
-            groups: unreadGroups,
+            groups: unreadGroups + pendingInvites.length,
             notifications: unreadNotifications,
         });
-    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications]);
+    }, [user?.handle, unreadMessages, unreadGroups, unreadNotifications, pendingInvites.length]);
     const requestItems = items.filter((c) => c.kind !== 'group' && !!c.isRequest);
     const chatItems = items.filter((c) => !(c.kind !== 'group' && c.isRequest));
     const pinnedItems = chatItems.filter((c) => c.isPinned);
     const regularItems = chatItems.filter((c) => !c.isPinned);
     const groupItems = items.filter((c) => c.kind === 'group');
-    const unreadGroupMessagesTotal = groupItems.reduce((sum, c) => sum + c.unread, 0);
+    const groupHeaderCount = unreadGroups + pendingInvites.length;
     const seenInsightIds = React.useMemo(
         () => (user?.handle ? getSeenInsightStoryIds(user.handle) : new Set<string>()),
         [user?.handle, insights, getSeenInsightStoryIds]
@@ -1194,6 +1222,32 @@ export default function InboxPage() {
         }
     };
 
+    const handleGroupInviteDecision = async (
+        notif: Notification,
+        decision: 'accept' | 'decline',
+        e: React.MouseEvent,
+    ) => {
+        e.stopPropagation();
+        if (!notif.chatGroupInviteId) return;
+        try {
+            if (decision === 'accept') {
+                await acceptChatGroupInvite(notif.chatGroupInviteId);
+            } else {
+                await declineChatGroupInvite(notif.chatGroupInviteId);
+            }
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+            setPendingInvites((prev) => prev.filter((invite) => invite.id !== notif.chatGroupInviteId));
+            await loadData();
+        } catch (error) {
+            console.error('Error responding to group invite:', error);
+            Swal.fire(bottomSheet({
+                title: 'Invite',
+                message: error instanceof Error ? error.message : 'Could not update this invite',
+                icon: 'alert',
+            }));
+        }
+    };
+
     const handleDenyFollowRequest = async (notif: Notification, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!user?.handle) return;
@@ -1341,9 +1395,9 @@ export default function InboxPage() {
                         }`}
                 >
                     <span>Groups</span>
-                    {unreadGroupMessagesTotal > 0 && (
+                    {groupHeaderCount > 0 && (
                         <span className="px-1 py-0.5 bg-white text-gray-900 text-[9px] rounded-full min-w-[16px] text-center leading-none font-semibold">
-                            {unreadGroupMessagesTotal > 9 ? '9+' : unreadGroupMessagesTotal}
+                            {groupHeaderCount > 9 ? '9+' : groupHeaderCount}
                         </span>
                     )}
                 </button>
@@ -1522,6 +1576,72 @@ export default function InboxPage() {
                     <div className="text-gray-500 text-center py-8">No notifications yet.</div>
                 ) : (
                     <div className="space-y-2">
+                        {pendingInvites.length > 0 ? (
+                            <div className="mb-3 space-y-2">
+                                <h2 className="px-1 pb-1 pt-1 text-[13px] font-semibold text-white/55">Group invites</h2>
+                                {pendingInvites.map((invite) => {
+                                    const inviterHandle = pendingInviteInviterHandle(invite);
+                                    const groupName = pendingInviteGroupName(invite);
+                                    const title = invite.inviter?.display_name || inviterHandle || 'Someone';
+                                    return (
+                                        <div key={invite.id} className="w-full rounded-xl border border-white/10 bg-[#161b22] p-3">
+                                            <div className="font-medium text-white">{title}</div>
+                                            {inviterHandle && title.toLowerCase() !== inviterHandle.toLowerCase() ? (
+                                                <div className="text-xs text-gray-300">{inviterHandle}</div>
+                                            ) : null}
+                                            <div className="text-xs text-gray-400">invited you to join</div>
+                                            <div className="text-sm font-bold text-white">{groupName}</div>
+                                            <div className="mt-2 flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        void handleGroupInviteDecision(
+                                                            {
+                                                                id: invite.id,
+                                                                type: 'group_invite',
+                                                                fromHandle: inviterHandle,
+                                                                toHandle: user?.handle || '',
+                                                                chatGroupInviteId: invite.id,
+                                                                groupName,
+                                                                timestamp: Date.now(),
+                                                                read: false,
+                                                            },
+                                                            'accept',
+                                                            { stopPropagation() {} } as React.MouseEvent,
+                                                        );
+                                                    }}
+                                                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[#111827]"
+                                                >
+                                                    Accept
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        void handleGroupInviteDecision(
+                                                            {
+                                                                id: invite.id,
+                                                                type: 'group_invite',
+                                                                fromHandle: inviterHandle,
+                                                                toHandle: user?.handle || '',
+                                                                chatGroupInviteId: invite.id,
+                                                                groupName,
+                                                                timestamp: Date.now(),
+                                                                read: false,
+                                                            },
+                                                            'decline',
+                                                            { stopPropagation() {} } as React.MouseEvent,
+                                                        );
+                                                    }}
+                                                    className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-[#E5E7EB]"
+                                                >
+                                                    Decline
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
                         {unreadNotifications > 0 && (
                             <div className="flex justify-end mb-2">
                                 <button
@@ -1537,8 +1657,18 @@ export default function InboxPage() {
                                 </button>
                             </div>
                         )}
-                        {notifications.map(notif => {
+                        {groupNotificationsIntoSections(notifications).map((section) => (
+                            <div key={section.id}>
+                                <h2 className="px-1 pb-1 pt-4 text-[13px] font-semibold text-white/55">
+                                    {section.label}
+                                </h2>
+                                {section.items.map(notif => {
                             const requester = notif.type === 'follow_request' ? followRequestIdentity(notif) : null;
+                            const groupInvite = notif.type === 'group_invite' ? groupInvitePresentation(notif) : null;
+                            const canRespondToInvite =
+                                !!groupInvite &&
+                                !!notif.chatGroupInviteId &&
+                                (!notif.inviteStatus || notif.inviteStatus === 'pending');
                             return (
                             <div
                                 key={notif.id}
@@ -1581,6 +1711,23 @@ export default function InboxPage() {
                                                             Private profile
                                                         </div>
                                                     ) : null}
+                                                </>
+                                            ) : groupInvite ? (
+                                                <>
+                                                    <div className="font-medium truncate text-white">
+                                                        {groupInvite.title}
+                                                    </div>
+                                                    {groupInvite.showHandle ? (
+                                                        <div className="text-xs text-gray-300 truncate">
+                                                            {groupInvite.handle}
+                                                        </div>
+                                                    ) : null}
+                                                    <div className="text-xs text-gray-400 truncate">
+                                                        invited you to join
+                                                    </div>
+                                                    <div className="truncate text-sm font-bold text-white">
+                                                        {groupInvite.groupName}
+                                                    </div>
                                                 </>
                                             ) : (
                                                 <>
@@ -1665,6 +1812,24 @@ export default function InboxPage() {
                                         </button>
                                     </div>
                                 </div>
+                                {canRespondToInvite && (
+                                    <div className="mt-2 flex flex-wrap items-center gap-2 pl-[4.75rem]">
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleGroupInviteDecision(notif, 'accept', e)}
+                                            className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[#111827] transition-colors hover:bg-white/90"
+                                        >
+                                            Accept
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleGroupInviteDecision(notif, 'decline', e)}
+                                            className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-[#E5E7EB] transition-colors hover:bg-white/15"
+                                        >
+                                            Decline
+                                        </button>
+                                    </div>
+                                )}
                                 {notif.type === 'follow_request' && (
                                     <div className="mt-2 flex flex-wrap items-center gap-2 pl-[4.75rem]">
                                         <button
@@ -1697,10 +1862,76 @@ export default function InboxPage() {
                             </div>
                             );
                         })}
+                            </div>
+                        ))}
                     </div>
                 )
             ) : activeTab === 'groups' ? (
-                groupItems.length > 0 ? (
+                <>
+                {pendingInvites.length > 0 ? (
+                    <div className="mb-3 space-y-2">
+                        <h2 className="px-1 pb-1 text-[13px] font-semibold text-white/55">Group invites</h2>
+                        {pendingInvites.map((invite) => {
+                            const inviterHandle = pendingInviteInviterHandle(invite);
+                            const groupName = pendingInviteGroupName(invite);
+                            const title = invite.inviter?.display_name || inviterHandle || 'Someone';
+                            return (
+                                <div key={invite.id} className="rounded-xl border border-white/10 bg-[#161b22] p-3">
+                                    <div className="font-medium text-white">{title}</div>
+                                    <div className="text-xs text-gray-400">invited you to join</div>
+                                    <div className="text-sm font-bold text-white">{groupName}</div>
+                                    <div className="mt-2 flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                void handleGroupInviteDecision(
+                                                    {
+                                                        id: invite.id,
+                                                        type: 'group_invite',
+                                                        fromHandle: inviterHandle,
+                                                        toHandle: user?.handle || '',
+                                                        chatGroupInviteId: invite.id,
+                                                        groupName,
+                                                        timestamp: Date.now(),
+                                                        read: false,
+                                                    },
+                                                    'accept',
+                                                    { stopPropagation() {} } as React.MouseEvent,
+                                                );
+                                            }}
+                                            className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[#111827]"
+                                        >
+                                            Accept
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                void handleGroupInviteDecision(
+                                                    {
+                                                        id: invite.id,
+                                                        type: 'group_invite',
+                                                        fromHandle: inviterHandle,
+                                                        toHandle: user?.handle || '',
+                                                        chatGroupInviteId: invite.id,
+                                                        groupName,
+                                                        timestamp: Date.now(),
+                                                        read: false,
+                                                    },
+                                                    'decline',
+                                                    { stopPropagation() {} } as React.MouseEvent,
+                                                );
+                                            }}
+                                            className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-[#E5E7EB]"
+                                        >
+                                            Decline
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : null}
+                {groupItems.length > 0 ? (
                     <div
                         className={compactPhone ? '-mx-3' : '-mx-4'}
                         onClickCapture={(e) => {
@@ -1740,9 +1971,10 @@ export default function InboxPage() {
                     <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400 leading-relaxed">
                         No group chats yet. Use <span className="text-white/90">New group</span> on your profile or{' '}
                         <span className="text-white/90">Create group</span> on your own post (⋯ menu), then invite people from the{' '}
-                        <span className="text-white/90">+</span> button in the group or from their profile.
+                        <span className="text-white/90">Invite</span> button in the group or from their profile.
                     </div>
-                )
+                )}
+                </>
             ) : activeTab === 'insights' ? (
                 !actionableInsights || actionableInsights.length === 0 ? (
                     <div className="text-gray-500">No story insights yet.</div>

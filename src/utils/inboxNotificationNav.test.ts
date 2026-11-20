@@ -41,6 +41,14 @@ describe('inbox notification tap routing', () => {
         });
     });
 
+    it('keeps a follow request on the notification so accept and deny stay available', () => {
+        expect(resolveInboxNotificationRoute({
+            type: 'follow_request',
+            message: 'Gazetteer@Dublin wants to follow you',
+            fromHandle: 'Gazetteer@Dublin',
+        })).toEqual({ dest: 'none' });
+    });
+
     it('opens ViewProfile for follow copy', () => {
         expect(extractNotificationActorHandle({
             type: 'dm',

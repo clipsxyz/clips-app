@@ -31,6 +31,7 @@ class Notification extends Model
         'post_id',
         'comment_id',
         'chat_group_invite_id',
+        'chat_group_id',
         'read',
     ];
 

@@ -5689,8 +5689,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             onClose={() => setCreateGroupOpen(false)}
             onCreated={(g) => {
               setCreateGroupOpen(false);
-              navigate(`/messages/group/${encodeURIComponent(g.id)}`);
-              showToast(`You're in â€œ${g.name}â€. Tap + in the header to invite people, or use their profile â†’ Invite to group.`);
+              navigate(`/messages/group/${encodeURIComponent(g.id)}`, {
+                state: { communityCreated: true, communityCreatedName: g.name },
+              });
             }}
           />
           <SavePostModal

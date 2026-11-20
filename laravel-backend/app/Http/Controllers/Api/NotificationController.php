@@ -49,7 +49,7 @@ class NotificationController extends Controller
             });
         }
 
-        $items = $query->limit($limit)->get();
+        $items = $query->with(['chatGroupInvite.chatGroup'])->limit($limit)->get();
         $last = $items->last();
         $nextCursor = null;
         if ($items->count() === $limit && $last) {
@@ -99,6 +99,16 @@ class NotificationController extends Controller
             $row['from_display_name'] = $actor?->display_name ?: null;
             $row['from_avatar_url'] = $actor?->avatar_url ?: null;
             $row['from_is_private'] = $actor ? (bool) $actor->is_private : null;
+
+            $invite = $notification->chatGroupInvite;
+            $group = $invite?->chatGroup;
+            if ($group) {
+                $row['group_name'] = $group->name;
+                $row['chat_group_id'] = $group->id;
+            }
+            if ($invite) {
+                $row['invite_status'] = $invite->status;
+            }
 
             return $row;
         })->values();

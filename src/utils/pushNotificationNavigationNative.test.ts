@@ -86,6 +86,21 @@ describe('navigateFromPushNotificationData group', () => {
     });
 });
 
+describe('navigateFromPushNotificationData follow request', () => {
+    it('opens the notifications list instead of the requester profile', () => {
+        const navigate = vi.fn();
+        const ok = navigateFromPushNotificationData(
+            { isReady: () => true, navigate },
+            { type: 'follow_request', fromHandle: 'Gazetteer@Dublin' },
+        );
+        expect(ok).toBe(true);
+        expect(navigate).toHaveBeenCalledWith('MainTabs', {
+            screen: 'Inbox',
+            params: { initialTab: 'notifications' },
+        });
+    });
+});
+
 describe('navigateFromPushNotificationData share and reclip', () => {
     it('opens PostDetail for share using post_id', () => {
         const navigate = vi.fn();

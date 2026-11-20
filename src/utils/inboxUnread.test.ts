@@ -10,14 +10,14 @@ import {
 } from './inboxUnread';
 
 describe('effectiveThreadUnread', () => {
-    it('zeros leftover unread when the latest message is from the viewer', () => {
+    it('keeps incoming unread after the viewer sends a later reply', () => {
         expect(
             effectiveThreadUnread({
                 unread: 3,
                 lastSenderHandle: 'Barry@Dublin',
                 viewerHandle: 'Barry@Dublin',
             }),
-        ).toBe(0);
+        ).toBe(3);
     });
 
     it('keeps inbound unread', () => {

@@ -1723,13 +1723,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         chatGroupId: g.id,
                         kind: 'group',
                         groupName: g.name,
-                    });
-                    setProfileAlert({
-                        title: `You're in “${g.name}”`,
-                        message:
-                            'Tap + in the header to invite people, or use their profile → Invite to group.',
-                        icon: 'success',
-                        confirmButtonText: 'Done',
+                        communityCreated: true,
+                        communityCreatedName: g.name,
                     });
                 }}
             />

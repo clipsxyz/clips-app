@@ -112,8 +112,31 @@ export function navigateFromPushNotificationData(nav: NavLike, data: PushNotific
         }
     }
 
+    if (type === 'follow_request') {
+        navigateMainTab(nav, 'Inbox', { initialTab: 'notifications' });
+        return true;
+    }
+
     if (route === 'profile' && (fromHandle || userId)) {
         nav.navigate('ViewProfile', { handle: fromHandle || userId, sourcePostId: postId });
+        return true;
+    }
+
+    if (type === 'message_reaction') {
+        if (chatGroupId) {
+            nav.navigate('Messages', {
+                chatGroupId,
+                kind: 'group',
+                groupName: pickString(data, 'groupName', 'group_name'),
+            });
+            return true;
+        }
+        const handle = fromHandle || userId;
+        if (handle) {
+            nav.navigate('Messages', { handle });
+            return true;
+        }
+        navigateMainTab(nav, 'Inbox', { initialTab: 'notifications' });
         return true;
     }
 
@@ -183,7 +206,7 @@ export function navigateFromPushNotificationData(nav: NavLike, data: PushNotific
         }
     }
 
-    if (type === 'follow' || type === 'follow_request' || type === 'new_post' || type === 'profile') {
+    if (type === 'follow' || type === 'new_post' || type === 'profile') {
         const handle = fromHandle || userId;
         if (handle) {
             nav.navigate('ViewProfile', {

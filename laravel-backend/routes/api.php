@@ -353,6 +353,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/conversation/{otherHandle}/paged', [MessageController::class, 'getConversationPaged']);
         Route::post('/send', [MessageController::class, 'sendMessage']);
         Route::post('/conversation/{otherHandle}/read', [MessageController::class, 'markConversationRead']);
+        Route::post('/{messageId}/reactions', [MessageController::class, 'toggleReaction']);
         Route::delete('/{messageId}', [MessageController::class, 'destroy']);
     });
 
@@ -363,9 +364,13 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/invites/{inviteId}/decline', [ChatGroupController::class, 'declineInvite']);
         Route::get('/', [ChatGroupController::class, 'index']);
         Route::post('/', [ChatGroupController::class, 'store']);
+        Route::get('/{id}/members', [ChatGroupController::class, 'members']);
+        Route::patch('/{id}', [ChatGroupController::class, 'update']);
         Route::delete('/{id}', [ChatGroupController::class, 'destroy']);
         Route::post('/{id}/leave', [ChatGroupController::class, 'leave']);
         Route::post('/{id}/invites', [ChatGroupController::class, 'invite']);
+        Route::post('/{id}/members/{userId}/remove', [ChatGroupController::class, 'removeMember']);
+        Route::post('/{id}/members/{userId}/role', [ChatGroupController::class, 'updateMemberRole']);
     });
 
     // Stories routes

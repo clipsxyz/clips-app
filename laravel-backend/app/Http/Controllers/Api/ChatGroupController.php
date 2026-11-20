@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ChatGroup;
 use App\Models\ChatGroupInvite;
 use App\Models\ChatGroupMember;
+use App\Models\Message;
 use App\Models\Notification;
 use App\Models\User;
 use App\Services\InteractionPushService;
@@ -32,7 +33,7 @@ class ChatGroupController extends Controller
             ->orderByDesc('updated_at')
             ->get();
 
-        $items = $memberships->map(function (ChatGroupMember $m) {
+        $items = $memberships->map(function (ChatGroupMember $m) use ($user) {
             $g = $m->chatGroup;
 
             return [
@@ -257,22 +258,39 @@ class ChatGroupController extends Controller
         }
 
         $group = $invite->chatGroup;
-        if ($invite->status === 'accepted') {
-            return response()->json(['success' => true, 'group' => $group?->fresh(), 'already' => true]);
+        if (! $group || $group->trashed()) {
+            return response()->json(['error' => 'This group no longer exists'], 410);
+        }
+
+        if ($group->hasActiveMember($user)) {
+            if ($invite->status === 'pending') {
+                $invite->update(['status' => 'accepted']);
+            }
+
+            return response()->json(['success' => true, 'group' => $group->fresh(), 'already' => true]);
         }
 
         if ($invite->status !== 'pending') {
-            return response()->json(['success' => true, 'already' => true]);
+            $replacement = ChatGroupInvite::with('chatGroup')
+                ->where('chat_group_id', $group->id)
+                ->where('invitee_id', $user->id)
+                ->where('status', 'pending')
+                ->where(function ($q) {
+                    $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                })
+                ->orderByDesc('created_at')
+                ->first();
+            if (! $replacement || ! $replacement->chatGroup || $replacement->chatGroup->trashed()) {
+                return response()->json(['error' => 'This invite is no longer pending.'], 409);
+            }
+            $invite = $replacement;
+            $group = $replacement->chatGroup;
         }
 
         if ($invite->expires_at && $invite->expires_at->isPast()) {
             $invite->update(['status' => 'expired']);
 
             return response()->json(['error' => 'Invite expired'], 400);
-        }
-
-        if (! $group || $group->trashed()) {
-            return response()->json(['error' => 'This group no longer exists'], 410);
         }
 
         try {
@@ -349,5 +367,197 @@ class ChatGroupController extends Controller
             ->update(['read' => true]);
 
         return response()->json(['success' => true]);
+    }
+
+    /** Active members for anyone already in the group. */
+    public function members(Request $request, string $id): JsonResponse
+    {
+        $user = Auth::user();
+        $group = $this->activeGroup($id);
+
+        if (! $group) {
+            return response()->json(['error' => 'Group not found'], 404);
+        }
+
+        if (! $group->hasActiveMember($user)) {
+            return response()->json(['error' => 'You are not a member of this group'], 403);
+        }
+
+        $items = $group->activeMembers()
+            ->with('user')
+            ->orderBy('created_at')
+            ->get()
+            ->map(function (ChatGroupMember $member) use ($group) {
+                $person = $member->user;
+
+                return [
+                    'user_id' => $member->user_id,
+                    'handle' => $person?->handle,
+                    'display_name' => $person?->display_name,
+                    'avatar_url' => $person?->avatar_url,
+                    'role' => $group->creator_id === $member->user_id ? 'admin' : $member->role,
+                    'is_creator' => $group->creator_id === $member->user_id,
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'name' => $group->name,
+            'creator_id' => $group->creator_id,
+            'is_admin' => $group->isAdmin($user),
+            'items' => $items,
+        ]);
+    }
+
+    /** Rename. Admins only, same as WhatsApp group subject. */
+    public function update(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|min:1|max:120',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $group = $this->activeGroup($id);
+
+        if (! $group) {
+            return response()->json(['error' => 'Group not found'], 404);
+        }
+
+        if (! $group->isAdmin($user)) {
+            return response()->json(['error' => 'Only group admins can edit this group.'], 403);
+        }
+
+        $name = trim((string) $request->input('name'));
+        if ($name === '') {
+            return response()->json(['error' => 'Group name is required'], 400);
+        }
+
+        if ($name !== $group->name) {
+            $group->name = $name;
+            $group->save();
+            $this->postGroupNotice($group, $user, $user->handle.' changed the group name to "'.$name.'"');
+        }
+
+        return response()->json([
+            'id' => $group->id,
+            'name' => $group->name,
+        ]);
+    }
+
+    public function removeMember(Request $request, string $id, string $userId): JsonResponse
+    {
+        $user = Auth::user();
+        $group = $this->activeGroup($id);
+
+        if (! $group) {
+            return response()->json(['error' => 'Group not found'], 404);
+        }
+
+        if (! $group->isAdmin($user)) {
+            return response()->json(['error' => 'Only group admins can remove people.'], 403);
+        }
+
+        if ($userId === $user->id) {
+            return response()->json(['error' => 'Leave the group instead of removing yourself.'], 400);
+        }
+
+        if ($userId === $group->creator_id) {
+            return response()->json(['error' => 'The person who created the group cannot be removed.'], 403);
+        }
+
+        $membership = ChatGroupMember::query()
+            ->where('chat_group_id', $group->id)
+            ->where('user_id', $userId)
+            ->whereNull('left_at')
+            ->first();
+
+        if (! $membership) {
+            return response()->json(['error' => 'That person is not in this group'], 404);
+        }
+
+        $membership->update(['left_at' => now()]);
+
+        ChatGroupInvite::where('chat_group_id', $group->id)
+            ->where('invitee_id', $userId)
+            ->where('status', 'pending')
+            ->update(['status' => 'cancelled']);
+
+        $removed = User::find($userId);
+        $label = $removed?->handle ?: 'a member';
+        $this->postGroupNotice($group, $user, $user->handle.' removed '.$label);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function updateMemberRole(Request $request, string $id, string $userId): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'role' => 'required|string|in:admin,member',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $group = $this->activeGroup($id);
+
+        if (! $group) {
+            return response()->json(['error' => 'Group not found'], 404);
+        }
+
+        if (! $group->isAdmin($user)) {
+            return response()->json(['error' => 'Only group admins can change roles.'], 403);
+        }
+
+        if ($userId === $group->creator_id) {
+            return response()->json(['error' => 'The person who created the group stays an admin.'], 403);
+        }
+
+        if ($userId === $user->id) {
+            return response()->json(['error' => 'You cannot change your own admin role.'], 400);
+        }
+
+        $membership = ChatGroupMember::query()
+            ->where('chat_group_id', $group->id)
+            ->where('user_id', $userId)
+            ->whereNull('left_at')
+            ->first();
+
+        if (! $membership) {
+            return response()->json(['error' => 'That person is not in this group'], 404);
+        }
+
+        $role = (string) $request->input('role');
+        if ($membership->role !== $role) {
+            $membership->update(['role' => $role]);
+            $target = User::find($userId);
+            $label = $target?->handle ?: 'a member';
+            $verb = $role === 'admin' ? 'made '.$label.' a group admin' : 'dismissed '.$label.' as admin';
+            $this->postGroupNotice($group, $user, $user->handle.' '.$verb);
+        }
+
+        return response()->json(['success' => true, 'role' => $role]);
+    }
+
+    private function activeGroup(string $id): ?ChatGroup
+    {
+        return ChatGroup::whereNull('deleted_at')->find($id);
+    }
+
+    private function postGroupNotice(ChatGroup $group, User $actor, string $text): void
+    {
+        Message::create([
+            'conversation_id' => $group->conversation_id,
+            'chat_group_id' => $group->id,
+            'sender_handle' => $actor->handle,
+            'recipient_handle' => $actor->handle,
+            'text' => $text,
+            'is_system_message' => true,
+        ]);
     }
 }

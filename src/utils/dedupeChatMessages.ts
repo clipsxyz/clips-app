@@ -41,6 +41,7 @@ function mergePreferringServer(existing: ChatMessage, incoming: ChatMessage): Ch
         audioUrl: incoming.audioUrl ?? existing.audioUrl,
         text: incoming.text ?? existing.text,
         sourcePostId: incoming.sourcePostId ?? existing.sourcePostId,
+        reactions: incoming.reactions?.length ? incoming.reactions : existing.reactions,
         read: Boolean(existing.read || incoming.read),
     };
 }

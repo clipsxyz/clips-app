@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use Tests\TestCase;
+use App\Models\ChatGroup;
+use App\Models\ChatGroupInvite;
 use App\Models\User;
 use App\Models\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -330,6 +332,45 @@ class NotificationControllerTest extends TestCase
         $this->assertDatabaseHas('notifications', [
             'id' => $notification->id,
         ]);
+    }
+
+    public function test_group_invite_notification_names_the_inviter_and_group(): void
+    {
+        $inviter = User::factory()->create([
+            'handle' => 'gavin@ca',
+            'display_name' => 'Barry Lawlor',
+        ]);
+        $invitee = User::factory()->create(['handle' => 'gazetteer@dublin']);
+        $group = ChatGroup::create([
+            'name' => 'The lads',
+            'creator_id' => $inviter->id,
+        ]);
+        $invite = ChatGroupInvite::create([
+            'chat_group_id' => $group->id,
+            'inviter_id' => $inviter->id,
+            'invitee_id' => $invitee->id,
+            'status' => 'pending',
+        ]);
+        Notification::create([
+            'user_id' => $invitee->id,
+            'type' => 'group_invite',
+            'from_handle' => $inviter->handle,
+            'to_handle' => $invitee->handle,
+            'message' => $inviter->handle.' invited you to join '.$group->name,
+            'chat_group_invite_id' => $invite->id,
+            'read' => false,
+        ]);
+
+        $this->actingAs($invitee, 'sanctum')
+            ->getJson('/api/notifications?limit=20')
+            ->assertOk()
+            ->assertJsonPath('items.0.type', 'group_invite')
+            ->assertJsonPath('items.0.from_handle', 'gavin@ca')
+            ->assertJsonPath('items.0.from_display_name', 'Barry Lawlor')
+            ->assertJsonPath('items.0.group_name', 'The lads')
+            ->assertJsonPath('items.0.chat_group_id', $group->id)
+            ->assertJsonPath('items.0.chat_group_invite_id', $invite->id)
+            ->assertJsonPath('items.0.invite_status', 'pending');
     }
 }
 

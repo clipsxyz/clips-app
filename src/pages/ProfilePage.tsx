@@ -4085,10 +4085,9 @@ export default function ProfilePage() {
         onClose={() => setCreateGroupOpen(false)}
         onCreated={(g) => {
           setCreateGroupOpen(false);
-          nav(`/messages/group/${encodeURIComponent(g.id)}`);
-          showToast(
-            `You're in “${g.name}”. Tap + in the header to invite people, or use their profile → Invite to group.`,
-          );
+          nav(`/messages/group/${encodeURIComponent(g.id)}`, {
+            state: { communityCreated: true, communityCreatedName: g.name },
+          });
         }}
       />
     </div>

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ChatGroup;
 use App\Models\ChatGroupMember;
 use App\Models\Message;
+use App\Models\MessageReaction;
 use App\Models\User;
 use App\Services\BoostAnalyticsService;
 use App\Services\InteractionPushService;
@@ -37,7 +38,7 @@ class MessageController extends Controller
         $conversationId = Message::getConversationId($user->handle, $otherHandle);
 
         $messages = Message::where('conversation_id', $conversationId)
-            ->with('replyToMessage')
+            ->with(['replyToMessage', 'reactions'])
             ->orderBy('created_at', 'asc')
             ->get();
 
@@ -70,7 +71,7 @@ class MessageController extends Controller
         $query = Message::query()
             ->where('conversation_id', $conversationId)
             ->whereNull('chat_group_id')
-            ->with('replyToMessage');
+            ->with(['replyToMessage', 'reactions']);
 
         if ($cursorState['created_at'] && $cursorState['id']) {
             $query->where(function ($q) use ($cursorState) {
@@ -151,14 +152,12 @@ class MessageController extends Controller
                         'avatar_url' => $otherUser->avatar_url,
                     ],
                     'latest_message' => $latestMessage,
-                    'unread_count' => strcasecmp((string) $latestMessage->sender_handle, (string) $user->handle) === 0
-                        ? 0
-                        : Message::where('conversation_id', $conversationId)
-                            ->whereNull('chat_group_id')
-                            ->whereRaw('LOWER(recipient_handle) = ?', [strtolower((string) $user->handle)])
-                            ->where('is_system_message', false)
-                            ->whereNull('read_at')
-                            ->count(),
+                    'unread_count' => Message::where('conversation_id', $conversationId)
+                        ->whereNull('chat_group_id')
+                        ->whereRaw('LOWER(recipient_handle) = ?', [strtolower((string) $user->handle)])
+                        ->where('is_system_message', false)
+                        ->whereNull('read_at')
+                        ->count(),
                     'group_updated_at' => null,
                     '_cursor_key' => 'dm:' . $conversationId,
                 ];
@@ -181,13 +180,11 @@ class MessageController extends Controller
                 ->first();
 
             $since = $gm->last_read_at ?? \Carbon\Carbon::createFromTimestampUTC(0);
-            $unreadCount = ($latestMessage && $latestMessage->sender_handle === $user->handle)
-                ? 0
-                : Message::where('chat_group_id', $group->id)
-                    ->where('is_system_message', false)
-                    ->where('sender_handle', '!=', $user->handle)
-                    ->where('created_at', '>', $since)
-                    ->count();
+            $unreadCount = Message::where('chat_group_id', $group->id)
+                ->where('is_system_message', false)
+                ->where('sender_handle', '!=', $user->handle)
+                ->where('created_at', '>', $since)
+                ->count();
 
             $conversations[] = [
                 'type' => 'group',
@@ -354,7 +351,7 @@ class MessageController extends Controller
         }
 
         $messages = Message::where('chat_group_id', $group->id)
-            ->with('replyToMessage')
+            ->with(['replyToMessage', 'reactions'])
             ->orderBy('created_at', 'asc')
             ->get();
 
@@ -400,7 +397,7 @@ class MessageController extends Controller
         $limit = (int) $request->get('limit', 50);
         $cursorState = $this->decodeThreadCursor((string) $request->get('cursor', ''));
 
-        $query = Message::query()->where('chat_group_id', $group->id)->with('replyToMessage');
+        $query = Message::query()->where('chat_group_id', $group->id)->with(['replyToMessage', 'reactions']);
 
         if ($cursorState['created_at'] && $cursorState['id']) {
             $query->where(function ($q) use ($cursorState) {
@@ -748,6 +745,94 @@ class MessageController extends Controller
         $message->delete();
 
         return response()->json(['success' => true] + $payload);
+    }
+
+    /**
+     * Toggle one emoji on a message. The author gets an inbox notification only.
+     * Removing a reaction does not send anything.
+     */
+    public function toggleReaction(Request $request, string $messageId): JsonResponse
+    {
+        $validator = Validator::make(array_merge($request->all(), ['messageId' => $messageId]), [
+            'messageId' => 'required|uuid',
+            'emoji' => 'required|string|min:1|max:16',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $message = Message::query()->find($messageId);
+
+        if (! $message) {
+            return response()->json(['error' => 'Message not found'], 404);
+        }
+
+        if (! $this->viewerCanAccessMessage($user, $message)) {
+            return response()->json(['error' => 'You cannot react to this message'], 403);
+        }
+
+        $emoji = trim((string) $request->input('emoji'));
+        $existing = MessageReaction::query()
+            ->where('message_id', $message->id)
+            ->where('user_id', $user->id)
+            ->where('emoji', $emoji)
+            ->first();
+
+        $added = false;
+        if ($existing) {
+            $existing->delete();
+        } else {
+            MessageReaction::create([
+                'message_id' => $message->id,
+                'user_id' => $user->id,
+                'user_handle' => $user->handle,
+                'emoji' => $emoji,
+            ]);
+            $added = true;
+        }
+
+        if ($added && strcasecmp((string) $message->sender_handle, (string) $user->handle) !== 0) {
+            $author = User::findByHandle((string) $message->sender_handle);
+            if ($author) {
+                try {
+                    app(InteractionPushService::class)->notifyMessageReaction(
+                        $user,
+                        $author,
+                        $emoji,
+                        $message->chat_group_id ? (string) $message->chat_group_id : null,
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to dispatch message reaction notification', [
+                        'message_id' => $message->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
+        $reactions = MessageReaction::query()
+            ->where('message_id', $message->id)
+            ->orderBy('created_at')
+            ->get();
+
+        return response()->json([
+            'added' => $added,
+            'reactions' => Message::groupedReactions($reactions),
+        ]);
+    }
+
+    private function viewerCanAccessMessage(User $user, Message $message): bool
+    {
+        if ($message->chat_group_id) {
+            $group = ChatGroup::whereNull('deleted_at')->find($message->chat_group_id);
+
+            return $group ? $group->hasActiveMember($user) : false;
+        }
+
+        return strcasecmp((string) $message->sender_handle, (string) $user->handle) === 0
+            || strcasecmp((string) $message->recipient_handle, (string) $user->handle) === 0;
     }
 }
 

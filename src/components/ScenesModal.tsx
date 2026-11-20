@@ -2621,10 +2621,9 @@ export default function ScenesModal({
                 onClose={() => setCreateGroupOpen(false)}
                 onCreated={(g) => {
                     setCreateGroupOpen(false);
-                    navigate(`/messages/group/${encodeURIComponent(g.id)}`);
-                    showToast(
-                        `You're in “${g.name}”. Tap + in the header to invite people, or use their profile → Invite to group.`,
-                    );
+                    navigate(`/messages/group/${encodeURIComponent(g.id)}`, {
+                        state: { communityCreated: true, communityCreatedName: g.name },
+                    });
                 }}
             />
         </>

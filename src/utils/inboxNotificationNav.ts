@@ -162,6 +162,10 @@ export function resolveInboxNotificationRoute(item: InboxNotificationNavInput): 
         return { dest: 'none' };
     }
 
+    if (kind === 'follow_request') {
+        return { dest: 'none' };
+    }
+
     if (isFollowInboxNotification(item)) {
         if (handle) return { dest: 'profile', handle };
         console.warn('[inbox] follow notification missing actor handle', item.id || '(no id)');

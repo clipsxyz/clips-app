@@ -7,6 +7,17 @@ import Avatar from '../components/Avatar';
 import { IMessageDmBubbleShell } from '../components/IMessageDmBubbleShell';
 import { useAuth } from '../context/Auth';
 import {
+    chatGroupApiError,
+    deleteChatGroup,
+    fetchChatGroupMembers,
+    fetchMyChatGroups,
+    isChatGroupAdmin,
+    removeChatGroupMember,
+    renameChatGroup,
+    setChatGroupMemberRole,
+    type ChatGroupMemberRow,
+} from '../api/chatGroups';
+import {
     fetchConversation,
     fetchConversationMessagesPage,
     appendMessage,
@@ -25,6 +36,7 @@ import {
     fetchGroupThreadMessagesPage,
     markGroupConversationReadById,
     deleteChatMessage,
+    toggleMessageReaction,
 } from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
@@ -40,6 +52,7 @@ import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
 import type { Post } from '../types';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
+import { groupSenderColor, groupSenderLabel, isGroupSenderRunStart } from '../utils/groupThreadSender';
 import { showToast } from '../utils/toast';
 import { getSocket } from '../services/socketio';
 import Swal from 'sweetalert2';
@@ -555,7 +568,38 @@ export default function MessagesPage() {
     const [pendingSharePostId, setPendingSharePostId] = React.useState<string | null>(null);
     const sharedPostSentRef = React.useRef(false);
     const communityCreatedHandledRef = React.useRef(false);
-    const [communityCreatedAlert, setCommunityCreatedAlert] = React.useState<string | null>(null);
+    const [canInviteGroup, setCanInviteGroup] = React.useState(false);
+    const [groupCreatorId, setGroupCreatorId] = React.useState<string | null>(null);
+    const [groupMembers, setGroupMembers] = React.useState<ChatGroupMemberRow[]>([]);
+    const [groupMembersLoading, setGroupMembersLoading] = React.useState(false);
+    const [editingGroupName, setEditingGroupName] = React.useState(false);
+    const [renameDraft, setRenameDraft] = React.useState('');
+    const [renameBusy, setRenameBusy] = React.useState(false);
+    const [managedMember, setManagedMember] = React.useState<ChatGroupMemberRow | null>(null);
+    const [memberActionBusy, setMemberActionBusy] = React.useState(false);
+    const isGroupCreator = Boolean(user?.id && groupCreatorId && String(user.id) === String(groupCreatorId));
+
+    React.useEffect(() => {
+        if (!isGroupThread || !groupId) {
+            setCanInviteGroup(false);
+            return;
+        }
+        let cancelled = false;
+        void fetchMyChatGroups(user?.handle)
+            .then((groups) => {
+                if (cancelled) return;
+                const current = (groups || []).find((g) => String(g.id) === String(groupId));
+                if (!current) return;
+                setCanInviteGroup(isChatGroupAdmin(current, user?.id));
+                setGroupCreatorId(current.creator_id || null);
+            })
+            .catch(() => {
+                if (!cancelled) setCanInviteGroup(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isGroupThread, groupId, user?.handle, user?.id]);
 
     React.useEffect(() => {
         const state = location.state as { communityCreated?: boolean; communityCreatedName?: string } | null;
@@ -563,10 +607,13 @@ export default function MessagesPage() {
         communityCreatedHandledRef.current = true;
         const name =
             (typeof state.communityCreatedName === 'string' && state.communityCreatedName.trim()) ||
-            'your community';
-        setCommunityCreatedAlert(name);
+            '';
+        if (name) setGroupDisplayName(name);
+        setCanInviteGroup(true);
+        if (user?.id) setGroupCreatorId(user.id);
+        setInviteMemberOpen(true);
         navigate(location.pathname, { replace: true, state: {} });
-    }, [location.pathname, location.state, navigate]);
+    }, [location.pathname, location.state, navigate, user?.id]);
 
     // Direct share to DM (Instagram/TikTok style): send the post immediately when opening the conversation
     React.useEffect(() => {
@@ -653,6 +700,18 @@ export default function MessagesPage() {
     
     // Message reactions state (messageId -> { emoji: string, users: string[] }[])
     const [messageReactions, setMessageReactions] = useState<Record<string, { emoji: string; users: string[] }[]>>({});
+    React.useEffect(() => {
+        setMessageReactions((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            for (const msg of messages) {
+                if (!msg.reactions) continue;
+                next[msg.id] = msg.reactions;
+                changed = true;
+            }
+            return changed ? next : prev;
+        });
+    }, [messages]);
     // Sticker reaction animation: pop big then fly to card
     const [stickerReactionAnimation, setStickerReactionAnimation] = useState<{
         messageId: string;
@@ -750,6 +809,29 @@ export default function MessagesPage() {
     const threadCardMaxWidth = 'min(200px, 78%)';
     const [groupDisplayName, setGroupDisplayName] = useState<string>('Group');
     const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
+
+    React.useEffect(() => {
+        if (!showChatInfo || !isGroupThread || !groupId) return;
+        let cancelled = false;
+        setGroupMembersLoading(true);
+        void fetchChatGroupMembers(groupId)
+            .then((payload) => {
+                if (cancelled) return;
+                setGroupMembers(payload.items);
+                if (payload.name.trim()) setGroupDisplayName(payload.name.trim());
+                setCanInviteGroup(payload.is_admin);
+                if (payload.creator_id) setGroupCreatorId(payload.creator_id);
+            })
+            .catch(() => {
+                if (!cancelled) setGroupMembers([]);
+            })
+            .finally(() => {
+                if (!cancelled) setGroupMembersLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [showChatInfo, isGroupThread, groupId]);
 
     const appendToThread = React.useCallback(
         (payload: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number }) => {
@@ -2535,9 +2617,10 @@ export default function MessagesPage() {
         }
     };
 
-    // Handle adding reaction to message
+    // Handle adding reaction to message. The other person gets a notification, not a new chat line.
     const handleAddReaction = (messageId: string, emoji: string) => {
         if (!user?.handle) return;
+        const previous = messageReactions;
         
         setMessageReactions(prev => {
             const current = prev[messageId] || [];
@@ -2583,6 +2666,17 @@ export default function MessagesPage() {
                 };
             }
         });
+        if (!isLaravelApiEnabled()) return;
+        void toggleMessageReaction(messageId, emoji)
+            .then((reactions) => {
+                if (!reactions) return;
+                setMessageReactions((prev) => ({ ...prev, [messageId]: reactions }));
+                setMessages((prev) => prev.map((msg) => (msg.id === messageId ? { ...msg, reactions } : msg)));
+            })
+            .catch((error) => {
+                console.error('Reaction failed:', error);
+                setMessageReactions(previous);
+            });
     };
 
     // Handle cancel reply
@@ -2949,15 +3043,16 @@ export default function MessagesPage() {
                                 <FiMapPin className="h-[22px] w-[22px]" />
                             </button>
                         )}
-                        {isGroupThread && groupId ? (
+                        {isGroupThread && groupId && canInviteGroup ? (
                             <button
                                 type="button"
-                                className="flex h-9 w-9 items-center justify-center text-white"
+                                className="mr-1 inline-flex h-8 shrink-0 items-center gap-1 rounded-full bg-white px-2.5 text-xs font-bold text-black"
                                 onClick={() => setInviteMemberOpen(true)}
-                                title="Invite someone by username"
-                                aria-label="Invite to group"
+                                title="Invite people to this group"
+                                aria-label="Invite people"
                             >
-                                <FiUserPlus className="h-[22px] w-[22px]" />
+                                <FiUserPlus className="h-3.5 w-3.5" />
+                                Invite
                             </button>
                         ) : null}
                         <button
@@ -2991,6 +3086,33 @@ export default function MessagesPage() {
                             typeof msg.text === 'string' &&
                             msg.text.trim().toLowerCase().startsWith('replying to @') &&
                             msg.text.toLowerCase().includes('story');
+                        const previous = idx > 0 ? messages[idx - 1] : null;
+                        const showGroupSender = isGroupSenderRunStart({
+                            isGroup: isGroupThread,
+                            isFromMe: msg.isFromMe,
+                            isSystem: !!msg.isSystemMessage,
+                            senderHandle: msg.senderHandle,
+                            previous: previous
+                                ? {
+                                      senderHandle: previous.senderHandle,
+                                      isFromMe: previous.isFromMe,
+                                      isSystem: !!previous.isSystemMessage,
+                                  }
+                                : null,
+                        });
+                        const groupSender = showGroupSender && msg.senderHandle ? (
+                            <button
+                                type="button"
+                                className="mb-0.5 max-w-full truncate text-left text-[13px] font-semibold leading-4"
+                                style={{ color: groupSenderColor(msg.senderHandle) }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/user/${encodeURIComponent(msg.senderHandle)}`);
+                                }}
+                            >
+                                {groupSenderLabel(msg.senderHandle)}
+                            </button>
+                        ) : null;
 
                         return (
                             <React.Fragment key={msg.id}>
@@ -3052,9 +3174,9 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1 bg-transparent' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                 </button>
                                                                             );
                                                                         })}
@@ -3085,9 +3207,9 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                 </button>
                                                                             );
                                                                         })}
@@ -3154,9 +3276,9 @@ export default function MessagesPage() {
                                                                                 {messageReactions[msg.id].map((reaction, idx) => {
                                                                                     const isHeart = reaction.emoji === '❤️';
                                                                                     return (
-                                                                                        <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                        <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                             {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                            {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                            {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                         </button>
                                                                                     );
                                                                                 })}
@@ -3178,9 +3300,9 @@ export default function MessagesPage() {
                                                                             {messageReactions[msg.id].map((reaction, idx) => {
                                                                                 const isHeart = reaction.emoji === '❤️';
                                                                                 return (
-                                                                                    <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                         {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                        {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                        {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                     </button>
                                                                                 );
                                                                             })}
@@ -3320,11 +3442,7 @@ export default function MessagesPage() {
                                                                                     e.stopPropagation();
                                                                                     handleAddReaction(msg.id, reaction.emoji);
                                                                                 }}
-                                                                                className={
-                                                                                    isHeart
-                                                                                        ? 'rounded-full px-1 py-0.5 flex items-center gap-1 transition-colors animate-reaction-heart-pop'
-                                                                                        : 'bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors'
-                                                                                }
+                                                                                className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm"
                                                                                 title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
                                                                             >
                                                                                 {isHeart ? (
@@ -3337,7 +3455,7 @@ export default function MessagesPage() {
                                                                                     <span className="text-sm leading-none">{reaction.emoji}</span>
                                                                                 )}
                                                                                 {reaction.users.length > 1 && (
-                                                                                    <span className={`text-[10px] font-medium leading-none ${isHeart ? 'text-red-400' : 'text-gray-700'}`}>{reaction.users.length}</span>
+                                                                                    <span className="text-[10px] font-medium leading-none text-white">{reaction.users.length}</span>
                                                                                 )}
                                                                             </button>
                                                                         );
@@ -3459,9 +3577,9 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                 </button>
                                                                             );
                                                                         })}
@@ -3490,9 +3608,9 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                 </button>
                                                                             );
                                                                         })}
@@ -3572,9 +3690,9 @@ export default function MessagesPage() {
                                                                                 {messageReactions[msg.id].map((reaction, idx) => {
                                                                                     const isHeart = reaction.emoji === '❤️';
                                                                                     return (
-                                                                                        <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                        <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                             {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                            {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                            {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                         </button>
                                                                                     );
                                                                                 })}
@@ -3599,9 +3717,9 @@ export default function MessagesPage() {
                                                                             {messageReactions[msg.id].map((reaction, idx) => {
                                                                                 const isHeart = reaction.emoji === '❤️';
                                                                                 return (
-                                                                                    <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm">
                                                                                         {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
-                                                                                        {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                        {reaction.users.length > 1 && <span className="text-[10px] font-medium text-white">{reaction.users.length}</span>}
                                                                                     </button>
                                                                                 );
                                                                             })}
@@ -3626,6 +3744,7 @@ export default function MessagesPage() {
                                                             className="flex-shrink-0"
                                                         />
                                                         <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+                                                            {groupSender}
                                                             <IMessageDmBubbleShell
                                                                 isFromMe={false}
                                                                 tailBgClassName=""
@@ -3746,11 +3865,7 @@ export default function MessagesPage() {
                                                                                         e.stopPropagation();
                                                                                         handleAddReaction(msg.id, reaction.emoji);
                                                                                     }}
-                                                                                    className={
-                                                                                        isHeart
-                                                                                            ? 'rounded-full px-1 py-0.5 flex items-center gap-1 transition-colors animate-reaction-heart-pop'
-                                                                                            : 'bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors'
-                                                                                    }
+                                                                                    className="rounded-full border border-white/15 bg-[#0B1220] px-1.5 py-0.5 flex items-center gap-1 shadow-sm"
                                                                                     title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
                                                                                 >
                                                                                     {isHeart ? (
@@ -3763,7 +3878,7 @@ export default function MessagesPage() {
                                                                                         <span className="text-sm leading-none">{reaction.emoji}</span>
                                                                                     )}
                                                                                     {reaction.users.length > 1 && (
-                                                                                        <span className={`text-[10px] font-medium leading-none ${isHeart ? 'text-red-400' : 'text-gray-700'}`}>{reaction.users.length}</span>
+                                                                                        <span className="text-[10px] font-medium leading-none text-white">{reaction.users.length}</span>
                                                                                     )}
                                                                                 </button>
                                                                             );
@@ -4549,9 +4664,250 @@ export default function MessagesPage() {
                                             <p className="mt-0.5 text-sm text-[#E2E8F0]">Group chat</p>
                                         </div>
                                     </div>
-                                    <p className="mb-4 text-xs leading-[18px] text-[#94A3B8]">
-                                        To add people, use the + button in the chat header, or open their profile and choose Invite to group.
-                                    </p>
+                                    {canInviteGroup ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowChatInfo(false);
+                                                setInviteMemberOpen(true);
+                                            }}
+                                            className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-bold text-black"
+                                        >
+                                            <FiUserPlus className="h-4 w-4" />
+                                            Invite people
+                                        </button>
+                                    ) : (
+                                        <p className="mb-2 text-xs leading-[18px] text-[#94A3B8]">
+                                            Only a group admin can invite people to this chat.
+                                        </p>
+                                    )}
+                                    {canInviteGroup ? (
+                                        editingGroupName ? (
+                                            <div className="mb-2">
+                                                <input
+                                                    value={renameDraft}
+                                                    onChange={(e) => setRenameDraft(e.target.value)}
+                                                    maxLength={120}
+                                                    placeholder="Group name"
+                                                    className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white outline-none"
+                                                />
+                                                <div className="mt-2 flex justify-end gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setEditingGroupName(false)}
+                                                        className="px-3 py-2 text-sm font-semibold text-[#94A3B8]"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={renameBusy}
+                                                        onClick={() => {
+                                                            if (!groupId) return;
+                                                            const next = renameDraft.trim();
+                                                            if (!next) return;
+                                                            setRenameBusy(true);
+                                                            void renameChatGroup(groupId, next)
+                                                                .then((saved) => {
+                                                                    setGroupDisplayName(saved?.name?.trim() || next);
+                                                                    setEditingGroupName(false);
+                                                                    window.dispatchEvent(
+                                                                        new CustomEvent('conversationUpdated', {
+                                                                            detail: { chat_group_id: groupId },
+                                                                        }),
+                                                                    );
+                                                                })
+                                                                .catch((error) => {
+                                                                    setChatInfoAlert({
+                                                                        title: 'Could not rename',
+                                                                        message: chatGroupApiError(error, 'Could not rename this group right now.'),
+                                                                        icon: 'alert',
+                                                                        confirmButtonText: 'OK',
+                                                                    });
+                                                                })
+                                                                .finally(() => setRenameBusy(false));
+                                                        }}
+                                                        className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-black disabled:opacity-60"
+                                                    >
+                                                        {renameBusy ? 'Saving...' : 'Save name'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setRenameDraft(groupDisplayName);
+                                                    setEditingGroupName(true);
+                                                }}
+                                                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-base font-medium text-white"
+                                            >
+                                                <FiEdit3 className="h-5 w-5" />
+                                                <span>Edit group name</span>
+                                            </button>
+                                        )
+                                    ) : null}
+                                    <p className="px-4 pb-1 pt-2 text-xs font-bold text-[#94A3B8]">Members</p>
+                                    {groupMembersLoading && groupMembers.length === 0 ? (
+                                        <p className="px-4 py-2 text-sm text-[#94A3B8]">Loading members...</p>
+                                    ) : (
+                                        groupMembers.map((member) => {
+                                            const label = member.handle || 'Member';
+                                            const roleLabel = member.is_creator ? 'Creator' : member.role === 'admin' ? 'Admin' : '';
+                                            const isSelf = !!user?.id && member.user_id === user.id;
+                                            return (
+                                                <button
+                                                    key={member.user_id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (canInviteGroup && !isSelf && !member.is_creator) {
+                                                            setManagedMember(member);
+                                                            return;
+                                                        }
+                                                        if (!member.handle) return;
+                                                        setShowChatInfo(false);
+                                                        navigate(`/user/${encodeURIComponent(member.handle)}`);
+                                                    }}
+                                                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left"
+                                                >
+                                                    <Avatar src={member.avatar_url || getAvatarForHandle(label)} name={label.split('@')[0] || 'Member'} size={36} />
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block truncate text-sm font-semibold text-white">{label}</span>
+                                                        {roleLabel ? <span className="block text-xs text-[#94A3B8]">{roleLabel}</span> : null}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })
+                                    )}
+                                    {managedMember ? (
+                                        <div className="mt-2 rounded-xl border border-white/10 p-2">
+                                            <p className="px-2 py-1 text-sm font-semibold text-white">{managedMember.handle}</p>
+                                            <button
+                                                type="button"
+                                                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-white"
+                                                onClick={() => {
+                                                    if (!managedMember.handle) return;
+                                                    setShowChatInfo(false);
+                                                    setManagedMember(null);
+                                                    navigate(`/user/${encodeURIComponent(managedMember.handle)}`);
+                                                }}
+                                            >
+                                                View profile
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={memberActionBusy || !groupId}
+                                                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-white disabled:opacity-60"
+                                                onClick={() => {
+                                                    if (!groupId) return;
+                                                    const next = managedMember.role === 'admin' ? 'member' : 'admin';
+                                                    setMemberActionBusy(true);
+                                                    void setChatGroupMemberRole(groupId, managedMember.user_id, next)
+                                                        .then(() => {
+                                                            setManagedMember(null);
+                                                            return fetchChatGroupMembers(groupId);
+                                                        })
+                                                        .then((payload) => {
+                                                            setGroupMembers(payload.items);
+                                                            window.dispatchEvent(
+                                                                new CustomEvent('conversationUpdated', {
+                                                                    detail: { chat_group_id: groupId },
+                                                                }),
+                                                            );
+                                                        })
+                                                        .catch((error) => {
+                                                            setChatInfoAlert({
+                                                                title: 'Could not update admin',
+                                                                message: chatGroupApiError(error, 'Could not change that role right now.'),
+                                                                icon: 'alert',
+                                                                confirmButtonText: 'OK',
+                                                            });
+                                                        })
+                                                        .finally(() => setMemberActionBusy(false));
+                                                }}
+                                            >
+                                                {managedMember.role === 'admin' ? 'Dismiss as admin' : 'Make group admin'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={memberActionBusy}
+                                                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-[#EF4444] disabled:opacity-60"
+                                                onClick={() => {
+                                                    if (!groupId) return;
+                                                    const target = managedMember;
+                                                    setChatInfoAlert({
+                                                        title: `Remove @${target.handle}?`,
+                                                        message: 'They will need a new invite to come back.',
+                                                        icon: 'alert',
+                                                        confirmButtonText: 'Remove',
+                                                        cancelButtonText: 'Cancel',
+                                                        showCancelButton: true,
+                                                        onConfirm: () => {
+                                                            setMemberActionBusy(true);
+                                                            void removeChatGroupMember(groupId, target.user_id)
+                                                                .then(() => fetchChatGroupMembers(groupId))
+                                                                .then((payload) => {
+                                                                    setManagedMember(null);
+                                                                    setGroupMembers(payload.items);
+                                                                    window.dispatchEvent(
+                                                                        new CustomEvent('conversationUpdated', {
+                                                                            detail: { chat_group_id: groupId },
+                                                                        }),
+                                                                    );
+                                                                })
+                                                                .catch((error) => {
+                                                                    setChatInfoAlert({
+                                                                        title: 'Could not remove',
+                                                                        message: chatGroupApiError(error, 'Could not remove that person right now.'),
+                                                                        icon: 'alert',
+                                                                        confirmButtonText: 'OK',
+                                                                    });
+                                                                })
+                                                                .finally(() => setMemberActionBusy(false));
+                                                        },
+                                                    });
+                                                }}
+                                            >
+                                                Remove from group
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                    {isGroupCreator ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!groupId) return;
+                                                setChatInfoAlert({
+                                                    title: `Delete "${groupDisplayName}"?`,
+                                                    message: 'This removes the group for everyone in it.',
+                                                    icon: 'alert',
+                                                    confirmButtonText: 'Delete group',
+                                                    cancelButtonText: 'Cancel',
+                                                    showCancelButton: true,
+                                                    onConfirm: () => {
+                                                        void (async () => {
+                                                            try {
+                                                                await deleteChatGroup(groupId);
+                                                                setShowChatInfo(false);
+                                                                navigate('/inbox');
+                                                            } catch (error) {
+                                                                setChatInfoAlert({
+                                                                    title: 'Could not delete group',
+                                                                    message: chatGroupApiError(error, 'Could not delete this group right now.'),
+                                                                    icon: 'alert',
+                                                                    confirmButtonText: 'OK',
+                                                                });
+                                                            }
+                                                        })();
+                                                    },
+                                                });
+                                            }}
+                                            className="mt-2 flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-base font-semibold text-[#EF4444]"
+                                        >
+                                            <FiTrash2 className="h-5 w-5" />
+                                            <span>Delete group</span>
+                                        </button>
+                                    ) : (
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -4573,7 +4929,7 @@ export default function MessagesPage() {
                                                             console.error('Error leaving group:', error);
                                                             setChatInfoAlert({
                                                                 title: 'Action failed',
-                                                                message: 'Could not leave this group right now.',
+                                                                message: chatGroupApiError(error, 'Could not leave this group right now.'),
                                                                 icon: 'alert',
                                                                 confirmButtonText: 'OK',
                                                             });
@@ -4587,6 +4943,7 @@ export default function MessagesPage() {
                                         <FiXCircle className="h-5 w-5" />
                                         <span>Leave Group</span>
                                     </button>
+                                    )}
                                 </>
                             ) : (
                                 <>
@@ -4804,16 +5161,6 @@ export default function MessagesPage() {
                     onReclip={async () => {}}
                 />
             )}
-            <GazetteerAlertSheet
-                visible={communityCreatedAlert != null}
-                title="Community created"
-                message={`You are in "${communityCreatedAlert || 'your community'}". Use + in the header to invite members.`}
-                icon="success"
-                showIcon
-                confirmButtonText="Open chat"
-                onConfirm={() => setCommunityCreatedAlert(null)}
-                onDismiss={() => setCommunityCreatedAlert(null)}
-            />
             <GazetteerAlertSheet
                 visible={chatInfoAlert != null}
                 title={chatInfoAlert?.title ?? ''}

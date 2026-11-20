@@ -7,7 +7,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { BottomSheetFlatList, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import {
@@ -18,7 +18,7 @@ import {
 } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
-import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
+import { UCL_CANVAS_NAVY, UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 
 function normalizeHandle(h: string): string {
     return h.trim().replace(/^@/g, '').split(/\s+/)[0] || '';
@@ -128,55 +128,64 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
             handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             backdropOpacity={0.65}
         >
-            <BottomSheetView style={styles.headerBlock}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Invite to a group</Text>
-                    <TouchableOpacity onPress={onClose}>
-                        <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
-                    </TouchableOpacity>
-                </View>
-                <Text style={styles.subtitle}>
-                    Choose a group for @{normalizedInvitee || 'user'}
-                </Text>
-            </BottomSheetView>
-
-            {loading ? (
-                <BottomSheetView>
-                    <ActivityIndicator color="#8B5CF6" style={{ marginVertical: 24 }} />
-                </BottomSheetView>
-            ) : groups.length === 0 ? (
-                <BottomSheetView>
-                    <Text style={styles.empty}>
-                        Only groups you admin can receive invites. Create a group from post options first.
+            <View style={styles.body}>
+                <View style={styles.headerBlock}>
+                    <View style={styles.header}>
+                        <Text style={styles.title}>Invite to a group</Text>
+                        <TouchableOpacity onPress={onClose} hitSlop={8}>
+                            <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
+                        </TouchableOpacity>
+                    </View>
+                    <Text style={styles.subtitle}>
+                        Choose a group for @{normalizedInvitee || 'user'}
                     </Text>
-                </BottomSheetView>
-            ) : (
-                <BottomSheetFlatList
-                    data={groups}
-                    keyExtractor={(item) => item.id}
-                    renderItem={renderItem}
-                    contentContainerStyle={styles.list}
-                />
-            )}
+                </View>
+
+                {loading ? (
+                    <ActivityIndicator color="#8B5CF6" style={styles.loader} />
+                ) : (
+                    <BottomSheetFlatList
+                        style={styles.listFlex}
+                        data={groups}
+                        keyExtractor={(item) => item.id}
+                        renderItem={renderItem}
+                        contentContainerStyle={styles.list}
+                        keyboardShouldPersistTaps="handled"
+                        ListEmptyComponent={
+                            <Text style={styles.empty}>
+                                Only groups you admin can receive invites. Create a group from post options first.
+                            </Text>
+                        }
+                    />
+                )}
+            </View>
         </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
+    body: {
+        flex: 1,
+    },
     headerBlock: {
-        paddingBottom: 8,
+        zIndex: 2,
+        paddingBottom: 12,
+        backgroundColor: UCL_CANVAS_NAVY,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.08)',
+        paddingHorizontal: 16,
+        paddingTop: 8,
     },
     title: { color: UCL_TEXT_PRIMARY, fontSize: 17, fontWeight: '600' },
     subtitle: { color: '#E2E8F0', fontSize: 13, paddingHorizontal: 16, paddingTop: 8 },
-    list: { paddingHorizontal: 8, paddingBottom: 24 },
+    loader: { marginVertical: 24 },
+    listFlex: { flex: 1 },
+    list: { paddingHorizontal: 8, paddingTop: 8, paddingBottom: 24 },
     row: {
         flexDirection: 'row',
         alignItems: 'center',

@@ -30,6 +30,7 @@ export interface ChatMessage {
     sourcePostId?: string; // Post shared/anchored by this message (persisted server-side)
     /** Recipient has opened the thread (1:1 DMs). Unset/false = delivered, not yet read. */
     read?: boolean;
+    reactions?: { emoji: string; users: string[] }[];
 }
 
 type ConversationId = string; // sorted `${a}|${b}`
@@ -93,8 +94,17 @@ function laravelMsgToChatMessage(m: {
     read?: boolean | number | string | null;
     read_at?: string | null;
     readAt?: string | null;
+    reactions?: { emoji?: string; users?: string[] }[] | null;
 }): ChatMessage {
     const sourcePostId = m.source_post_id ?? m.sourcePostId;
+    const reactions = Array.isArray(m.reactions)
+        ? m.reactions
+              .map((row) => ({
+                  emoji: String(row?.emoji || ''),
+                  users: Array.isArray(row?.users) ? row.users.map((user) => String(user)) : [],
+              }))
+              .filter((row) => row.emoji)
+        : undefined;
     return {
         id: m.id,
         senderHandle: String(m.sender_handle ?? m.senderHandle ?? ''),
@@ -105,7 +115,23 @@ function laravelMsgToChatMessage(m: {
         replyTo: mapLaravelReplyTo(m),
         sourcePostId: sourcePostId ? String(sourcePostId) : undefined,
         read: laravelMessageIsRead(m),
+        reactions,
     };
+}
+
+export async function toggleMessageReaction(
+    messageId: string,
+    emoji: string,
+): Promise<{ emoji: string; users: string[] }[] | null> {
+    if (!useLiveInboxApi()) return null;
+    const { toggleMessageReaction: toggle } = await import('./client');
+    const res = (await toggle(messageId, emoji)) as { reactions?: { emoji?: string; users?: string[] }[] };
+    return (res?.reactions ?? [])
+        .map((row) => ({
+            emoji: String(row?.emoji || ''),
+            users: Array.isArray(row?.users) ? row.users.map((user) => String(user)) : [],
+        }))
+        .filter((row) => row.emoji);
 }
 
 async function emitMessagesRead(selfHandle: string, otherHandle: string): Promise<void> {
@@ -948,8 +974,18 @@ export async function listConversations(forHandle: string, viewerId?: string): P
         if (!(await hasAuthTokenAsync())) return [];
         try {
             const apiClient = await import('./client');
-            const res = await apiClient.fetchConversations(0, 100);
-            const items = res?.items ?? [];
+            const items: any[] = [];
+            let cursor: string | number | null = 0;
+            let pages = 0;
+            do {
+                const res = await apiClient.fetchConversations(cursor, 40);
+                const batch = Array.isArray(res?.items) ? res.items : [];
+                items.push(...batch);
+                const next = typeof res?.nextCursor === 'string' && res.nextCursor ? res.nextCursor : null;
+                cursor = next;
+                pages += 1;
+                if (!res?.hasMore || !next) break;
+            } while (pages < 50);
             const { userHasUnviewedStoriesByHandle } = await import('./stories');
             const mapped = await Promise.all(
                 items.map(

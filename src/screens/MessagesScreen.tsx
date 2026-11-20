@@ -60,14 +60,22 @@ import {
     isUserBlocked,
     deleteConversation,
     deleteChatMessage,
+    toggleMessageReaction,
     type ChatMessage,
 } from '../api/messages';
 import {
+    chatGroupApiError,
     createChatGroup,
+    deleteChatGroup,
+    fetchChatGroupMembers,
     fetchMyChatGroups,
     inviteUserToChatGroup,
     isChatGroupAdmin,
     leaveChatGroup,
+    removeChatGroupMember,
+    renameChatGroup,
+    setChatGroupMemberRole,
+    type ChatGroupMemberRow,
 } from '../api/chatGroups';
 import { connectSocket, joinGroupChat, leaveGroupChat } from '../services/socketio';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
@@ -87,6 +95,7 @@ import { followOrRequest } from '../utils/followOrRequest';
 import type { Post } from '../types';
 import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
+import { groupSenderColor, groupSenderLabel, isGroupSenderRunStart } from '../utils/groupThreadSender';
 import Avatar from '../components/Avatar';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
@@ -506,6 +515,7 @@ type DmMessageRowProps = {
     userId?: string;
     threadHandle?: string;
     isGroupThread: boolean;
+    showGroupSenderName: boolean;
     dmSentStyle: DmSentBubbleStyle;
     reactions?: DmReaction[];
     isPlayingAudio: boolean;
@@ -536,6 +546,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
     userId,
     threadHandle,
     isGroupThread,
+    showGroupSenderName,
     dmSentStyle,
     reactions,
     isPlayingAudio,
@@ -557,6 +568,17 @@ const DmMessageRow = React.memo(function DmMessageRow({
     const suppressTapRef = useRef(false);
     const isFromMe = sameDmHandle(item.senderHandle, userHandle);
     const senderAvatar = getAvatarForHandle(item.senderHandle);
+    const senderColor = groupSenderColor(item.senderHandle);
+    const groupSenderName = showGroupSenderName && item.senderHandle ? (
+        <TouchableOpacity
+            onPress={() => navigation.navigate('ViewProfile', { handle: item.senderHandle })}
+            hitSlop={6}
+        >
+            <Text style={[styles.groupSenderName, { color: senderColor }]} numberOfLines={1}>
+                {groupSenderLabel(item.senderHandle)}
+            </Text>
+        </TouchableOpacity>
+    ) : null;
     const isStoryInteraction = Boolean(item.storyId);
     const isLegacyStoryContextText =
         !!item.isSystemMessage &&
@@ -678,6 +700,14 @@ const DmMessageRow = React.memo(function DmMessageRow({
 
     const onDoubleTap = () => ctx.handleReactWithAnimation(item.id, '❤️');
 
+    if (item.isSystemMessage && !isStoryInteraction && !isLegacyStoryContextText) {
+        return (
+            <View style={styles.groupNoticeWrap}>
+                <Text style={styles.groupNoticeText}>{item.text}</Text>
+            </View>
+        );
+    }
+
     let inner: React.ReactNode;
 
     if (isStoryInteraction || isLegacyStoryContextText) {
@@ -706,10 +736,11 @@ const DmMessageRow = React.memo(function DmMessageRow({
                 {!isFromMe ? (
                     <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
                 ) : null}
-                <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
-                    <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => {
+                    <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
+                        {groupSenderName}
+                        <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={() => {
                             if (!item.storyId) return;
                             navigation.navigate('Stories', {
                                 openUserHandle: isFromMe
@@ -784,6 +815,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                             styles.sharedPostColumn,
                         ]}
                     >
+                        {groupSenderName}
                         {replyPreview ? <DmQuotedReply preview={replyPreview} /> : null}
                         <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap} suppressTapRef={suppressTapRef}>
                             {sharedCard}
@@ -839,6 +871,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                             styles.sharedPostColumn,
                         ]}
                     >
+                        {groupSenderName}
                         <DmSharedStoryCard
                             handle={storyShare.handle}
                             storyId={storyShare.storyId}
@@ -876,6 +909,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
 
             const bubbleContent = (
                 <>
+                    {showGroupSenderName && !isMediaOnlyMessage ? groupSenderName : null}
                     {replyPreview ? <DmQuotedReply preview={replyPreview} /> : null}
                     {item.text ? (
                         <Text
@@ -1017,6 +1051,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                         </Animated.View>
                     ) : null}
                     <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
+                        {showGroupSenderName && isMediaOnlyMessage ? groupSenderName : null}
                         <Animated.View
                             {...(!isFromMe ? bubblePanResponder.panHandlers : {})}
                             style={!isFromMe && isSwiping ? { transform: [{ translateX: swipeAnim }] } : undefined}
@@ -1137,6 +1172,14 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [creatingGroup, setCreatingGroup] = useState(false);
     const [inviteOpen, setInviteOpen] = useState(false);
     const [isGroupAdmin, setIsGroupAdmin] = useState(false);
+    const [isGroupCreator, setIsGroupCreator] = useState(false);
+    const [groupMembers, setGroupMembers] = useState<ChatGroupMemberRow[]>([]);
+    const [membersLoading, setMembersLoading] = useState(false);
+    const [editingGroupName, setEditingGroupName] = useState(false);
+    const [renameDraft, setRenameDraft] = useState('');
+    const [renameBusy, setRenameBusy] = useState(false);
+    const [managedMember, setManagedMember] = useState<ChatGroupMemberRow | null>(null);
+    const [memberActionBusy, setMemberActionBusy] = useState(false);
     const [inviteHandle, setInviteHandle] = useState('');
     const [inviteBusy, setInviteBusy] = useState(false);
     const [inviteSuggestions, setInviteSuggestions] = useState<Array<{ handle: string; displayName?: string; avatarUrl?: string }>>([]);
@@ -1148,6 +1191,18 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [recentFiles, setRecentFiles] = useState<DmRecentFile[]>([]);
     const [recentFilesLoading, setRecentFilesLoading] = useState(false);
     const [messageReactions, setMessageReactions] = useState<Record<string, Array<{ emoji: string; users: string[] }>>>({});
+    useEffect(() => {
+        setMessageReactions((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            for (const msg of messages) {
+                if (!msg.reactions) continue;
+                next[msg.id] = msg.reactions;
+                changed = true;
+            }
+            return changed ? next : prev;
+        });
+    }, [messages]);
     const [showStickerPicker, setShowStickerPicker] = useState(false);
     const [stickerTargetMessageId, setStickerTargetMessageId] = useState<string | null>(null);
     const [isRecordingVoice, setIsRecordingVoice] = useState(false);
@@ -1400,21 +1455,17 @@ export default function MessagesScreen({ route, navigation }: any) {
     useEffect(() => {
         if (!communityCreated || communityCreatedHandledRef.current) return;
         communityCreatedHandledRef.current = true;
-        const name =
-            (typeof communityCreatedName === 'string' && communityCreatedName.trim()) ||
-            groupName ||
-            'your community';
-        showAlert({
-            title: 'Community created',
-            message: `You are in "${name}". Use + in the header to invite members.`,
-            icon: 'success',
-            confirmButtonText: 'Open chat',
-        });
+        if (typeof communityCreatedName === 'string' && communityCreatedName.trim()) {
+            setGroupName(communityCreatedName.trim());
+        }
+        setIsGroupAdmin(true);
+        setIsGroupCreator(true);
+        setInviteOpen(true);
         navigation.setParams({
             communityCreated: undefined,
             communityCreatedName: undefined,
         });
-    }, [communityCreated, communityCreatedName, groupName, navigation, showAlert]);
+    }, [communityCreated, communityCreatedName, navigation]);
 
     const scrollMessagesToBottom = useCallback((animated = true) => {
         requestAnimationFrame(() => {
@@ -1600,6 +1651,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     useEffect(() => {
         if (!isGroupThread || !chatGroupId) {
             setIsGroupAdmin(false);
+            setIsGroupCreator(false);
             return;
         }
         let cancelled = false;
@@ -1609,6 +1661,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 const current = (groups || []).find((g) => String(g.id) === String(chatGroupId));
                 const admin = isChatGroupAdmin(current, user?.id);
                 setIsGroupAdmin(admin);
+                setIsGroupCreator(!!user?.id && !!current?.creator_id && String(current.creator_id) === String(user.id));
                 if (current?.name?.trim()) setGroupName(current.name.trim());
                 if (current?.avatar_url) setGroupAvatarUrl(current.avatar_url);
             })
@@ -2015,6 +2068,27 @@ export default function MessagesScreen({ route, navigation }: any) {
         });
     };
 
+    const loadGroupMembers = useCallback(async () => {
+        if (!chatGroupId) return;
+        setMembersLoading(true);
+        try {
+            const payload = await fetchChatGroupMembers(chatGroupId);
+            setGroupMembers(payload.items);
+            if (payload.name.trim()) setGroupName(payload.name.trim());
+            setIsGroupAdmin(payload.is_admin);
+            setIsGroupCreator(!!user?.id && !!payload.creator_id && String(payload.creator_id) === String(user.id));
+        } catch (error) {
+            console.error('Error loading group members:', error);
+        } finally {
+            setMembersLoading(false);
+        }
+    }, [chatGroupId, user?.id]);
+
+    useEffect(() => {
+        if (!showChatInfo || !isGroupThread || !chatGroupId) return;
+        void loadGroupMembers();
+    }, [showChatInfo, isGroupThread, chatGroupId, loadGroupMembers]);
+
     const loadMessages = async (reset: boolean = false) => {
         if (!user?.handle) return;
         if (reset) {
@@ -2063,6 +2137,139 @@ export default function MessagesScreen({ route, navigation }: any) {
         } finally {
             setLoading(false);
         }
+    };
+
+    const loadMessagesRef = useRef(loadMessages);
+    loadMessagesRef.current = loadMessages;
+    const openedThreadKeyRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!isScreenFocused) return;
+        const key = isGroupThread ? `g:${chatGroupId || ''}` : `d:${handle || ''}`;
+        if (openedThreadKeyRef.current !== key) {
+            openedThreadKeyRef.current = key;
+            return;
+        }
+        void loadMessagesRef.current(false);
+    }, [isScreenFocused, isGroupThread, chatGroupId, handle]);
+
+    const handleRenameGroup = async () => {
+        if (!chatGroupId || renameBusy) return;
+        const next = renameDraft.trim();
+        if (!next) {
+            showAlert({
+                title: 'Name required',
+                message: 'Type a group name.',
+                icon: 'info',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
+        setRenameBusy(true);
+        try {
+            const saved = await renameChatGroup(chatGroupId, next);
+            setGroupName(saved?.name?.trim() || next);
+            setEditingGroupName(false);
+            await loadMessages(true);
+        } catch (error) {
+            showAlert({
+                title: 'Could not rename',
+                message: chatGroupApiError(error, 'Could not rename this group right now.'),
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        } finally {
+            setRenameBusy(false);
+        }
+    };
+
+    const handleDeleteGroup = async () => {
+        if (!chatGroupId) return;
+        try {
+            await deleteChatGroup(chatGroupId);
+            setShowChatInfo(false);
+            showAlert({
+                title: 'Group deleted',
+                message: `"${groupName}" is gone for everyone.`,
+                icon: 'success',
+                confirmButtonText: 'OK',
+                onConfirm: () => {
+                    if (navigation.canGoBack()) navigation.goBack();
+                    else navigateMainTab(navigation, 'Inbox');
+                },
+            });
+        } catch (error) {
+            showAlert({
+                title: 'Could not delete group',
+                message: chatGroupApiError(error, 'Could not delete this group right now.'),
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        }
+    };
+
+    const confirmDeleteGroup = () => {
+        showAlert({
+            title: `Delete "${groupName}"?`,
+            message: 'This removes the group for everyone in it.',
+            icon: 'alert',
+            confirmButtonText: 'Delete group',
+            cancelButtonText: 'Cancel',
+            showCancelButton: true,
+            onConfirm: () => {
+                void handleDeleteGroup();
+            },
+        });
+    };
+
+    const applyMemberRole = async (member: ChatGroupMemberRow, role: 'admin' | 'member') => {
+        if (!chatGroupId || memberActionBusy) return;
+        setMemberActionBusy(true);
+        try {
+            await setChatGroupMemberRole(chatGroupId, member.user_id, role);
+            setManagedMember(null);
+            await Promise.all([loadGroupMembers(), loadMessages(true)]);
+        } catch (error) {
+            showAlert({
+                title: 'Could not update admin',
+                message: chatGroupApiError(error, 'Could not change that role right now.'),
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        } finally {
+            setMemberActionBusy(false);
+        }
+    };
+
+    const confirmRemoveMember = (member: ChatGroupMemberRow) => {
+        const label = member.handle || 'this person';
+        showAlert({
+            title: `Remove @${label}?`,
+            message: 'They will need a new invite to come back.',
+            icon: 'alert',
+            confirmButtonText: 'Remove',
+            cancelButtonText: 'Cancel',
+            showCancelButton: true,
+            onConfirm: () => {
+                if (!chatGroupId) return;
+                void (async () => {
+                    setMemberActionBusy(true);
+                    try {
+                        await removeChatGroupMember(chatGroupId, member.user_id);
+                        setManagedMember(null);
+                        await Promise.all([loadGroupMembers(), loadMessages(true)]);
+                    } catch (error) {
+                        showAlert({
+                            title: 'Could not remove',
+                            message: chatGroupApiError(error, 'Could not remove that person right now.'),
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                    } finally {
+                        setMemberActionBusy(false);
+                    }
+                })();
+            },
+        });
     };
 
     const loadOlderMessages = async () => {
@@ -2455,6 +2662,7 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const handleToggleReaction = (messageId: string, emoji: string) => {
         if (!user?.handle) return;
+        const previous = messageReactions;
         setMessageReactions((prev) => {
             const existing = prev[messageId] || [];
             const next = [...existing];
@@ -2476,6 +2684,17 @@ export default function MessagesScreen({ route, navigation }: any) {
             }
             return { ...prev, [messageId]: next };
         });
+        if (!isLaravelApiEnabled()) return;
+        void toggleMessageReaction(messageId, emoji)
+            .then((reactions) => {
+                if (!reactions) return;
+                setMessageReactions((prev) => ({ ...prev, [messageId]: reactions }));
+                setMessages((prev) => prev.map((msg) => (msg.id === messageId ? { ...msg, reactions } : msg)));
+            })
+            .catch((error) => {
+                console.error('Reaction failed:', error);
+                setMessageReactions(previous);
+            });
     };
 
     /** Instagram-style: add reaction, then pop → fly into the pill on the bubble. */
@@ -3381,9 +3600,23 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
     };
 
-    const renderMessage = ({ item }: { item: ChatMessage }) => {
+    const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
         const sharedRef = getMessageSharedRef(item);
         const sharedKey = sharedRef ? sharedPostRefKey(sharedRef) : null;
+        const older = listMessages[index + 1];
+        const showGroupSenderName = isGroupSenderRunStart({
+            isGroup: isGroupThread,
+            isFromMe: sameDmHandle(item.senderHandle, user?.handle),
+            isSystem: !!item.isSystemMessage,
+            senderHandle: item.senderHandle,
+            previous: older
+                ? {
+                      senderHandle: older.senderHandle,
+                      isFromMe: sameDmHandle(older.senderHandle, user?.handle),
+                      isSystem: !!older.isSystemMessage,
+                  }
+                : null,
+        });
         return (
             <DmMessageRow
                 message={item}
@@ -3391,8 +3624,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                 userId={user?.id}
                 threadHandle={handle}
                 isGroupThread={isGroupThread}
+                showGroupSenderName={showGroupSenderName}
                 dmSentStyle={dmSentStyle}
-                reactions={messageReactions[item.id]}
+                reactions={messageReactions[item.id] ?? item.reactions}
                 isPlayingAudio={Boolean(item.audioUrl) && playingAudioId === item.audioUrl}
                 isSwiping={swipingMessageId === item.id}
                 isActive={isScreenFocused && activeMessageIds.has(item.id)}
@@ -3519,10 +3753,11 @@ export default function MessagesScreen({ route, navigation }: any) {
                     {isGroupThread && isGroupAdmin ? (
                         <TouchableOpacity
                             onPress={() => setInviteOpen(true)}
-                            style={styles.headerActionButton}
-                            accessibilityLabel="Invite to group"
+                            style={styles.inviteChip}
+                            accessibilityLabel="Invite people"
                         >
-                            <Icon name="person-add-outline" size={ox(22)} color="#FFFFFF" />
+                            <Icon name="person-add-outline" size={ox(14)} color="#000000" />
+                            <Text style={styles.inviteChipText}>Invite</Text>
                         </TouchableOpacity>
                     ) : null}
                     <TouchableOpacity style={styles.headerActionButton} onPress={openHeaderActions}>
@@ -3541,6 +3776,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     inverted
                     key={`dm-${isGroupThread ? String(chatGroupId || '') : String(handle || '')}`}
                     data={listMessages}
+                    extraData={messageReactions}
                     renderItem={renderMessage}
                     keyExtractor={(item) => item.id}
                     style={styles.messagesList}
@@ -4003,25 +4239,134 @@ export default function MessagesScreen({ route, navigation }: any) {
                                         <Text style={styles.chatInfoSubtitle}>Group chat</Text>
                                     </View>
                                 </View>
-                                <Text style={styles.chatInfoHint}>
-                                    {isGroupAdmin
-                                        ? "To add people, use the + button in the chat header, or open someone's profile and choose Invite to group."
-                                        : 'Only the group admin can invite people to this chat.'}
-                                </Text>
-                                <TouchableOpacity
-                                    style={styles.leaveGroupBtn}
-                                    onPress={confirmLeaveGroup}
-                                    disabled={leaveGroupBusy}
-                                >
-                                    {leaveGroupBusy ? (
-                                        <ActivityIndicator color="#EF4444" />
+                                {isGroupAdmin ? (
+                                    <TouchableOpacity
+                                        style={styles.invitePeopleBtn}
+                                        onPress={() => {
+                                            setShowChatInfo(false);
+                                            setInviteOpen(true);
+                                        }}
+                                    >
+                                        <Icon name="person-add-outline" size={ox(18)} color="#000000" />
+                                        <Text style={styles.invitePeopleBtnText}>Invite people</Text>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <Text style={styles.chatInfoHint}>
+                                        Only a group admin can invite people to this chat.
+                                    </Text>
+                                )}
+                                {isGroupAdmin ? (
+                                    editingGroupName ? (
+                                        <View style={styles.renameBox}>
+                                            <TextInput
+                                                value={renameDraft}
+                                                onChangeText={setRenameDraft}
+                                                placeholder="Group name"
+                                                placeholderTextColor="#94A3B8"
+                                                style={styles.renameInput}
+                                                maxLength={120}
+                                                autoFocus
+                                            />
+                                            <View style={styles.renameActions}>
+                                                <TouchableOpacity
+                                                    onPress={() => setEditingGroupName(false)}
+                                                    style={styles.renameCancel}
+                                                >
+                                                    <Text style={styles.renameCancelText}>Cancel</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        void handleRenameGroup();
+                                                    }}
+                                                    disabled={renameBusy}
+                                                    style={styles.renameSave}
+                                                >
+                                                    <Text style={styles.renameSaveText}>
+                                                        {renameBusy ? 'Saving...' : 'Save name'}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
                                     ) : (
-                                        <>
-                                            <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
-                                            <Text style={styles.leaveGroupBtnText}>Leave Group</Text>
-                                        </>
-                                    )}
-                                </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.chatInfoActionRow}
+                                            onPress={() => {
+                                                setRenameDraft(groupName);
+                                                setEditingGroupName(true);
+                                            }}
+                                        >
+                                            <Icon name="create-outline" size={ox(20)} color="#FFFFFF" />
+                                            <Text style={styles.chatInfoActionText}>Edit group name</Text>
+                                        </TouchableOpacity>
+                                    )
+                                ) : null}
+                                <Text style={styles.memberSectionLabel}>Members</Text>
+                                {membersLoading && groupMembers.length === 0 ? (
+                                    <ActivityIndicator color="#FFFFFF" style={styles.memberLoading} />
+                                ) : (
+                                    groupMembers.map((member) => {
+                                        const label = member.handle || 'Member';
+                                        const roleLabel = member.is_creator
+                                            ? 'Creator'
+                                            : member.role === 'admin'
+                                              ? 'Admin'
+                                              : '';
+                                        return (
+                                            <TouchableOpacity
+                                                key={member.user_id}
+                                                style={styles.memberRow}
+                                                onPress={() => {
+                                                    const isSelf = !!user?.id && member.user_id === user.id;
+                                                    if (isGroupAdmin && !isSelf && !member.is_creator) {
+                                                        setManagedMember(member);
+                                                        return;
+                                                    }
+                                                    if (!member.handle) return;
+                                                    setShowChatInfo(false);
+                                                    navigation.navigate('ViewProfile', { handle: member.handle });
+                                                }}
+                                            >
+                                                <Avatar
+                                                    src={member.avatar_url || getAvatarForHandle(label)}
+                                                    name={label.split('@')[0] || 'Member'}
+                                                    size={ox(36)}
+                                                />
+                                                <View style={styles.memberText}>
+                                                    <Text style={styles.memberHandle} numberOfLines={1}>
+                                                        {label}
+                                                    </Text>
+                                                    {roleLabel ? (
+                                                        <Text style={styles.memberRole}>{roleLabel}</Text>
+                                                    ) : null}
+                                                </View>
+                                                {isGroupAdmin && member.user_id !== user?.id && !member.is_creator ? (
+                                                    <Icon name="ellipsis-horizontal" size={ox(18)} color="#94A3B8" />
+                                                ) : null}
+                                            </TouchableOpacity>
+                                        );
+                                    })
+                                )}
+                                {isGroupCreator ? (
+                                    <TouchableOpacity style={styles.leaveGroupBtn} onPress={confirmDeleteGroup}>
+                                        <Icon name="trash-outline" size={ox(20)} color="#EF4444" />
+                                        <Text style={styles.leaveGroupBtnText}>Delete group</Text>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={styles.leaveGroupBtn}
+                                        onPress={confirmLeaveGroup}
+                                        disabled={leaveGroupBusy}
+                                    >
+                                        {leaveGroupBusy ? (
+                                            <ActivityIndicator color="#EF4444" />
+                                        ) : (
+                                            <>
+                                                <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
+                                                <Text style={styles.leaveGroupBtnText}>Leave Group</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                )}
                             </ScrollView>
                         ) : (
                             <ScrollView
@@ -4123,6 +4468,65 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 </TouchableOpacity>
                             </ScrollView>
                         )}
+                    </PassportSheetCanvas>
+                </View>
+            </View>
+
+            <View style={[styles.sheetOverlay, styles.memberActionOverlay, !managedMember && styles.hidden]}>
+                <TouchableOpacity
+                    style={styles.sheetBackdropTap}
+                    activeOpacity={1}
+                    onPress={() => setManagedMember(null)}
+                />
+                <View style={[styles.chatInfoSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                    <PassportSheetCanvas tone="ucl" style={styles.chatInfoCanvas}>
+                        <View style={styles.chatInfoHeader}>
+                            <Text style={styles.chatInfoTitle} numberOfLines={1}>
+                                {managedMember?.handle || 'Member'}
+                            </Text>
+                            <TouchableOpacity onPress={() => setManagedMember(null)}>
+                                <Icon name="close" size={ox(24)} color={UCL_TEXT_PRIMARY} />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.chatInfoBodyContent}>
+                            <TouchableOpacity
+                                style={styles.chatInfoActionRow}
+                                onPress={() => {
+                                    const handleToOpen = managedMember?.handle;
+                                    setManagedMember(null);
+                                    setShowChatInfo(false);
+                                    if (handleToOpen) navigation.navigate('ViewProfile', { handle: handleToOpen });
+                                }}
+                            >
+                                <Icon name="person-outline" size={ox(20)} color="#FFFFFF" />
+                                <Text style={styles.chatInfoActionText}>View profile</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.chatInfoActionRow}
+                                disabled={memberActionBusy}
+                                onPress={() => {
+                                    if (!managedMember) return;
+                                    const next = managedMember.role === 'admin' ? 'member' : 'admin';
+                                    void applyMemberRole(managedMember, next);
+                                }}
+                            >
+                                <Icon name="shield-outline" size={ox(20)} color="#FFFFFF" />
+                                <Text style={styles.chatInfoActionText}>
+                                    {managedMember?.role === 'admin' ? 'Dismiss as admin' : 'Make group admin'}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.chatInfoActionRow}
+                                disabled={memberActionBusy}
+                                onPress={() => {
+                                    if (!managedMember) return;
+                                    confirmRemoveMember(managedMember);
+                                }}
+                            >
+                                <Icon name="person-remove-outline" size={ox(20)} color="#EF4444" />
+                                <Text style={styles.chatInfoActionDangerText}>Remove from group</Text>
+                            </TouchableOpacity>
+                        </View>
                     </PassportSheetCanvas>
                 </View>
             </View>
@@ -4419,6 +4823,35 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: ox(4),
     },
+    inviteChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(4),
+        height: ox(32),
+        paddingHorizontal: ox(10),
+        borderRadius: ox(16),
+        backgroundColor: '#FFFFFF',
+    },
+    inviteChipText: {
+        color: '#000000',
+        fontSize: ox(12),
+        fontWeight: '700',
+    },
+    invitePeopleBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: ox(8),
+        backgroundColor: '#FFFFFF',
+        borderRadius: ox(12),
+        paddingVertical: ox(12),
+        marginBottom: ox(16),
+    },
+    invitePeopleBtnText: {
+        color: '#000000',
+        fontSize: ox(14),
+        fontWeight: '700',
+    },
     headerActionButton: {
         width: ox(36),
         height: ox(36),
@@ -4514,6 +4947,22 @@ const styles = StyleSheet.create({
         fontSize: ox(15),
         lineHeight: ox(20),
         color: '#FFFFFF',
+    },
+    groupNoticeWrap: {
+        alignItems: 'center',
+        paddingHorizontal: ox(24),
+        paddingVertical: ox(8),
+    },
+    groupNoticeText: {
+        color: '#E2E8F0',
+        fontSize: ox(13),
+        textAlign: 'center',
+        lineHeight: ox(18),
+    },
+    groupSenderName: {
+        fontSize: ox(13),
+        fontWeight: '700',
+        marginBottom: ox(2),
     },
     messageText: {
         fontSize: ox(15),
@@ -5163,7 +5612,9 @@ const styles = StyleSheet.create({
         borderRadius: ox(999),
         paddingHorizontal: ox(7),
         paddingVertical: ox(3),
-        backgroundColor: 'rgba(255,255,255,0.92)',
+        backgroundColor: '#0B1220',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.16)',
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(4),
@@ -5172,7 +5623,7 @@ const styles = StyleSheet.create({
         fontSize: ox(12),
     },
     reactionCount: {
-        color: '#374151',
+        color: '#FFFFFF',
         fontSize: ox(10),
         fontWeight: '700',
     },
@@ -5290,6 +5741,79 @@ const styles = StyleSheet.create({
         fontSize: ox(12),
         lineHeight: ox(18),
         marginBottom: ox(16),
+    },
+    renameBox: {
+        marginBottom: ox(8),
+    },
+    renameInput: {
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.16)',
+        borderRadius: ox(12),
+        color: '#FFFFFF',
+        fontSize: ox(16),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
+    },
+    renameActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: ox(8),
+        marginTop: ox(8),
+    },
+    renameCancel: {
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
+    },
+    renameCancelText: {
+        color: '#94A3B8',
+        fontSize: ox(14),
+        fontWeight: '600',
+    },
+    renameSave: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: ox(10),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
+    },
+    renameSaveText: {
+        color: '#111827',
+        fontSize: ox(14),
+        fontWeight: '700',
+    },
+    memberSectionLabel: {
+        color: '#94A3B8',
+        fontSize: ox(12),
+        fontWeight: '700',
+        marginTop: ox(8),
+        marginBottom: ox(4),
+        paddingHorizontal: ox(16),
+    },
+    memberLoading: {
+        marginVertical: ox(12),
+    },
+    memberRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(12),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(8),
+    },
+    memberText: {
+        flex: 1,
+        minWidth: 0,
+    },
+    memberHandle: {
+        color: '#FFFFFF',
+        fontSize: ox(15),
+        fontWeight: '600',
+    },
+    memberRole: {
+        color: '#94A3B8',
+        fontSize: ox(12),
+        marginTop: ox(2),
+    },
+    memberActionOverlay: {
+        zIndex: 30,
     },
     leaveGroupBtn: {
         flexDirection: 'row',

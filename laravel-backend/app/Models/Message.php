@@ -75,6 +75,9 @@ class Message extends Model
         $array['source_post_id'] = $sourcePostId;
         $array['sourcePostId'] = $sourcePostId;
         $array['read'] = $this->read_at !== null;
+        if ($this->relationLoaded('reactions')) {
+            $array['reactions'] = self::groupedReactions($this->getRelation('reactions'));
+        }
 
         return $array;
     }
@@ -98,6 +101,25 @@ class Message extends Model
     public function replyToMessage()
     {
         return $this->belongsTo(Message::class, 'reply_to_message_id');
+    }
+
+    public function reactions()
+    {
+        return $this->hasMany(MessageReaction::class, 'message_id');
+    }
+
+    public static function groupedReactions($reactions): array
+    {
+        return collect($reactions)
+            ->groupBy('emoji')
+            ->map(function ($rows, $emoji) {
+                return [
+                    'emoji' => (string) $emoji,
+                    'users' => collect($rows)->pluck('user_handle')->filter()->values()->all(),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     /** Post this message shares/anchors to, when sent from a share sheet. */

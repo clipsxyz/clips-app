@@ -9,4 +9,5 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('fcm:prune')->weekly();
+Schedule::command('gazetteer:prune-notifications')->daily();
 

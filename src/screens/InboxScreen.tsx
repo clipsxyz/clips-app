@@ -67,11 +67,13 @@ import { getFollowedUsers } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
 import { notificationKindIonicon, notificationKindLabel } from '../utils/notificationKind';
 import { followRequestIdentity } from '../utils/followRequestNotification';
+import { groupInvitePresentation } from '../utils/groupInviteNotification';
 import {
     isFollowInboxNotification,
     isPostRelatedInboxNotification,
     resolveInboxNotificationRoute,
 } from '../utils/inboxNotificationNav';
+import { groupNotificationsIntoSections } from '../utils/notificationSections';
 import Avatar from '../components/Avatar';
 import {
     listConversations,
@@ -125,7 +127,7 @@ type InboxAlertConfig = {
 function isAlreadyHandledInviteError(error: unknown): boolean {
     const status = Number((error as { status?: number } | null)?.status || 0);
     const message = String((error as { message?: string } | null)?.message || '').toLowerCase();
-    if (status === 404 || status === 409) return true;
+    if (status === 404) return true;
     if (status === 400 && /pending|already|expired|no longer/.test(message)) return true;
     return /pending|already|not found|no longer/.test(message);
 }
@@ -195,7 +197,7 @@ function FadeCollapseRow({
             style={{
                 overflow: 'hidden',
                 opacity: progress,
-                maxHeight: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 240] }),
+                maxHeight: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 640] }),
                 transform: [
                     {
                         translateX: progress.interpolate({
@@ -405,7 +407,8 @@ export default function InboxScreen({ navigation, route }: any) {
     }, [user?.handle]);
 
     useEffect(() => {
-        if (activeTab !== 'insights' || !user?.handle) return;
+        if (!user?.handle) return;
+        if (activeTab !== 'insights' && activeTab !== 'notifications' && activeTab !== 'groups') return;
         void loadDataRef.current?.({ silent: true });
     }, [activeTab, user?.handle]);
 
@@ -528,17 +531,34 @@ export default function InboxScreen({ navigation, route }: any) {
                 };
             });
     }, [conversations, notificationPrefs, user?.handle]);
+    const pendingInviteIds = useMemo(
+        () => new Set(pendingInvites.map((invite) => invite.id)),
+        [pendingInvites],
+    );
     const allNotifications = useMemo(() => {
         return [
-            ...notifications.filter(
-                (n) =>
+            ...notifications.filter((n) => {
+                if (n.type === 'group_invite') {
+                    if (n.inviteStatus && n.inviteStatus !== 'pending') return false;
+                    if (n.chatGroupInviteId && pendingInviteIds.has(n.chatGroupInviteId)) return false;
+                }
+                return (
                     countsTowardInboxNotificationBadge(n.type) ||
                     isPostRelatedInboxNotification(n) ||
-                    isFollowInboxNotification(n),
-            ),
+                    isFollowInboxNotification(n)
+                );
+            }),
             ...activityNotifications,
         ].sort((a, b) => b.timestamp - a.timestamp);
-    }, [notifications, activityNotifications]);
+    }, [notifications, activityNotifications, pendingInviteIds]);
+    const notificationRows = useMemo(
+        () =>
+            groupNotificationsIntoSections(allNotifications).flatMap((section) => [
+                { kind: 'header' as const, id: `section-${section.id}`, label: section.label },
+                ...section.items.map((item) => ({ kind: 'notification' as const, item })),
+            ]),
+        [allNotifications],
+    );
     const inboxUnreadParts = inboxUnreadPartsFromLists(conversations, notifications);
     const unreadMessages = inboxUnreadParts.messages;
     const unreadGroups = inboxUnreadParts.groups;
@@ -877,7 +897,7 @@ export default function InboxScreen({ navigation, route }: any) {
         if (!user?.handle) return;
         try {
             await markAllNotificationsRead(user.handle);
-            setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+            await loadData({ silent: true });
         } catch (error) {
             console.error('Failed to mark all notifications read:', error);
         }
@@ -1504,22 +1524,143 @@ export default function InboxScreen({ navigation, route }: any) {
             {activeTab === 'notifications' ? (
                 <RNFlatList
                     key="notifications"
-                    data={allNotifications}
-                    keyExtractor={(item) => item.id}
+                    style={styles.listFlex}
+                    data={notificationRows}
+                    keyExtractor={(row) => (row.kind === 'header' ? row.id : row.item.id)}
                     keyboardShouldPersistTaps="handled"
                     removeClippedSubviews={false}
                     contentContainerStyle={styles.notificationListContent}
-                    ListHeaderComponent={
-                        unreadNotifications > 0 ? (
-                            <View style={styles.listActionRow}>
-                                <TouchableOpacity onPress={handleMarkAllRead}>
-                                    <Text style={styles.headerActionText}>Mark all as read</Text>
-                                </TouchableOpacity>
-                            </View>
-                        ) : null
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={() => { void refreshData(); }}
+                            tintColor="#FFFFFF"
+                        />
                     }
-                    renderItem={({ item }) => {
+                    ListHeaderComponent={
+                        <View>
+                            {pendingInvites.length > 0 ? (
+                                <View style={styles.pendingInvitesWrap}>
+                                    <Text style={styles.notificationSectionHeader}>Group invites</Text>
+                                    {pendingInvites.map((invite) => {
+                                        const inviterHandle = pendingInviteInviterHandle(invite);
+                                        const groupName = pendingInviteGroupName(invite);
+                                        return (
+                                            <View key={invite.id} style={[styles.item, styles.groupInviteCard]}>
+                                                <View style={styles.groupInviteTop}>
+                                                    <Avatar
+                                                        src={
+                                                            invite.inviter?.avatar_url ||
+                                                            (inviterHandle ? getAvatarForHandle(inviterHandle) : undefined)
+                                                        }
+                                                        name={invite.inviter?.display_name || inviterHandle || groupName}
+                                                        size={ox(40)}
+                                                        cornerRadius={ox(12)}
+                                                    />
+                                                    <View style={styles.itemContent}>
+                                                        <Text style={styles.itemTitle} numberOfLines={1}>
+                                                            {invite.inviter?.display_name || inviterHandle || 'Someone'}
+                                                        </Text>
+                                                        {inviterHandle ? (
+                                                            <Text style={styles.itemMessage} numberOfLines={1}>{inviterHandle}</Text>
+                                                        ) : null}
+                                                        <Text style={styles.itemMessage}>invited you to join</Text>
+                                                        <Text style={styles.groupInviteName} numberOfLines={2}>{groupName}</Text>
+                                                    </View>
+                                                </View>
+                                                {renderInviteButtons(invite.id)}
+                                            </View>
+                                        );
+                                    })}
+                                </View>
+                            ) : null}
+                            {unreadNotifications > 0 ? (
+                                <View style={styles.listActionRow}>
+                                    <TouchableOpacity onPress={handleMarkAllRead}>
+                                        <Text style={styles.headerActionText}>Mark all as read</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ) : null}
+                        </View>
+                    }
+                    renderItem={({ item: entry }) => {
+                        if (entry.kind === 'header') {
+                            return <Text style={styles.notificationSectionHeader}>{entry.label}</Text>;
+                        }
+                        const item = entry.item;
                         const inviteId = item.type === 'group_invite' ? item.chatGroupInviteId : undefined;
+                        if (item.type === 'group_invite') {
+                            const invite = groupInvitePresentation(item);
+                            const canRespond = !!inviteId && (!item.inviteStatus || item.inviteStatus === 'pending');
+                            const card = (
+                                <View style={[styles.item, styles.groupInviteCard, !item.read && styles.itemUnread]}>
+                                    <View style={styles.groupInviteTop}>
+                                        <View style={styles.itemIcon}>
+                                            <View style={styles.notificationAvatarWrap}>
+                                                <Avatar
+                                                    src={item.fromAvatarUrl || dmAvatarMap[item.fromHandle] || getAvatarForHandle(item.fromHandle)}
+                                                    name={invite.title}
+                                                    size={ox(40)}
+                                                    cornerRadius={ox(12)}
+                                                />
+                                                <View style={styles.notificationTypeBadge}>
+                                                    <Icon name={getNotificationIcon(item)} size={ox(10)} color="#111827" />
+                                                </View>
+                                                {!item.read ? <View style={styles.unreadDot} pointerEvents="none" /> : null}
+                                            </View>
+                                        </View>
+                                        <View style={styles.itemContent}>
+                                            <Text style={styles.itemTitle} numberOfLines={1}>{invite.title}</Text>
+                                            {invite.showHandle ? (
+                                                <Text style={styles.itemMessage} numberOfLines={1}>{invite.handle}</Text>
+                                            ) : null}
+                                            <Text style={styles.itemMessage} numberOfLines={1}>invited you to join</Text>
+                                            <Text style={styles.groupInviteName} numberOfLines={2}>{invite.groupName}</Text>
+                                            <Text style={styles.itemTime}>{timeAgo(item.timestamp)}</Text>
+                                        </View>
+                                        <View style={styles.itemTrailing}>
+                                            <View style={styles.notifKindChip}>
+                                                <Text style={styles.notifKindChipText}>{notificationKindLabel(item)}</Text>
+                                            </View>
+                                            {!item.id.startsWith('conv-notif-') && (
+                                                <TouchableOpacity
+                                                    onPress={() =>
+                                                        setInboxAlert({
+                                                            title: 'Delete notification',
+                                                            message: 'Remove this notification?',
+                                                            icon: 'alert',
+                                                            showCancelButton: true,
+                                                            cancelButtonText: 'Cancel',
+                                                            confirmButtonText: 'Delete',
+                                                            confirmDestructive: true,
+                                                            onConfirm: () => {
+                                                                void handleDeleteNotification(item.id);
+                                                            },
+                                                        })
+                                                    }
+                                                    style={styles.rowActionIcon}
+                                                    hitSlop={8}
+                                                >
+                                                    <Icon name="trash-outline" size={ox(18)} color="#9CA3AF" />
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    </View>
+                                    {canRespond ? renderInviteButtons(inviteId) : null}
+                                </View>
+                            );
+                            if (!inviteId) return card;
+                            return (
+                                <FadeCollapseRow
+                                    exiting={exitingInviteId === inviteId}
+                                    onExited={() => {
+                                        finishInviteExit(inviteId);
+                                    }}
+                                >
+                                    {card}
+                                </FadeCollapseRow>
+                            );
+                        }
                         const requester = item.type === 'follow_request' ? followRequestIdentity(item) : null;
                         const row = (
                         <Pressable
@@ -1531,13 +1672,6 @@ export default function InboxScreen({ navigation, route }: any) {
                             ]}
                         >
                             <View style={styles.itemIcon}>
-                                <TouchableOpacity
-                                    disabled={item.type !== 'follow_request' || !item.fromHandle}
-                                    activeOpacity={item.type === 'follow_request' ? 0.7 : 1}
-                                    onPress={() => {
-                                        if (item.type === 'follow_request') openRequesterProfile(item.fromHandle);
-                                    }}
-                                >
                                 <View style={styles.notificationAvatarWrap}>
                                     <Avatar
                                         src={item.fromAvatarUrl || dmAvatarMap[item.fromHandle] || getAvatarForHandle(item.fromHandle)}
@@ -1554,15 +1688,10 @@ export default function InboxScreen({ navigation, route }: any) {
                                     </View>
                                     {!item.read ? <View style={styles.unreadDot} pointerEvents="none" /> : null}
                                 </View>
-                                </TouchableOpacity>
                             </View>
                             <View style={styles.itemContent}>
                                 {requester ? (
-                                    <TouchableOpacity
-                                        activeOpacity={0.7}
-                                        disabled={!item.fromHandle}
-                                        onPress={() => openRequesterProfile(item.fromHandle)}
-                                    >
+                                    <View>
                                         <Text style={styles.itemTitle} numberOfLines={1}>
                                             {requester.title}
                                         </Text>
@@ -1579,7 +1708,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                                 Private profile
                                             </Text>
                                         ) : null}
-                                    </TouchableOpacity>
+                                    </View>
                                 ) : (
                                     <>
                                         <Text style={styles.itemTitle} numberOfLines={1}>
@@ -1855,6 +1984,7 @@ export default function InboxScreen({ navigation, route }: any) {
             ) : activeTab === 'groups' ? (
                 <FlatList
                     key="groups"
+                    style={styles.listFlex}
                     extraData={storyViewedVersion}
                     data={groupMessages}
                     keyExtractor={(item, idx) => `group-${item.chatGroupId || idx}`}
@@ -1930,6 +2060,7 @@ export default function InboxScreen({ navigation, route }: any) {
                 <>
                 <FlatList
                     key={`messages-${messageFilter}`}
+                    style={styles.listFlex}
                     extraData={storyViewedVersion}
                     data={
                         showMessageSections
@@ -2113,6 +2244,9 @@ const styles = StyleSheet.create({
         paddingBottom: ox(8),
         paddingTop: ox(4),
     },
+    listFlex: {
+        flex: 1,
+    },
     notificationListContent: {
         paddingHorizontal: ox(12),
         paddingBottom: ox(24),
@@ -2185,11 +2319,13 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     tab: {
+        flex: 1,
+        minWidth: 0,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         paddingVertical: ox(8),
-        paddingHorizontal: ox(12),
+        paddingHorizontal: ox(6),
         gap: ox(4),
         borderRadius: ox(16),
         backgroundColor: 'rgba(255, 255, 255, 0.06)',
@@ -2210,9 +2346,8 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     badge: {
-        backgroundColor: 'rgba(16, 185, 129, 0.20)',
-        borderWidth: 1,
-        borderColor: 'rgba(16, 185, 129, 0.45)',
+        flexShrink: 0,
+        backgroundColor: '#FFFFFF',
         borderRadius: ox(12),
         minWidth: ox(16),
         height: ox(16),
@@ -2221,8 +2356,23 @@ const styles = StyleSheet.create({
         paddingHorizontal: ox(4),
     },
     badgeText: {
-        color: '#34D399',
+        color: '#111827',
         fontSize: ox(9),
+        fontWeight: '700',
+    },
+    groupInviteCard: {
+        flexDirection: 'column',
+        alignItems: 'stretch',
+    },
+    groupInviteTop: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: ox(10),
+    },
+    groupInviteName: {
+        marginTop: ox(2),
+        color: '#FFFFFF',
+        fontSize: ox(15),
         fontWeight: '700',
     },
     item: {
@@ -2328,6 +2478,14 @@ const styles = StyleSheet.create({
     },
     moreBtn: {
         padding: ox(6),
+    },
+    notificationSectionHeader: {
+        color: '#9CA3AF',
+        fontSize: ox(13),
+        fontWeight: '700',
+        paddingHorizontal: ox(4),
+        paddingTop: ox(14),
+        paddingBottom: ox(6),
     },
     sectionHeader: {
         color: '#9CA3AF',

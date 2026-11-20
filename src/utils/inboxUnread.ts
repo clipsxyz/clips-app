@@ -23,10 +23,6 @@ export type InboxUnreadNotification = {
     type?: string | null;
 };
 
-function sameHandle(a?: string | null, b?: string | null): boolean {
-    return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
-}
-
 export function isThreadActivityNotificationType(type?: string | null): boolean {
     return THREAD_ACTIVITY_NOTIFICATION_TYPES.has(String(type || '').trim());
 }
@@ -41,9 +37,9 @@ export function countsTowardInboxNotificationBadge(type?: string | null): boolea
 
 /**
  * Unread for one inbox row.
- * Last outbound message means the viewer already opened/sent in the thread, so
- * leftover server `unread_count` must not keep the pill/tab badged.
- * Explicit "mark unread" (override > 0) still wins.
+ * The count is incoming messages the viewer has not opened. A later reply from
+ * the viewer does not clear those. Message requests stay off this list.
+ * Explicit "mark unread" still wins when the server count is zeroed.
  */
 export function effectiveThreadUnread(input: {
     unread: number;
@@ -53,10 +49,8 @@ export function effectiveThreadUnread(input: {
     markedUnread?: boolean;
 }): number {
     const unread = Math.max(0, Math.floor(Number(input.unread) || 0));
-    if (unread === 0) return 0;
     if (input.isRequest) return 0;
-    if (input.markedUnread) return unread;
-    if (sameHandle(input.lastSenderHandle, input.viewerHandle)) return 0;
+    if (input.markedUnread) return Math.max(unread, 1);
     return unread;
 }
 

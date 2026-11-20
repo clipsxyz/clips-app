@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, useWindowDimensions } from 'react-native';
 import { Swipeable, TouchableOpacity as SwipeActionButton } from 'react-native-gesture-handler';
 import Avatar from './Avatar';
 import StoryRingAvatar from './StoryRingAvatar.native';
@@ -121,6 +121,9 @@ export default function InboxConversationRow({
     const timestamp = compactInboxTime(conv.lastMessage?.timestamp);
     const unread = conv.unread || 0;
     const storyHandle = isGroup ? '' : conv.otherHandle;
+    const { width: windowWidth } = useWindowDimensions();
+    const actionCount = [onPin, onMarkRead || onMarkUnread, onToggleMute, onDelete].filter(Boolean).length;
+    const actionWidth = Math.max(48, Math.min(64, Math.floor((windowWidth * 0.62) / Math.max(actionCount, 1))));
 
     useEffect(() => {
         if (isSwipeOpen) {
@@ -158,14 +161,14 @@ export default function InboxConversationRow({
             return (
                 <SwipeActionButton
                     key={key || label}
-                    style={[styles.swipeAction, { backgroundColor: bg }]}
+                    style={[styles.swipeAction, { backgroundColor: bg, width: actionWidth }]}
                     onPress={() => {
                         onAction();
                         closeSwipe();
                     }}
                     activeOpacity={0.85}
                 >
-                    <Text style={styles.swipeActionText}>{label}</Text>
+                    <Text style={styles.swipeActionText} numberOfLines={2}>{label}</Text>
                 </SwipeActionButton>
             );
         };
@@ -225,14 +228,25 @@ export default function InboxConversationRow({
 
                 <View style={styles.contentContainer}>
                     <View style={styles.topRow}>
-                        <Text numberOfLines={1} style={styles.nameText}>
+                        <Text numberOfLines={1} style={[styles.nameText, unread > 0 && styles.nameTextUnread]}>
                             {name}
                         </Text>
                         <Text style={styles.timeText}>{timestamp}</Text>
                     </View>
-                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.previewText}>
-                        {lastMessage}
-                    </Text>
+                    <View style={styles.previewRow}>
+                        <Text
+                            ellipsizeMode="tail"
+                            numberOfLines={1}
+                            style={[styles.previewText, unread > 0 && styles.previewTextUnread]}
+                        >
+                            {lastMessage}
+                        </Text>
+                        {unread > 0 ? (
+                            <View style={styles.unreadBadge}>
+                                <Text style={styles.unreadBadgeText}>{unread > 99 ? '99+' : String(unread)}</Text>
+                            </View>
+                        ) : null}
+                    </View>
                 </View>
             </TouchableOpacity>
         </Swipeable>
@@ -280,26 +294,55 @@ const styles = StyleSheet.create({
         minWidth: 0,
         marginRight: 8,
     },
+    nameTextUnread: {
+        fontWeight: '700',
+    },
     timeText: {
         fontSize: 13,
         color: '#8E8E93',
     },
+    previewRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
     previewText: {
+        flex: 1,
+        minWidth: 0,
         fontSize: 14,
         color: '#8E8E93',
+    },
+    previewTextUnread: {
+        color: '#FFFFFF',
+        fontWeight: '600',
+    },
+    unreadBadge: {
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        paddingHorizontal: 5,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    unreadBadgeText: {
+        color: '#000000',
+        fontSize: 11,
+        fontWeight: '700',
     },
     swipeActions: {
         flexDirection: 'row',
         alignItems: 'stretch',
     },
     swipeAction: {
-        width: 56,
         justifyContent: 'center',
         alignItems: 'center',
+        paddingHorizontal: 4,
     },
     swipeActionText: {
         color: '#FFFFFF',
-        fontSize: 11,
+        fontSize: 10,
         fontWeight: '600',
+        textAlign: 'center',
     },
 });
