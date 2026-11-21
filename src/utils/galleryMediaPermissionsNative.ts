@@ -82,3 +82,13 @@ export async function ensureCameraCapturePermission(kind: 'photo' | 'video'): Pr
     if (kind !== 'video') return true;
     return ensureMicrophonePermission();
 }
+
+/** Ask before the in-app camera sheet opens, so the system dialog is not hidden behind it. */
+export async function requestInAppCameraAccess(kind: 'photo' | 'video'): Promise<boolean> {
+    if (Platform.OS !== 'android') return true;
+    await new Promise((resolve) => setTimeout(resolve, 280));
+    const cameraOk = await ensureCameraPermission();
+    if (!cameraOk) return false;
+    if (kind === 'video') await ensureMicrophonePermission();
+    return true;
+}

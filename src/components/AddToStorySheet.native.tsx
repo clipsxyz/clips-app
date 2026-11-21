@@ -2,10 +2,9 @@ import React, { useCallback, useState } from 'react';
 import type { Asset } from 'react-native-image-picker';
 import GazetteerAlertSheet from './GazetteerAlertSheet.native';
 import GazetteerMenuSheet from './GazetteerMenuSheet.native';
-import { launchNativeCamera } from '../utils/launchNativeCamera';
-import { ensureCameraCapturePermission } from '../utils/galleryMediaPermissionsNative';
+import CreateCameraSheet, { type CameraCaptureMode, type CapturedCameraMedia } from './CreateCameraSheet.native';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
-import { MAX_FEED_VIDEO_DURATION_SEC } from '../utils/validateLocalVideoNative';
+import { requestInAppCameraAccess } from '../utils/galleryMediaPermissionsNative';
 
 type StoryNavigation = {
     navigate: (name: string, params?: Record<string, unknown>) => void;
@@ -43,6 +42,7 @@ export default function AddToStorySheet({
     navigation: StoryNavigation;
 }) {
     const [alert, setAlert] = useState<AlertState | null>(null);
+    const [cameraMode, setCameraMode] = useState<CameraCaptureMode | null>(null);
 
     const openComposer = useCallback(
         (asset: Asset) => {
@@ -91,53 +91,9 @@ export default function AddToStorySheet({
         }
     }, [openComposer]);
 
-    const pickCamera = useCallback(
-        async (capture: 'photo' | 'video') => {
-            const allowed = await ensureCameraCapturePermission(capture);
-            if (!allowed) {
-                setAlert({
-                    title: capture === 'video' ? 'Camera and microphone needed' : 'Camera access needed',
-                    message:
-                        capture === 'video'
-                            ? 'Allow camera and microphone in Settings to record a video for your story.'
-                            : 'Allow camera access in Settings to take a photo for your story.',
-                    icon: 'alert',
-                });
-                return;
-            }
-            launchNativeCamera(
-                {
-                    mediaType: capture,
-                    quality: capture === 'video' ? 0.8 : 0.9,
-                    saveToPhotos: true,
-                    cameraType: 'back',
-                    durationLimitSec: capture === 'video' ? MAX_FEED_VIDEO_DURATION_SEC : 0,
-                },
-                (response) => {
-                    if (response.didCancel) return;
-                    if (response.errorCode) {
-                        setAlert({
-                            title: 'Camera error',
-                            message: response.errorMessage || 'Could not open the camera.',
-                            icon: 'alert',
-                        });
-                        return;
-                    }
-                    const supported = (response.assets || []).filter(assetIsSupported);
-                    if (supported.length === 0) {
-                        setAlert({
-                            title: capture === 'video' ? 'No video' : 'No photo',
-                            message:
-                                capture === 'video'
-                                    ? 'No video was recorded. Try again.'
-                                    : 'No photo was captured. Try again.',
-                            icon: 'alert',
-                        });
-                        return;
-                    }
-                    openComposer(supported[0]);
-                },
-            );
+    const openCaptured = useCallback(
+        (media: CapturedCameraMedia) => {
+            openComposer(media);
         },
         [openComposer],
     );
@@ -160,14 +116,36 @@ export default function AddToStorySheet({
                         label: 'Take photo',
                         icon: 'camera-outline',
                         onPress: () => {
-                            void pickCamera('photo');
+                            void (async () => {
+                                const allowed = await requestInAppCameraAccess('photo');
+                                if (!allowed) {
+                                    setAlert({
+                                        title: 'Camera access needed',
+                                        message: 'Allow the camera so you can take a photo for your Shorts.',
+                                        icon: 'alert',
+                                    });
+                                    return;
+                                }
+                                setCameraMode('photo');
+                            })();
                         },
                     },
                     {
                         label: 'Record video',
                         icon: 'videocam-outline',
                         onPress: () => {
-                            void pickCamera('video');
+                            void (async () => {
+                                const allowed = await requestInAppCameraAccess('video');
+                                if (!allowed) {
+                                    setAlert({
+                                        title: 'Camera access needed',
+                                        message: 'Allow the camera so you can record a video for your Shorts. Video also asks for the microphone.',
+                                        icon: 'alert',
+                                    });
+                                    return;
+                                }
+                                setCameraMode('video');
+                            })();
                         },
                     },
                     {
@@ -186,6 +164,15 @@ export default function AddToStorySheet({
                 confirmButtonText="OK"
                 onConfirm={() => setAlert(null)}
                 onDismiss={() => setAlert(null)}
+            />
+            <CreateCameraSheet
+                visible={cameraMode != null}
+                mode={cameraMode ?? 'photo'}
+                onClose={() => setCameraMode(null)}
+                onCapture={(media) => {
+                    setCameraMode(null);
+                    openCaptured(media);
+                }}
             />
         </>
     );

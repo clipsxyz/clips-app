@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { IoCameraOutline, IoImagesOutline, IoLinkOutline, IoVideocamOutline } from 'react-icons/io5';
 import GazetteerAlertSheet from './GazetteerAlertSheet';
 import GazetteerMenuSheet from './GazetteerMenuSheet';
+import CreateCameraSheet, { type CameraCaptureMode } from './CreateCameraSheet';
 import { holdFeedAudio } from '../utils/feedAudioHold';
 
 type Props = {
@@ -42,6 +43,7 @@ function storyFileKind(file: File): 'image' | 'video' | null {
 /** Same “Add to your story” card as Create, shown over the current screen. */
 export default function AddToStorySheet({ visible, onDismiss }: Props) {
     const navigate = useNavigate();
+    const [cameraMode, setCameraMode] = React.useState<CameraCaptureMode | null>(null);
     const libraryRef = React.useRef<HTMLInputElement | null>(null);
     const photoRef = React.useRef<HTMLInputElement | null>(null);
     const videoRef = React.useRef<HTMLInputElement | null>(null);
@@ -190,12 +192,12 @@ export default function AddToStorySheet({ visible, onDismiss }: Props) {
                     {
                         label: 'Take photo',
                         icon: <IoCameraOutline size={20} color="#FFFFFF" />,
-                        onPress: () => openPicker(photoRef.current, true),
+                        onPress: () => setCameraMode('photo'),
                     },
                     {
                         label: 'Record video',
                         icon: <IoVideocamOutline size={20} color="#FFFFFF" />,
-                        onPress: () => openPicker(videoRef.current, true),
+                        onPress: () => setCameraMode('video'),
                     },
                     {
                         label: 'Paste a link',
@@ -213,6 +215,17 @@ export default function AddToStorySheet({ visible, onDismiss }: Props) {
                 confirmButtonText="OK"
                 onConfirm={() => setAlert(null)}
                 onDismiss={() => setAlert(null)}
+            />
+            <CreateCameraSheet
+                visible={cameraMode != null}
+                mode={cameraMode ?? 'photo'}
+                onClose={() => setCameraMode(null)}
+                onCapture={(file) => {
+                    setCameraMode(null);
+                    const transfer = new DataTransfer();
+                    transfer.items.add(file);
+                    void ingestStoryFiles(transfer.files);
+                }}
             />
             <input
                 ref={libraryRef}

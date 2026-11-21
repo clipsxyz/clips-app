@@ -24,6 +24,8 @@ import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 import { saveDraft } from '../api/drafts.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
+import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet.native';
+import { requestInAppCameraAccess } from '../utils/galleryMediaPermissionsNative';
 import {
     failedToSaveSheet,
     nothingToSaveSheet,
@@ -121,6 +123,7 @@ export default function CreateScreen({ navigation, route }: any) {
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
+    const [cameraCapture, setCameraCapture] = useState<CameraCaptureMode | null>(null);
     const [mediaSourceMenu, setMediaSourceMenu] = useState<{
         title: string;
         subtitle?: string;
@@ -836,28 +839,38 @@ export default function CreateScreen({ navigation, route }: any) {
                                             label: 'Take photo',
                                             icon: 'camera-outline',
                                             onPress: () => {
-                                                navigation.replace('GalleryPreview', {
-                                                    autoStart: {
-                                                        source: 'camera',
-                                                        kind: 'single',
-                                                        mediaType: 'photo',
-                                                    },
-                                                    story24: isStory24Flow || undefined,
-                                                });
+                                                void (async () => {
+                                                    const allowed = await requestInAppCameraAccess('photo');
+                                                    if (!allowed) {
+                                                        setDraftAlert({
+                                                            title: 'Camera access needed',
+                                                            message: 'Allow the camera so you can take a photo here.',
+                                                            icon: 'alert',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                        return;
+                                                    }
+                                                    setCameraCapture('photo');
+                                                })();
                                             },
                                         },
                                         {
                                             label: 'Record video',
                                             icon: 'videocam-outline',
                                             onPress: () => {
-                                                navigation.replace('GalleryPreview', {
-                                                    autoStart: {
-                                                        source: 'camera',
-                                                        kind: 'single',
-                                                        mediaType: 'video',
-                                                    },
-                                                    story24: isStory24Flow || undefined,
-                                                });
+                                                void (async () => {
+                                                    const allowed = await requestInAppCameraAccess('video');
+                                                    if (!allowed) {
+                                                        setDraftAlert({
+                                                            title: 'Camera access needed',
+                                                            message: 'Allow the camera so you can record a video here. Video also asks for the microphone.',
+                                                            icon: 'alert',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                        return;
+                                                    }
+                                                    setCameraCapture('video');
+                                                })();
                                             },
                                         },
                                         ...(isStory24Flow
@@ -889,28 +902,38 @@ export default function CreateScreen({ navigation, route }: any) {
                                             label: 'Take photo',
                                             icon: 'camera-outline',
                                             onPress: () => {
-                                                navigation.replace('GalleryPreview', {
-                                                    autoStart: {
-                                                        source: 'camera',
-                                                        kind: 'single',
-                                                        mediaType: 'photo',
-                                                    },
-                                                    story24: isStory24Flow || undefined,
-                                                });
+                                                void (async () => {
+                                                    const allowed = await requestInAppCameraAccess('photo');
+                                                    if (!allowed) {
+                                                        setDraftAlert({
+                                                            title: 'Camera access needed',
+                                                            message: 'Allow the camera so you can take a photo here.',
+                                                            icon: 'alert',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                        return;
+                                                    }
+                                                    setCameraCapture('photo');
+                                                })();
                                             },
                                         },
                                         {
                                             label: 'Record video',
                                             icon: 'videocam-outline',
                                             onPress: () => {
-                                                navigation.replace('GalleryPreview', {
-                                                    autoStart: {
-                                                        source: 'camera',
-                                                        kind: 'single',
-                                                        mediaType: 'video',
-                                                    },
-                                                    story24: isStory24Flow || undefined,
-                                                });
+                                                void (async () => {
+                                                    const allowed = await requestInAppCameraAccess('video');
+                                                    if (!allowed) {
+                                                        setDraftAlert({
+                                                            title: 'Camera access needed',
+                                                            message: 'Allow the camera so you can record a video here. Video also asks for the microphone.',
+                                                            icon: 'alert',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                        return;
+                                                    }
+                                                    setCameraCapture('video');
+                                                })();
                                             },
                                         },
                                     ],
@@ -1279,6 +1302,35 @@ export default function CreateScreen({ navigation, route }: any) {
                 subtitle={mediaSourceMenu?.subtitle}
                 options={mediaSourceMenu?.options ?? []}
                 onDismiss={() => setMediaSourceMenu(null)}
+            />
+            <CreateCameraSheet
+                visible={cameraCapture != null}
+                mode={cameraCapture ?? 'photo'}
+                onClose={() => setCameraCapture(null)}
+                onCapture={(media) => {
+                    const isVideo = media.type.startsWith('video');
+                    setCameraCapture(null);
+                    if (isStory24Flow) {
+                        navigation.replace('Story24Composer', {
+                            mediaUrl: media.uri,
+                            mediaType: isVideo ? 'video' : 'image',
+                            videoCoverTime: isVideo ? 0 : undefined,
+                            videoDurationSec:
+                                isVideo && media.duration && media.duration > 0
+                                    ? Math.max(0.1, Math.floor(media.duration * 10) / 10)
+                                    : undefined,
+                        });
+                        return;
+                    }
+                    navigation.replace('GalleryPreview', {
+                        mediaUrl: media.uri,
+                        mediaType: isVideo ? 'video' : 'image',
+                        videoDuration:
+                            isVideo && media.duration && media.duration > 0
+                                ? Math.max(0.1, Math.floor(media.duration * 10) / 10)
+                                : undefined,
+                    });
+                }}
             />
         </GazetteerScreenShell>
     );

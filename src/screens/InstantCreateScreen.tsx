@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
-import { launchNativeCamera } from '../utils/launchNativeCamera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
@@ -20,6 +19,7 @@ import CreateGroupModal from '../components/CreateGroupModal.native';
 import CommunityGroupOnboardingSheet from '../components/CommunityGroupOnboardingSheet.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
+import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet.native';
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
 import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarousel.native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -30,12 +30,9 @@ import {
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
-import {
-    ensureCameraCapturePermission,
-} from '../utils/galleryMediaPermissionsNative';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
+import { requestInAppCameraAccess } from '../utils/galleryMediaPermissionsNative';
 import { CAROUSEL_MAX_ITEMS as MAX_GALLERY_ITEMS } from '../constants';
-import { MAX_FEED_VIDEO_DURATION_SEC } from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 type PickerMode = 'feed' | 'story24';
@@ -89,9 +86,10 @@ type OrbitModeItemProps = {
     orbitAnim: Animated.Value;
     centeredMode: CreateModeId;
     onPress: (item: (typeof CREATE_MODE_ITEMS)[number], idx: number, isCentered: boolean) => void;
+    lifted?: boolean;
 };
 
-function OrbitModeItem({ item, idx, orbitAnim, centeredMode, onPress }: OrbitModeItemProps) {
+function OrbitModeItem({ item, idx, orbitAnim, centeredMode, onPress, lifted = true }: OrbitModeItemProps) {
     const orbitRotationDeg = Animated.multiply(orbitAnim, -STEP_DEG);
     const angleDeg = Animated.add(Animated.multiply(idx, STEP_DEG), orbitRotationDeg);
     const isCentered = centeredMode === item.id;
@@ -149,6 +147,7 @@ function OrbitModeItem({ item, idx, orbitAnim, centeredMode, onPress }: OrbitMod
                                 styles.modeTile,
                                 isCentered ? styles.modeTileActive : styles.modeTileIdle,
                                 isCentered ? styles.modeTileLarge : styles.modeTileSmall,
+                                !lifted && styles.flat,
                             ]}
                         >
                             {isCentered ? (
@@ -185,6 +184,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [communityOnboardingOpen, setCommunityOnboardingOpen] = useState(false);
     const [hubAlert, setHubAlert] = useState<HubAlertConfig | null>(null);
+    const [cameraSheet, setCameraSheet] = useState<{ picker: PickerMode; capture: CameraCaptureMode } | null>(null);
     const [mediaSourceMenu, setMediaSourceMenu] = useState<{
         title: string;
         subtitle?: string;
@@ -375,61 +375,6 @@ export default function InstantCreateScreen({ navigation, route }: any) {
         [navigateFromAssets],
     );
 
-    const pickCameraMedia = useCallback(
-        async (mode: PickerMode = 'feed', capture: 'photo' | 'video' = 'photo') => {
-            const allowed = await ensureCameraCapturePermission(capture);
-            if (!allowed) {
-                setHubAlert({
-                    title: capture === 'video' ? 'Camera and microphone needed' : 'Camera access needed',
-                    message:
-                        capture === 'video'
-                            ? 'Allow camera and microphone in Settings to record a video for your post.'
-                            : 'Allow camera access in Settings to take a photo for your post.',
-                    icon: 'alert',
-                    confirmButtonText: 'OK',
-                });
-                return;
-            }
-            launchNativeCamera(
-                {
-                    mediaType: capture,
-                    quality: capture === 'video' ? 0.8 : 0.9,
-                    saveToPhotos: true,
-                    cameraType: 'back',
-                    durationLimitSec: capture === 'video' ? MAX_FEED_VIDEO_DURATION_SEC : 0,
-                },
-                (response) => {
-                    if (response.didCancel) return;
-                    if (response.errorCode) {
-                        setHubAlert({
-                            title: 'Camera error',
-                            message: response.errorMessage || 'Could not open the camera.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-                    const rawAssets = response.assets || [];
-                    const supported = rawAssets.filter(assetIsSupportedGalleryItem);
-                    if (supported.length === 0) {
-                        setHubAlert({
-                            title: capture === 'video' ? 'No video' : 'No photo',
-                            message:
-                                capture === 'video'
-                                    ? 'No video was recorded. Try again.'
-                                    : 'No photo was captured. Try again.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-                    void navigateFromAssets(supported.slice(0, 1), mode, false);
-                },
-            );
-        },
-        [navigateFromAssets],
-    );
-
     /** System gallery has no camera tab — offer library, camera, and (for stories) a pasted link. */
     const openMediaSourceMenu = useCallback(
         (mode: PickerMode = 'feed') => {
@@ -446,12 +391,40 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                     {
                         label: 'Take photo',
                         icon: 'camera-outline',
-                        onPress: () => void pickCameraMedia(mode, 'photo'),
+                        onPress: () => {
+                            void (async () => {
+                                const allowed = await requestInAppCameraAccess('photo');
+                                if (!allowed) {
+                                    setHubAlert({
+                                        title: 'Camera access needed',
+                                        message: 'Allow the camera so you can take a photo here.',
+                                        icon: 'alert',
+                                        confirmButtonText: 'OK',
+                                    });
+                                    return;
+                                }
+                                setCameraSheet({ picker: mode, capture: 'photo' });
+                            })();
+                        },
                     },
                     {
                         label: 'Record video',
                         icon: 'videocam-outline',
-                        onPress: () => void pickCameraMedia(mode, 'video'),
+                        onPress: () => {
+                            void (async () => {
+                                const allowed = await requestInAppCameraAccess('video');
+                                if (!allowed) {
+                                    setHubAlert({
+                                        title: 'Camera access needed',
+                                        message: 'Allow the camera so you can record a video here. Video also asks for the microphone.',
+                                        icon: 'alert',
+                                        confirmButtonText: 'OK',
+                                    });
+                                    return;
+                                }
+                                setCameraSheet({ picker: mode, capture: 'video' });
+                            })();
+                        },
                     },
                     ...(isStory
                         ? [
@@ -465,7 +438,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                 ],
             });
         },
-        [navigation, pickCameraMedia, pickGalleryMedia],
+        [navigation, pickGalleryMedia],
     );
 
     useEffect(() => {
@@ -560,7 +533,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
             <View style={styles.body}>
                 <View style={styles.orbitZone} {...dialPanResponder.panHandlers}>
                     <View style={styles.orbitStage}>
-                        <View style={styles.avatarRing}>
+                        <View style={[styles.avatarRing, cameraSheet != null && styles.flat]}>
                             <View style={styles.avatarInner}>
                                 <Avatar
                                     src={user?.avatarUrl}
@@ -578,13 +551,17 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                                 orbitAnim={orbitAnim}
                                 centeredMode={centeredMode}
                                 onPress={handleModePress}
+                                lifted={cameraSheet == null}
                             />
                         ))}
                     </View>
                 </View>
 
                 <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-                    <CreateSourceAppsCarouselNative onExplainTap={openGallerySourceExplainer} />
+                    <CreateSourceAppsCarouselNative
+                        onExplainTap={openGallerySourceExplainer}
+                        lifted={cameraSheet == null}
+                    />
                     <Text style={styles.helperText}>
                         Rotate to choose · top icon is active · tap to open
                     </Text>
@@ -637,6 +614,16 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                 subtitle={mediaSourceMenu?.subtitle}
                 options={mediaSourceMenu?.options ?? []}
                 onDismiss={() => setMediaSourceMenu(null)}
+            />
+            <CreateCameraSheet
+                visible={cameraSheet != null}
+                mode={cameraSheet?.capture ?? 'photo'}
+                onClose={() => setCameraSheet(null)}
+                onCapture={(media) => {
+                    const picker = cameraSheet?.picker ?? 'feed';
+                    setCameraSheet(null);
+                    void navigateFromAssets([media], picker, false);
+                }}
             />
             </LinearGradient>
         </GazetteerScreenShell>
@@ -708,6 +695,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'visible',
+    },
+    flat: {
+        elevation: 0,
     },
     avatarRing: {
         position: 'absolute',

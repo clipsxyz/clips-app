@@ -23,6 +23,7 @@ const SOURCES = [
 type Props = {
     onExplainTap: (sourceKey?: (typeof SOURCES)[number]['key']) => void;
     shareLabel?: string;
+    lifted?: boolean;
 };
 
 const SLOT = 34;
@@ -111,6 +112,7 @@ function SourceIcon({ sourceKey }: { sourceKey: (typeof SOURCES)[number]['key'] 
 export default function CreateSourceAppsCarouselNative({
     onExplainTap,
     shareLabel = 'Upload',
+    lifted = true,
 }: Props) {
     const scrollRef = useRef<ScrollView | null>(null);
     const pausedRef = useRef(false);
@@ -128,7 +130,7 @@ export default function CreateSourceAppsCarouselNative({
     return (
         <TouchableOpacity
             activeOpacity={0.9}
-            style={styles.pill}
+            style={[styles.pill, !lifted && styles.pillFlat]}
             onPress={() => {
                 const key = SOURCES[indexRef.current]?.key ?? 'tiktok';
                 onExplainTap(key);
@@ -189,6 +191,9 @@ const styles = StyleSheet.create({
         shadowRadius: 10,
         shadowOffset: { width: 0, height: 2 },
         elevation: 4,
+    },
+    pillFlat: {
+        elevation: 0,
     },
     iconWindow: {
         width: SLOT,
