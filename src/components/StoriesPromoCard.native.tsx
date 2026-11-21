@@ -167,7 +167,7 @@ export default function StoriesPromoCard({
             activeOpacity={0.9}
             style={styles.card}
             accessibilityRole="button"
-            accessibilityLabel="Open Stories 24"
+            accessibilityLabel="Open Shorts"
         >
             <LinearGradient
                 colors={[...SCRIM]}

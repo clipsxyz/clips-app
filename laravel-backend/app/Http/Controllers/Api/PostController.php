@@ -744,7 +744,7 @@ class PostController extends Controller
             'textStyle.color' => 'nullable|string|max:50',
             'textStyle.size' => 'nullable|in:small,medium,large',
             'textStyle.background' => 'nullable|string|max:200',
-            'card_style' => 'nullable|in:gradient-sunset,gradient-midnight,gradient-amber,gradient-emerald,minimal-charcoal',
+            'card_style' => 'nullable|in:solid-black,gradient-sunset,gradient-midnight,gradient-amber,gradient-emerald,minimal-charcoal',
             'taggedUsers' => 'nullable|array',
             'taggedUsers.*' => 'required|string|exists:users,handle',
             'videoCaptionsEnabled' => 'nullable|boolean',

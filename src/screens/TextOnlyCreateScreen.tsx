@@ -121,7 +121,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     route.params?.textTemplateId || route.params?.templateId || null,
   );
-  const [textCardStyle, setTextCardStyle] = useState<TextCardStyleId>('gradient-sunset');
+  const [textCardStyle, setTextCardStyle] = useState<TextCardStyleId>('solid-black');
   const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showTemplateCue, setShowTemplateCue] = useState(false);

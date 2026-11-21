@@ -41,7 +41,7 @@ export default function TextOnlyPostPage() {
     const [tagSearchUsers, setTagSearchUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
     const [tagSearchLoading, setTagSearchLoading] = useState(false);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(locationState?.templateId || null);
-    const [textCardStyle, setTextCardStyle] = useState<TextCardStyleId>('gradient-sunset');
+    const [textCardStyle, setTextCardStyle] = useState<TextCardStyleId>('solid-black');
     const [showTemplatePicker, setShowTemplatePicker] = useState(false);
     const [showTemplateCue, setShowTemplateCue] = useState(false);
     const [showTemplateBurst, setShowTemplateBurst] = useState(false);
@@ -404,8 +404,8 @@ export default function TextOnlyPostPage() {
                     style={{
                         minHeight: 280,
                         background: textCardStyleBackground(textCardStyle),
-                        borderTop: textCardStyle === 'minimal-charcoal' ? '1px solid rgba(255,255,255,0.14)' : undefined,
-                        borderBottom: textCardStyle === 'minimal-charcoal' ? '1px solid rgba(255,255,255,0.14)' : undefined,
+                        borderTop: TEXT_CARD_STYLES[textCardStyle].bordered ? '1px solid rgba(255,255,255,0.14)' : undefined,
+                        borderBottom: TEXT_CARD_STYLES[textCardStyle].bordered ? '1px solid rgba(255,255,255,0.14)' : undefined,
                     }}
                 >
                     <div className="mb-[18px] flex items-center justify-center gap-3.5">

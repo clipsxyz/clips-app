@@ -2140,6 +2140,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost)) &&
         !heldVideoPostId;
     const [shareToStoriesPost, setShareToStoriesPost] = useState<Post | null>(null);
+    /** Which confirm card is still waiting. Cleared once the viewer shares or cancels. */
+    const shareConfirmPostIdRef = useRef<string | null>(null);
     const [reclipConfirmPost, setReclipConfirmPost] = useState<Post | null>(null);
     const [feedGazetteerAlert, setFeedGazetteerAlert] = useState<{
         title: string;
@@ -3345,6 +3347,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const handleShareToStoriesSuccess = React.useCallback(
         (postId: string) => {
+            shareConfirmPostIdRef.current = null;
             updatePost(postId, (prev) => ({
                 ...prev,
                 stats: { ...prev.stats, shares: prev.stats.shares + 1 },
@@ -3356,32 +3359,35 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const openShareToStoriesForPost = React.useCallback(
         (post: Post) => {
             pinFeedScrollSoon();
+            if (postIsLiveOnStories(post.id)) {
+                setFeedGazetteerAlert({
+                    title: 'Already on Stories',
+                    message: STORY_SHARE_STILL_LIVE_MESSAGE,
+                    icon: 'info',
+                });
+                return;
+            }
+            shareConfirmPostIdRef.current = post.id;
+            setShareToStoriesPost(post);
+            const handle = user?.handle;
+            if (!handle) return;
             void (async () => {
-                if (postIsLiveOnStories(post.id)) {
-                    setFeedGazetteerAlert({
-                        title: 'Already on Stories',
-                        message: STORY_SHARE_STILL_LIVE_MESSAGE,
-                        icon: 'info',
-                    });
+                try {
+                    const group = await fetchStoryGroupByHandle(handle);
+                    rememberLiveSharedPosts(group?.stories || []);
+                } catch {
+                    // The server still refuses a second share of a live story.
                     return;
                 }
-                if (user?.handle) {
-                    try {
-                        const group = await fetchStoryGroupByHandle(user.handle);
-                        rememberLiveSharedPosts(group?.stories || []);
-                    } catch {
-                        // The server still refuses a second share of a live story.
-                    }
-                    if (postIsLiveOnStories(post.id)) {
-                        setFeedGazetteerAlert({
-                            title: 'Already on Stories',
-                            message: STORY_SHARE_STILL_LIVE_MESSAGE,
-                            icon: 'info',
-                        });
-                        return;
-                    }
-                }
-                setShareToStoriesPost(post);
+                if (shareConfirmPostIdRef.current !== post.id) return;
+                if (!postIsLiveOnStories(post.id)) return;
+                shareConfirmPostIdRef.current = null;
+                setShareToStoriesPost(null);
+                setFeedGazetteerAlert({
+                    title: 'Already on Stories',
+                    message: STORY_SHARE_STILL_LIVE_MESSAGE,
+                    icon: 'info',
+                });
             })();
         },
         [pinFeedScrollSoon, user?.handle],
@@ -5930,6 +5936,16 @@ onVisitProfile={() =>
                                             <Text style={styles.emptyFeedSecondaryBtnText}>Try again</Text>
                                         </TouchableOpacity>
                                     </>
+                                ) : (showFollowingFeed || active === 'Following') &&
+                                  !(customLocation && String(customLocation).trim()) ? (
+                                    <View style={FEED_EMPTY_CARD}>
+                                        <Text style={FEED_EMPTY_FOLLOWING_TITLE}>Your Following feed</Text>
+                                        <Text style={FEED_EMPTY_FOLLOWING_SUBTITLE}>
+                                            This feed shows posts from people you follow. You are not
+                                            following anyone yet, so it is empty. Follow accounts and their
+                                            posts will show up here.
+                                        </Text>
+                                    </View>
                                 ) : (
                                     <View style={FEED_EMPTY_CARD}>
                                         <Text style={FEED_EMPTY_BADGE}>Your home feed</Text>
@@ -6060,12 +6076,11 @@ onVisitProfile={() =>
                                 <View style={styles.emptyDefaultWrap}>
                                     {showFollowingFeed || String(currentFilter).toLowerCase() === 'discover' ? (
                                         <View style={FEED_EMPTY_CARD}>
-                                            <Text style={FEED_EMPTY_FOLLOWING_TITLE}>
-                                                Unlock Your Following News Feed
-                                            </Text>
+                                            <Text style={FEED_EMPTY_FOLLOWING_TITLE}>Your Following feed</Text>
                                             <Text style={FEED_EMPTY_FOLLOWING_SUBTITLE}>
-                                                This feed only populates with the accounts you follow. Start
-                                                tapping Follow to personalize your stream.
+                                                This feed shows posts from people you follow. You are not
+                                                following anyone yet, so it is empty. Follow accounts and their
+                                                posts will show up here.
                                             </Text>
                                         </View>
                                     ) : (
@@ -6459,6 +6474,7 @@ onVisitProfile={() =>
                 post={shareToStoriesPost}
                 onClose={() => {
                     const y = feedScrollYRef.current;
+                    shareConfirmPostIdRef.current = null;
                     setShareToStoriesPost(null);
                     pinFeedScrollSoon(y);
                 }}

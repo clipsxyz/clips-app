@@ -162,7 +162,7 @@ export default function ShareToStoriesModal({
             overlay = showUploadOverlayNative({
                 thumbUri: resolveOverlayThumbUri(post, payload.mediaUrl, payload.mediaType, payload.videoPosterUrl),
                 thumbType: payload.mediaType === 'video' ? 'video' : 'image',
-                initialMessage: 'Sharing to Stories 24...',
+                initialMessage: 'Sharing to Shorts...',
                 uploadingTitle: 'Preparing story...',
                 successTitle: 'The post is now live in Stories.',
                 errorTitle: 'Story share failed',
@@ -208,9 +208,9 @@ export default function ShareToStoriesModal({
             }
             console.error('Failed to share to stories:', e);
             if (overlay) {
-                overlay.error('Failed to share to Stories 24. Please try again.');
+                overlay.error('Failed to share to Shorts. Please try again.');
             } else {
-                gazetteerAlert('Stories', 'Failed to share to Stories 24. Please try again.');
+                gazetteerAlert('Shorts', 'Failed to share to Shorts. Please try again.');
             }
         } finally {
             setIsSharing(false);
@@ -237,7 +237,7 @@ export default function ShareToStoriesModal({
                         <ShareToStoriesFeedIcon size={52} color="#FFFFFF" />
                     </View>
                     <Text style={styles.kicker}>Gazetteer says</Text>
-                    <Text style={styles.title}>Share this post to your stories</Text>
+                    <Text style={styles.title}>Share this post to Shorts</Text>
                     <View style={styles.actions}>
                         <TouchableOpacity
                             style={styles.cancelBtn}

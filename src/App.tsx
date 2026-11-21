@@ -6203,7 +6203,7 @@ function Stories24FeedRail({
       <div className="mb-3 flex w-full items-center justify-between px-4">
         <h3 className="flex min-w-0 items-center gap-1.5 text-[17px] font-normal tracking-[0.2px] text-white">
           <FiMapPin className="h-4 w-4 shrink-0 text-white" aria-hidden />
-          <span>Stories 24</span>
+          <span>Shorts</span>
         </h3>
         <button
           type="button"
@@ -9476,8 +9476,8 @@ function FeedPageWrapper() {
         <div className="p-8 text-center text-gray-600 dark:text-gray-300">
           {showFollowingFeed || currentFilter.toLowerCase() === 'discover' ? (
             <>
-              <div className="text-lg font-semibold mb-1">Unlock Your Following News Feed</div>
-              <div className="text-gray-600 text-sm">This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream</div>
+              <div className="text-lg font-semibold mb-1">Your Following feed</div>
+              <div className="text-gray-600 text-sm">This feed shows posts from people you follow. You are not following anyone yet, so it is empty. Follow accounts and their posts will show up here.</div>
             </>
           ) : customLocation ? (
             <>

@@ -263,7 +263,7 @@ export default function LoginScreen({ navigation, route }: any) {
                     : signupScreen === 'place'
                       ? isBusinessAccount
                           ? 'Where is the business?'
-                          : 'Where are you?'
+                          : 'Customise your location feeds'
                       : signupScreen === 'username'
                         ? 'Username'
                         : 'Add a photo';
@@ -632,7 +632,7 @@ export default function LoginScreen({ navigation, route }: any) {
         }
         if (signupScreen === 'type') {
             if (!accountType) {
-                setErrorText('Choose Personal or Business.');
+                setErrorText('Choose Creator or Business.');
                 return;
             }
             setStep(step + 1);
@@ -779,7 +779,7 @@ export default function LoginScreen({ navigation, route }: any) {
         if (passwordNorm && confirmPasswordNorm && passwordNorm !== confirmPasswordNorm) {
             nextErrors.confirmPassword = 'Passwords do not match.';
         }
-        if (!accountType) nextErrors.accountType = 'Choose personal or business.';
+        if (!accountType) nextErrors.accountType = 'Choose Creator or Business.';
         if (Object.keys(nextErrors).length > 0) {
             setFieldErrors(nextErrors);
             setErrorText('Please fix the highlighted fields.');
@@ -1209,7 +1209,7 @@ export default function LoginScreen({ navigation, route }: any) {
                                     onPress={() => setAccountType('personal')}
                                     style={[styles.profileTabButton, accountType === 'personal' && styles.profileTabButtonActive]}
                                 >
-                                    <Text style={[styles.profileTabText, accountType === 'personal' && styles.profileTabTextActive]}>Personal</Text>
+                                    <Text style={[styles.profileTabText, accountType === 'personal' && styles.profileTabTextActive]}>Creator</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     onPress={() => setAccountType('business')}
@@ -1981,8 +1981,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#000000',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
+        borderWidth: 3,
+        borderColor: '#FFFFFF',
     },
     profileTabButtonActive: {
         backgroundColor: '#FFFFFF',

@@ -224,7 +224,7 @@ export default function LoginPage() {
               : signupScreen === 'place'
                 ? isBusinessAccount
                   ? 'Where is the business?'
-                  : 'Where are you?'
+                  : 'Customise your location feeds'
                 : signupScreen === 'username'
                   ? 'Username'
                   : 'Add a photo';
@@ -301,7 +301,7 @@ export default function LoginPage() {
     setSignupError('');
     if (signupScreen === 'type') {
       if (!accountType) {
-        setSignupError('Choose Personal or Business.');
+        setSignupError('Choose Creator or Business.');
         return;
       }
       updateStep(step + 1);
@@ -1034,17 +1034,17 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setAccountType('personal')}
-              className={`rounded-xl border px-3 py-6 text-sm font-semibold ${
-                accountType === 'personal' ? 'border-white bg-white text-black' : 'border-white/20 text-white'
+              className={`rounded-xl border-[3px] border-white px-3 py-6 text-sm font-semibold ${
+                accountType === 'personal' ? 'bg-white text-black' : 'bg-transparent text-white'
               }`}
             >
-              Personal
+              Creator
             </button>
             <button
               type="button"
               onClick={() => setAccountType('business')}
-              className={`rounded-xl border px-3 py-6 text-sm font-semibold ${
-                accountType === 'business' ? 'border-white bg-white text-black' : 'border-white/20 text-white'
+              className={`rounded-xl border-[3px] border-white px-3 py-6 text-sm font-semibold ${
+                accountType === 'business' ? 'bg-white text-black' : 'bg-transparent text-white'
               }`}
             >
               Business

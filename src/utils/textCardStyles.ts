@@ -1,4 +1,5 @@
 export type TextCardStyleId =
+    | 'solid-black'
     | 'gradient-sunset'
     | 'gradient-midnight'
     | 'gradient-amber'
@@ -9,6 +10,18 @@ export const TEXT_CARD_STYLES: Record<
     TextCardStyleId,
     { label: string; colors: string[]; textColor: string; bordered?: boolean }
 > = {
+    'solid-black': {
+        label: 'Black',
+        colors: ['#000000'],
+        textColor: '#FFFFFF',
+        bordered: true,
+    },
+    'minimal-charcoal': {
+        label: 'Charcoal',
+        colors: ['#1E1E1E'],
+        textColor: '#FFFFFF',
+        bordered: true,
+    },
     'gradient-sunset': {
         label: 'Sunset',
         colors: ['#7C3AED', '#DB2777'],
@@ -28,12 +41,6 @@ export const TEXT_CARD_STYLES: Record<
         label: 'Emerald',
         colors: ['#064E3B', '#34D399'],
         textColor: '#FFFFFF',
-    },
-    'minimal-charcoal': {
-        label: 'Charcoal',
-        colors: ['#1E1E1E'],
-        textColor: '#FFFFFF',
-        bordered: true,
     },
 };
 

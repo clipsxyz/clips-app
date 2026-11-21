@@ -637,7 +637,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 storyAudience === 'close_friends' ? 'Close Friends' : storyAudience === 'only_me' ? 'Only Me' : 'Public';
             gazetteerAlert(
                 'Success',
-                `Story 24 published (${storyAudienceLabel}).`,
+                `Shorts published (${storyAudienceLabel}).`,
                 [
                     {
                         text: 'OK',
@@ -720,7 +720,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Icon name="close" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>{isStory24Flow ? 'Create Story 24' : 'Create Post'}</Text>
+                <Text style={styles.headerTitle}>{isStory24Flow ? 'Create Shorts' : 'Create Post'}</Text>
                 <View style={styles.headerActions}>
                     <TouchableOpacity onPress={handleSaveDraft} disabled={isSavingDraft || isUploading} style={styles.draftButton}>
                         {isSavingDraft ? (
@@ -762,7 +762,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 {isStory24Flow && (
                     <View style={styles.addYoursBanner}>
                         <Icon name="location" size={ox(16)} color="#111827" />
-                        <Text style={styles.addYoursBannerText}>Stories 24 mode</Text>
+                        <Text style={styles.addYoursBannerText}>Shorts mode</Text>
                     </View>
                 )}
                 {isStory24Flow && (

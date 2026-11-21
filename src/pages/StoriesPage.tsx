@@ -1887,7 +1887,7 @@ export default function StoriesPage() {
                 <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
                     <StoriesPopIcon size={80} />
                     <p className="mt-6 text-sm font-medium text-white/70">Opening stories…</p>
-                    <p className="mt-1 text-[11px] text-white/35">Stories 24</p>
+                    <p className="mt-1 text-[11px] text-white/35">Shorts</p>
                 </div>
             </div>
         );

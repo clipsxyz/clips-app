@@ -1346,7 +1346,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                     <>
                         <StoriesPopIcon size={ox(80)} />
                         <Text style={styles.storiesOpeningText}>Opening stories…</Text>
-                        <Text style={styles.stories24HoldSubtext}>Stories 24</Text>
+                        <Text style={styles.stories24HoldSubtext}>Shorts</Text>
                     </>
                 ) : fromProfile ? (
                     <>

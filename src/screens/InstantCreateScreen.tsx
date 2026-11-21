@@ -44,7 +44,7 @@ type CreateModeId = 'community' | 'text' | 'gallery' | 'story';
 const CREATE_MODE_ITEMS = [
     { id: 'community' as const, title: 'Community', icon: 'community' as const },
     { id: 'text' as const, title: 'Text only', icon: 'type' as const },
-    { id: 'story' as const, title: '24h Story', icon: 'story' as const },
+    { id: 'story' as const, title: 'Shorts', icon: 'story' as const },
     { id: 'gallery' as const, title: 'Gallery', icon: 'gallery' as const },
 ] as const;
 

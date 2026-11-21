@@ -823,7 +823,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             <View style={styles.headerRow}>
                 <View style={styles.headerTitle}>
                     <Stories24MapPinIcon size={16} color="#FFFFFF" />
-                    <Text style={styles.railTitle}>Stories 24</Text>
+                    <Text style={styles.railTitle}>Shorts</Text>
                 </View>
                 <TouchableOpacity
                     style={styles.addYoursPill}

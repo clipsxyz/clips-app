@@ -50,7 +50,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       const overlay = showUploadOverlay({
         thumbUrl: payload.mediaUrl,
         thumbType: payload.mediaType === 'video' ? 'video' : 'image',
-        initialMessage: 'Sharing to Stories 24...',
+        initialMessage: 'Sharing to Shorts...',
         uploadingTitle: 'Preparing story...',
         successTitle: 'The post is now live in Stories.',
         errorTitle: 'Story share failed',
@@ -94,7 +94,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       showToast?.('The post is now live in Stories.');
     } catch (e) {
       console.error('Failed to share to clips:', e);
-      showToast?.('Failed to share to Stories 24. Please try again.');
+      showToast?.('Failed to share to Shorts. Please try again.');
     } finally {
       setIsSharing(false);
     }
@@ -121,7 +121,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         </p>
 
         <p className="mb-6 text-center text-lg font-semibold text-white">
-          Share this post to your stories
+          Share this post to Shorts
         </p>
 
         <div className="flex gap-3">
