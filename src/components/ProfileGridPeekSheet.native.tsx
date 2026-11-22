@@ -67,18 +67,47 @@ const ACTION_BORDER = 2;
 const MEDIA_RADIUS = 28;
 const TILE_RADIUS = 8;
 
-/** Draws the spectrum edge above a video. Android TextureView ignores a rounded parent, so the stroke has to sit on top. */
-function TileSpectrumEdge({ width, height }: { width: number; height: number }) {
+const SPECTRUM_EDGE = ['#22C55E', '#FFD400', '#FF4D9A'] as const;
+
+/** Solid frame for Boost. Profile keeps the spectrum gradient. */
+function FrameEdge({
+    color,
+    style,
+    children,
+}: {
+    color?: string;
+    style?: StyleProp<ViewStyle>;
+    children: React.ReactNode;
+}) {
+    if (color) {
+        return <View style={[style, { backgroundColor: color }]}>{children}</View>;
+    }
+    return (
+        <LinearGradient
+            colors={[...SPECTRUM_EDGE]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={style}
+        >
+            {children}
+        </LinearGradient>
+    );
+}
+
+/** Draws the edge above a video. Android TextureView ignores a rounded parent, so the stroke has to sit on top. */
+function TileSpectrumEdge({ width, height, color }: { width: number; height: number; color?: string }) {
     const stroke = ACTION_BORDER;
     const inset = stroke / 2;
     return (
         <Svg width={width} height={height} style={styles.tileEdge} pointerEvents="none">
             <Defs>
-                <SvgGradient id="profileTileSpectrum" x1="0" y1="0" x2="1" y2="1">
-                    <Stop offset="0" stopColor="#22C55E" />
-                    <Stop offset="0.5" stopColor="#FFD400" />
-                    <Stop offset="1" stopColor="#FF4D9A" />
-                </SvgGradient>
+                {color ? null : (
+                    <SvgGradient id="profileTileSpectrum" x1="0" y1="0" x2="1" y2="1">
+                        <Stop offset="0" stopColor="#22C55E" />
+                        <Stop offset="0.5" stopColor="#FFD400" />
+                        <Stop offset="1" stopColor="#FF4D9A" />
+                    </SvgGradient>
+                )}
                 <Mask id="profileTileOutside">
                     <Rect width={width} height={height} fill="#FFFFFF" />
                     <Rect width={width} height={height} rx={MEDIA_RADIUS} ry={MEDIA_RADIUS} fill="#000000" />
@@ -97,7 +126,7 @@ function TileSpectrumEdge({ width, height }: { width: number; height: number }) 
                 height={Math.max(0, height - stroke)}
                 rx={MEDIA_RADIUS - inset}
                 ry={MEDIA_RADIUS - inset}
-                stroke="url(#profileTileSpectrum)"
+                stroke={color || 'url(#profileTileSpectrum)'}
                 strokeWidth={stroke}
                 fill="none"
             />
@@ -224,6 +253,8 @@ type Props = {
     onViewFullscreen?: () => void;
     /** Replaces Add to Story, Share, and View in fullscreen. */
     actions?: ProfileGridTapAction[];
+    /** Solid edge on the opened card. Profile leaves this unset and keeps the spectrum border. */
+    borderColor?: string;
 };
 
 export default function ProfileGridPeekSheet({
@@ -235,6 +266,7 @@ export default function ProfileGridPeekSheet({
     onShare,
     onViewFullscreen,
     actions,
+    borderColor,
 }: Props) {
     const { width, height } = useWindowDimensions();
     const insets = useSafeAreaInsets();
@@ -335,10 +367,8 @@ export default function ProfileGridPeekSheet({
                         },
                     ]}
                 >
-                <LinearGradient
-                    colors={['#22C55E', '#FFD400', '#FF4D9A']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
+                <FrameEdge
+                    color={borderColor}
                     style={[styles.mediaGradient, { borderRadius: MEDIA_RADIUS }]}
                 >
                 <View
@@ -429,17 +459,14 @@ export default function ProfileGridPeekSheet({
                         </Pressable>
                     ) : null}
                 </View>
-                </LinearGradient>
-                {video && playback ? <TileSpectrumEdge width={target.width} height={target.height} /> : null}
+                </FrameEdge>
+                {video && playback ? (
+                    <TileSpectrumEdge width={target.width} height={target.height} color={borderColor} />
+                ) : null}
                 </View>
                 ) : (
                 <Animated.View style={[styles.mediaCard, shellStyle]}>
-                    <LinearGradient
-                        colors={['#22C55E', '#FFD400', '#FF4D9A']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.mediaGradient}
-                    >
+                    <FrameEdge color={borderColor} style={styles.mediaGradient}>
                         <View style={[styles.mediaInner, { borderRadius: MEDIA_RADIUS - ACTION_BORDER }]}>
                     {poster || imageUri ? (
                         <CachedImage
@@ -453,7 +480,7 @@ export default function ProfileGridPeekSheet({
                         </View>
                     )}
                         </View>
-                    </LinearGradient>
+                    </FrameEdge>
                 </Animated.View>
                 )}
 
@@ -465,12 +492,7 @@ export default function ProfileGridPeekSheet({
                         { top: target.top + target.height + STACK_GAP, left: target.left, width: target.width },
                     ]}
                 >
-                    <LinearGradient
-                        colors={['#22C55E', '#FFD400', '#FF4D9A']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.actionsGradient}
-                    >
+                    <FrameEdge color={borderColor} style={styles.actionsGradient}>
                     <View style={styles.actions}>
                     {actionRows.map((action, index) => (
                         <View key={action.label}>
@@ -482,7 +504,7 @@ export default function ProfileGridPeekSheet({
                         </View>
                     ))}
                     </View>
-                    </LinearGradient>
+                    </FrameEdge>
                 </Animated.View>
             </View>
         </Modal>

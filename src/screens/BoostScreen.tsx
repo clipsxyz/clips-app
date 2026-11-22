@@ -489,6 +489,7 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                     post={gridTap.post}
                     origin={gridTap.origin}
                     profileHandle={gridTap.post.userHandle || user?.handle || ''}
+                    borderColor="#FFFFFF"
                     onClose={() => setGridTap(null)}
                     actions={[
                         {
