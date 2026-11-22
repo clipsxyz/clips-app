@@ -25,6 +25,10 @@ import { saveDraft } from '../api/drafts.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet.native';
+import {
+    MAX_FEED_VIDEO_DURATION_SEC,
+    MAX_STORIES_VIDEO_DURATION_SEC,
+} from '../utils/autoTrimVideoNative';
 import { requestInAppCameraAccess } from '../utils/galleryMediaPermissionsNative';
 import {
     failedToSaveSheet,
@@ -1306,6 +1310,8 @@ export default function CreateScreen({ navigation, route }: any) {
             <CreateCameraSheet
                 visible={cameraCapture != null}
                 mode={cameraCapture ?? 'photo'}
+                maxVideoSeconds={isStory24Flow ? MAX_STORIES_VIDEO_DURATION_SEC : MAX_FEED_VIDEO_DURATION_SEC}
+                countdown={cameraCapture === 'video'}
                 onClose={() => setCameraCapture(null)}
                 onCapture={(media) => {
                     const isVideo = media.type.startsWith('video');

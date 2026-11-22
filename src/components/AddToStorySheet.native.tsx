@@ -3,6 +3,7 @@ import type { Asset } from 'react-native-image-picker';
 import GazetteerAlertSheet from './GazetteerAlertSheet.native';
 import GazetteerMenuSheet from './GazetteerMenuSheet.native';
 import CreateCameraSheet, { type CameraCaptureMode, type CapturedCameraMedia } from './CreateCameraSheet.native';
+import { MAX_STORIES_VIDEO_DURATION_SEC } from '../utils/autoTrimVideoNative';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import { requestInAppCameraAccess } from '../utils/galleryMediaPermissionsNative';
 
@@ -168,6 +169,8 @@ export default function AddToStorySheet({
             <CreateCameraSheet
                 visible={cameraMode != null}
                 mode={cameraMode ?? 'photo'}
+                maxVideoSeconds={MAX_STORIES_VIDEO_DURATION_SEC}
+                countdown={cameraMode === 'video'}
                 onClose={() => setCameraMode(null)}
                 onCapture={(media) => {
                     setCameraMode(null);

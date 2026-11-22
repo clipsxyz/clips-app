@@ -20,6 +20,10 @@ import CommunityGroupOnboardingSheet from '../components/CommunityGroupOnboardin
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet.native';
+import {
+    MAX_FEED_VIDEO_DURATION_SEC,
+    MAX_STORIES_VIDEO_DURATION_SEC,
+} from '../utils/autoTrimVideoNative';
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
 import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarousel.native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -618,6 +622,10 @@ export default function InstantCreateScreen({ navigation, route }: any) {
             <CreateCameraSheet
                 visible={cameraSheet != null}
                 mode={cameraSheet?.capture ?? 'photo'}
+                maxVideoSeconds={
+                    cameraSheet?.picker === 'story24' ? MAX_STORIES_VIDEO_DURATION_SEC : MAX_FEED_VIDEO_DURATION_SEC
+                }
+                countdown={cameraSheet?.capture === 'video'}
                 onClose={() => setCameraSheet(null)}
                 onCapture={(media) => {
                     const picker = cameraSheet?.picker ?? 'feed';
