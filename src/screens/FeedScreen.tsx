@@ -221,6 +221,7 @@ import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import DeletePostConfirmSheet from '../components/DeletePostConfirmSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
+import BoostSelectionModal from '../components/BoostSelectionModal.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
@@ -2152,7 +2153,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [hasInbox, setHasInbox] = useState(false);
     const insets = useSafeAreaInsets();
     const [reloadTick, setReloadTick] = useState(0);
-    const [showBoostPrompt, setShowBoostPrompt] = useState(false);
+    const [boostSheetPost, setBoostSheetPost] = useState<Post | null>(null);
     const [likesSheetPost, setLikesSheetPost] = useState<Post | null>(null);
     const [taggedSheetPost, setTaggedSheetPost] = useState<Post | null>(null);
     const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
@@ -6255,7 +6256,8 @@ onVisitProfile={() =>
                     overflowPost ? () => setQrPost(overflowPost) : undefined
                 }
                 onBoost={() => {
-                    setShowBoostPrompt(true);
+                    if (!overflowPost) return;
+                    setBoostSheetPost(overflowPost);
                 }}
                 onArchive={async () => {
                     if (!overflowPost) return;
@@ -6445,28 +6447,22 @@ onVisitProfile={() =>
                 />
             ) : null}
 
-            <Modal visible={showBoostPrompt} transparent animationType="fade" onRequestClose={() => setShowBoostPrompt(false)}>
-                <View style={styles.modalOverlay}>
-                    <View style={styles.boostPromptCard}>
-                        <Text style={styles.boostPromptTitle}>Boost your posts</Text>
-                        <Text style={styles.boostPromptText}>Reach more people in local, regional, and national feeds.</Text>
-                        <View style={styles.boostPromptActions}>
-                            <TouchableOpacity style={styles.boostPromptSecondaryBtn} onPress={() => setShowBoostPrompt(false)}>
-                                <Text style={styles.boostPromptSecondaryText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.boostPromptPrimaryBtn}
-                                onPress={() => {
-                                    setShowBoostPrompt(false);
-                                    navigation.navigate('Boost');
-                                }}
-                            >
-                                <Text style={styles.boostPromptPrimaryText}>Open Boost</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
+            <BoostSelectionModal
+                isOpen={boostSheetPost != null}
+                post={boostSheetPost}
+                selectedPost={boostSheetPost}
+                onClose={() => setBoostSheetPost(null)}
+                onSelect={(feedType, price, meta) => {
+                    const postId = boostSheetPost?.id;
+                    setBoostSheetPost(null);
+                    navigation?.navigate('Payment', {
+                        postId,
+                        boostFeedType: feedType,
+                        boostAmount: price,
+                        boostMeta: meta,
+                    });
+                }}
+            />
 
             {/* Feed-level share-to-stories. Per-card Modal mount/unmount jumps FlatList on Android. */}
             <ShareToStoriesModal

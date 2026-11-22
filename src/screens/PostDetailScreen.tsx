@@ -37,6 +37,7 @@ import {
 } from '../utils/feedEngagementPrefsMobile';
 import { isLikelyImageUri } from '../utils/imageDimensions';
 import FeedPostMedia from '../components/FeedPostMedia.native';
+import BoostSelectionModal from '../components/BoostSelectionModal.native';
 import VideoMuteToggle from '../components/VideoMuteToggle.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedPostHeader from '../components/FeedPostHeader.native';
@@ -106,6 +107,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(!!openComments);
     const [overflowVisible, setOverflowVisible] = useState(false);
+    const [boostSheetOpen, setBoostSheetOpen] = useState(false);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [saveModalVisible, setSaveModalVisible] = useState(false);
@@ -660,7 +662,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 onShowQRCode={() => setQrVisible(true)}
                 onBoost={() => {
                     setOverflowVisible(false);
-                    navigation.navigate('Boost');
+                    setBoostSheetOpen(true);
                 }}
                 onArchive={async () => {
                     await markFeedPostArchivedMobile(userId, post.id);
@@ -826,6 +828,22 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     }}
                 />
             ) : null}
+            <BoostSelectionModal
+                isOpen={boostSheetOpen && post != null}
+                post={post}
+                selectedPost={post}
+                onClose={() => setBoostSheetOpen(false)}
+                onSelect={(feedType, price, meta) => {
+                    const postId = post?.id;
+                    setBoostSheetOpen(false);
+                    navigation.navigate('Payment', {
+                        postId,
+                        boostFeedType: feedType,
+                        boostAmount: price,
+                        boostMeta: meta,
+                    });
+                }}
+            />
         </GazetteerScreenShell>
     );
 }

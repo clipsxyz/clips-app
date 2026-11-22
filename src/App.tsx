@@ -9369,7 +9369,8 @@ function FeedPageWrapper() {
             }}
             showBoostIcon={user?.handle === p.userHandle && !p.originalUserHandle}
             onBoost={async () => {
-              navigate('/boost', { state: { focusPostId: p.id } });
+              setSelectedPostForBoost(p);
+              setBoostModalOpen(true);
             }}
             onDelete={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
               const result = await Swal.fire(bottomSheet({
@@ -9951,7 +9952,8 @@ function FeedPageWrapper() {
             }}
             onOpenComments={() => handleOpenComments(p.id)}
             onBoost={async () => {
-              navigate('/boost', { state: { focusPostId: p.id } });
+              setSelectedPostForBoost(p);
+              setBoostModalOpen(true);
             }}
             
             onReclip={async () => {
