@@ -10023,7 +10023,7 @@ function BoostPageWrapper() {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
   const [boostFilter, setBoostFilter] = React.useState<'all' | 'ready' | 'active' | 'ended'>('all');
-  const [boostSort, setBoostSort] = React.useState<'best' | 'recent'>('best');
+  const [boostSort, setBoostSort] = React.useState<'best' | 'recent'>('recent');
   const [insightsRange, setInsightsRange] = React.useState<'24h' | '7d' | 'all'>('24h');
   const boostInsightsCacheRef = React.useRef<Map<string, { data: any; ts: number }>>(new Map());
 

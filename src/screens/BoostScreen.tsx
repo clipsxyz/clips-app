@@ -140,7 +140,7 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
     const [boostFilter, setBoostFilter] = useState<BoostPostFilter>('all');
     const [counts, setCounts] = useState<BoostPostCounts>(EMPTY_COUNTS);
     const [listLoading, setListLoading] = useState(false);
-    const [boostSort, setBoostSort] = useState<'best' | 'recent'>('best');
+    const [boostSort, setBoostSort] = useState<'best' | 'recent'>('recent');
     const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
     const [insightsPost, setInsightsPost] = useState<Post | null>(null);
     const [insightsVisible, setInsightsVisible] = useState(false);
@@ -150,6 +150,7 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
     const requestGenRef = useRef(0);
     const hasLoadedRef = useRef(false);
     const lastLoadRef = useRef(0);
+    const loadUserPostsRef = useRef<(opts?: { silent?: boolean }) => Promise<void>>(async () => {});
 
     const loadUserPosts = useCallback(async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
@@ -204,13 +205,15 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
         }
     }, [user?.handle, userId, boostFilter]);
 
+    loadUserPostsRef.current = loadUserPosts;
+
     useEffect(() => {
         void loadUserPosts();
     }, [loadUserPosts]);
 
     useEffect(() => {
         const sub = DeviceEventEmitter.addListener(BOOST_STATUS_REFRESH_EVENT, () => {
-            setBoostFilter('active');
+            void loadUserPostsRef.current({ silent: true });
         });
         return () => sub.remove();
     }, []);
@@ -223,8 +226,8 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
         const key = `${action}:${sessionId}`;
         if (handledBoostSuccessRef.current === key) return;
         handledBoostSuccessRef.current = key;
-        setBoostFilter('active');
         navigation.setParams?.({ initialAction: undefined });
+        void loadUserPostsRef.current({ silent: true });
     }, [navigation, route?.params?.initialAction, route?.params?.session_id]);
 
     /** Mount effect above covers the first load; skip the focus effect's first pass so
