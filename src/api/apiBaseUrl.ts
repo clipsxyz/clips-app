@@ -245,33 +245,19 @@ function currentApiOrigin(): string {
     return apiBase.replace(/\/api$/i, '');
 }
 
-function isDevMediaHost(hostname: string): boolean {
-    return (
-        hostname === 'localhost' ||
-        hostname === '127.0.0.1' ||
-        hostname === '10.0.2.2' ||
-        /^10\./.test(hostname) ||
-        /^192\.168\./.test(hostname) ||
-        /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
-    );
-}
-
-/** Point leftover localhost / old LAN :8000 media URLs at the API this device can reach. */
+/**
+ * Point leftover localhost / old LAN media URLs at the API this device can reach.
+ * String replace, not `new URL`: on the phone a parsed port can come back empty, so
+ * the old check treated `192.168.1.15:8000` as port 80 and left the dead host in place.
+ * The tile can still show a cached picture while the player requests that dead host.
+ */
 function remapDevMediaHostToApiOrigin(absoluteUrl: string): string {
-    const origin = currentApiOrigin();
+    const origin = currentApiOrigin().replace(/\/$/, '');
     if (!origin || !/^https?:\/\//i.test(origin)) return absoluteUrl;
-    try {
-        const parsed = new URL(absoluteUrl);
-        const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
-        if ((port !== '8000' && port !== '5173') || !isDevMediaHost(parsed.hostname)) return absoluteUrl;
-        const current = new URL(origin);
-        parsed.protocol = current.protocol;
-        parsed.hostname = current.hostname;
-        parsed.port = current.port;
-        return parsed.toString();
-    } catch {
-        return absoluteUrl;
-    }
+    return absoluteUrl.replace(
+        /^https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(?::\d+)?(?=\/|$)/i,
+        origin,
+    );
 }
 
 /**

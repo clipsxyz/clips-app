@@ -241,6 +241,7 @@ export default function ProfileGridPeekSheet({
     const progress = useRef(new Animated.Value(0)).current;
     const [ready, setReady] = useState(false);
     const [videoFrameReady, setVideoFrameReady] = useState(false);
+    const [videoFailed, setVideoFailed] = useState(false);
     const [cardMuted, setCardMuted] = useState(true);
     const actionRows = actions ?? [
         { label: 'Add to Story', icon: 'sparkles-outline', onPress: () => onAddToStory?.() },
@@ -257,6 +258,7 @@ export default function ProfileGridPeekSheet({
         progress.setValue(0);
         setReady(false);
         setVideoFrameReady(false);
+        setVideoFailed(false);
         setCardMuted(true);
         Animated.timing(progress, {
             toValue: 1,
@@ -355,7 +357,11 @@ export default function ProfileGridPeekSheet({
                             {poster ? (
                                 <CachedImage
                                     source={{ uri: poster }}
-                                    style={[StyleSheet.absoluteFill, videoFrameReady ? styles.posterHidden : null]}
+                                    style={[
+                                        StyleSheet.absoluteFill,
+                                        styles.posterCover,
+                                        videoFrameReady && !videoFailed ? styles.posterHidden : null,
+                                    ]}
                                     resizeMode="cover"
                                 />
                             ) : null}
@@ -381,8 +387,13 @@ export default function ProfileGridPeekSheet({
                                         playWhenInactive={false}
                                         ignoreSilentSwitch="ignore"
                                         useTextureView
+                                        shutterColor="transparent"
                                         pointerEvents="none"
-                                        onReadyForDisplay={() => setVideoFrameReady(true)}
+                                        progressUpdateInterval={250}
+                                        onProgress={({ currentTime }) => {
+                                            if (!videoFailed && currentTime > 0.05) setVideoFrameReady(true);
+                                        }}
+                                        onError={() => setVideoFailed(true)}
                                         {...androidListSafeVideoProps()}
                                     />
                                 </View>
@@ -520,6 +531,9 @@ const styles = StyleSheet.create({
         top: 0,
         zIndex: 40,
         elevation: 40,
+    },
+    posterCover: {
+        zIndex: 2,
     },
     posterHidden: {
         opacity: 0,
