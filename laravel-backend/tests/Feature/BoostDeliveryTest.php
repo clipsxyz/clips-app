@@ -74,6 +74,53 @@ class BoostDeliveryTest extends TestCase
             ->assertJsonPath('candidates', []);
     }
 
+    public function test_same_local_viewers_see_a_promoted_business_on_the_business_card_surface(): void
+    {
+        $viewer = User::factory()->create([
+            'location_local' => 'Galway',
+            'location_regional' => 'Connacht',
+            'location_national' => 'Ireland',
+        ]);
+        $owner = User::factory()->create([
+            'location_local' => 'Galway',
+            'location_regional' => 'Connacht',
+            'location_national' => 'Ireland',
+            'account_type' => 'business',
+        ]);
+        $post = Post::factory()->create(['user_id' => $owner->id, 'user_handle' => $owner->handle]);
+        Boost::query()->create([
+            'post_id' => $post->id,
+            'user_id' => $owner->id,
+            'feed_type' => 'regional',
+            'price' => 1.5,
+            'activated_at' => now()->subHours(2),
+            'expires_at' => now()->addHours(4),
+            'duration_hours' => 6,
+            'eligible_users_count' => 150,
+            'status' => 'active',
+        ]);
+        User::factory()->create([
+            'location_local' => 'Dublin',
+            'account_type' => 'personal',
+        ]);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/boosts/delivery?surface=business')
+            ->assertOk()
+            ->assertJsonPath('candidates.0.postId', (string) $post->id);
+
+        $otherLocal = User::factory()->create(['location_local' => 'Cork']);
+        $this->actingAs($otherLocal, 'sanctum')
+            ->getJson('/api/boosts/delivery?surface=business')
+            ->assertOk()
+            ->assertJsonPath('candidates', []);
+
+        $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/boosts/delivery?surface=business')
+            ->assertOk()
+            ->assertJsonPath('candidates', []);
+    }
+
     public function test_stories_only_include_a_live_public_story_from_the_paid_area(): void
     {
         $viewer = User::factory()->create([

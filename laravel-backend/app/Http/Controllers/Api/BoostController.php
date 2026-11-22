@@ -731,7 +731,7 @@ class BoostController extends Controller
     public function delivery(Request $request, BoostDeliveryService $delivery): JsonResponse
     {
         $surface = (string) $request->query('surface', 'location');
-        if (! in_array($surface, ['location', 'following', 'stories'], true)) {
+        if (! in_array($surface, ['location', 'following', 'stories', 'business'], true)) {
             return response()->json(['error' => 'Invalid surface'], 400);
         }
 

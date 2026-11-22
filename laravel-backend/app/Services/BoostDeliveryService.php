@@ -47,7 +47,11 @@ class BoostDeliveryService
                 if (! $owner || ! $post) {
                     return false;
                 }
-                if (! $this->viewerInPaidArea($viewer, $owner, (string) $boost->feed_type)) {
+                if ($surface === 'business' && ($owner->account_type ?? null) !== 'business') {
+                    return false;
+                }
+                $areaFeedType = $surface === 'business' ? 'local' : (string) $boost->feed_type;
+                if (! $this->viewerInPaidArea($viewer, $owner, $areaFeedType)) {
                     return false;
                 }
                 $handle = $this->normalizeHandle((string) ($owner->handle ?? $post->user_handle ?? ''));
@@ -89,13 +93,14 @@ class BoostDeliveryService
         $audienceCache = [];
         $ranked = [];
         foreach ($boosts as $boost) {
-            if (isset($seenByViewer[(int) $boost->id])) {
+            if ($surface !== 'business' && isset($seenByViewer[(int) $boost->id])) {
                 continue;
             }
             $owner = $boost->user;
-            $cacheKey = $owner->id.'|'.$boost->feed_type;
+            $audienceFeedType = $surface === 'business' ? 'local' : (string) $boost->feed_type;
+            $cacheKey = $owner->id.'|'.$audienceFeedType;
             if (! array_key_exists($cacheKey, $audienceCache)) {
-                $audienceCache[$cacheKey] = $this->realAudienceCount($owner, (string) $boost->feed_type);
+                $audienceCache[$cacheKey] = $this->realAudienceCount($owner, $audienceFeedType);
             }
             $audience = $audienceCache[$cacheKey];
             if ($audience < 1) {

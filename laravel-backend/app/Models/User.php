@@ -46,6 +46,7 @@ class User extends Authenticatable
         'location_local',
         'location_regional',
         'location_national',
+        'account_type',
         'is_verified',
         'is_private',
         'allow_comments',

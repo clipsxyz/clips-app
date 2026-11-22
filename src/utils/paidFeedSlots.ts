@@ -7,7 +7,7 @@ import {
     type Stories24RailItem,
 } from './stories24Rail';
 
-export type PaidFeedSurface = 'location' | 'following' | 'stories';
+export type PaidFeedSurface = 'location' | 'following' | 'stories' | 'business';
 
 export type PaidDeliveryStory = {
     id: string;

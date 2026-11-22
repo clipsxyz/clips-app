@@ -64,7 +64,7 @@ class SuggestedPlacesController extends Controller
 
             $candidates = Post::query()
                 ->with([
-                    'user:id,handle,display_name,avatar_url,location_local,location_regional,location_national',
+                    'user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,account_type',
                     'taggedUsers:id,handle,display_name,avatar_url',
                 ])
                 ->withCount(['likes', 'comments', 'shares', 'views', 'reclips'])

@@ -412,6 +412,13 @@ class AuthController extends Controller
             }
         }
         $this->applyBusinessAddressUpdate($user, $request);
+        $accountTypeSent = $request->exists('accountType')
+            || $request->exists('account_type')
+            || $request->exists('isBusiness')
+            || $request->exists('is_business');
+        if ($accountTypeSent && Schema::hasColumn('users', 'account_type')) {
+            $user->account_type = $this->requestIsBusinessAccount($request) ? 'business' : 'personal';
+        }
         if (array_key_exists('profile_background_url', $data)) {
             $raw = $data['profile_background_url'];
             $user->profile_background_url = ($raw === null || $raw === '') ? null : $raw;

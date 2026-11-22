@@ -73,7 +73,7 @@ export default function LocalBusinessSuggestionCard({
   if (!posts.length) {
     return (
       <section className="mx-3 mb-4 rounded-3xl border border-[#363636] bg-[#121212] p-3 shadow-[0_2px_12px_rgba(0,0,0,0.45)]">
-        <h3 className="text-sm font-semibold text-white tracking-tight">Local business you might like</h3>
+        <h3 className="text-sm font-semibold text-white tracking-tight">Local businesses you might like</h3>
         <p className="mt-2 text-[12px] text-[#8e8e8e]">No strong local business matches yet. Check back soon.</p>
       </section>
     );
@@ -180,13 +180,9 @@ export default function LocalBusinessSuggestionCard({
   }, [visibleBusinessCards, pinnedPaidPostId]);
 
   return (
-    <section className="mx-3 mb-4 rounded-3xl border border-[#363636] bg-[#121212] p-3 shadow-[0_2px_12px_rgba(0,0,0,0.45)]">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-white tracking-tight">Local business you might like</h3>
-          <p className="mt-1 text-[11px] text-[#8e8e8e]">Connect with businesses near {userLocal || 'you'}.</p>
-        </div>
-        <span className="shrink-0 text-xs font-semibold text-[#8ab4ff]">Suggested</span>
+    <section className="mx-3 mb-4 rounded-3xl border border-white/20 bg-black/30 p-3">
+      <div className="mb-3">
+        <h3 className="text-[15px] font-semibold leading-5 text-white tracking-tight">Local businesses you might like</h3>
       </div>
 
       {visibleBusinessCards.length === 0 ? (
@@ -206,7 +202,7 @@ export default function LocalBusinessSuggestionCard({
               data-business-card-id={card.id}
               data-business-card-index={idx}
               data-business-post-id={card.postId || ''}
-              className="shrink-0 w-[165px] rounded-2xl border border-[#30363d] bg-[#0d1318] p-2.5 shadow-[0_2px_10px_rgba(0,0,0,0.35)]"
+              className="flex shrink-0 w-[165px] flex-col overflow-hidden rounded-2xl border border-white/25 bg-white/10"
             >
               <button
                 type="button"
@@ -223,7 +219,7 @@ export default function LocalBusinessSuggestionCard({
                     jumpToPost(card.postId);
                   }
                 }}
-                className="w-full disabled:cursor-not-allowed"
+                className="w-full px-2.5 pt-2.5 disabled:cursor-not-allowed"
                 disabled={!card.canViewProfile}
               >
                 <div className="mb-2.5 flex justify-center">
@@ -237,41 +233,12 @@ export default function LocalBusinessSuggestionCard({
                   </span>
                 )}
               </button>
-              <button
-                type="button"
-                disabled={card.isOwn || !card.canViewProfile}
-                onClick={() => {
-                  if (card.isOwn || !card.canViewProfile) return;
-                  emitSuggestedPlacesAnalytics({
-                    action: 'business_card_profile_open',
-                    businessKey: card.id,
-                    postId: card.postId,
-                  });
-                  if (card.handle) {
-                    navigate(`/user/${card.handle}`);
-                  } else if (card.postId) {
-                    jumpToPost(card.postId);
-                  }
-                }}
-                className={`mt-3 w-full rounded-xl py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
-                  card.isOwn
-                    ? 'border border-[#3a3a3a] bg-transparent text-white hover:bg-white/5'
-                    : 'border-2 border-white text-[#111111] shadow-[0_2px_8px_rgba(212,175,55,0.45)]'
-                }`}
-                style={
-                  card.isOwn
-                    ? undefined
-                    : { background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
-                }
-              >
-                {card.isOwn ? 'You' : 'View'}
-              </button>
-              <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-[#8e8e8e]">
+              <div className="mt-1.5 inline-flex items-center gap-1 px-2.5 text-[10px] text-white/70">
                 <FiMapPin className="h-3 w-3" />
                 <span className="truncate">{userLocal || 'Local match'}</span>
               </div>
               {!card.isOwn && card.handle && onHideBusiness && (
-                <div className="mt-1 flex items-center justify-between gap-2">
+                <div className="mt-1 flex items-center justify-between gap-2 px-2.5 pb-2">
                   {onLikeBusiness && (
                     <button
                       type="button"
@@ -310,6 +277,26 @@ export default function LocalBusinessSuggestionCard({
                   </button>
                 </div>
               )}
+              <button
+                type="button"
+                disabled={card.isOwn || !card.canViewProfile}
+                onClick={() => {
+                  if (card.isOwn || !card.canViewProfile) return;
+                  emitSuggestedPlacesAnalytics({
+                    action: 'business_card_profile_open',
+                    businessKey: card.id,
+                    postId: card.postId,
+                  });
+                  if (card.handle) {
+                    navigate(`/user/${card.handle}`);
+                  } else if (card.postId) {
+                    jumpToPost(card.postId);
+                  }
+                }}
+                className="mt-auto w-full bg-white py-2.5 text-sm font-semibold text-[#111111] disabled:bg-white/70"
+              >
+                {card.isOwn ? 'You' : 'View profile'}
+              </button>
             </article>
           );
         })}

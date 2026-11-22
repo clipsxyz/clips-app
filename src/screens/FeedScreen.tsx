@@ -2189,6 +2189,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [likedBusinesses, setLikedBusinesses] = useState<Set<string>>(new Set());
     const [businessStripEligible, setBusinessStripEligible] = useState(false);
     const [paidSlotPosts, setPaidSlotPosts] = useState<Post[]>([]);
+    const [promotedLocalBusinesses, setPromotedLocalBusinesses] = useState<Post[]>([]);
     const sponsoredStoryHoldRef = useRef<Stories24RailItem | null>(null);
     const sponsoredBusinessMarkedRef = useRef<string | null>(null);
     const businessStripMarkedRef = useRef(false);
@@ -2980,6 +2981,32 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             cancelled = true;
         };
     }, [user?.id, paidSurface, paidFeedType, refreshing]);
+
+    const showLocalBusinessCards =
+        headerFeedScope === 'local' || headerFeedScope === 'regional' || headerFeedScope === 'national';
+
+    useEffect(() => {
+        if (user?.accountType !== 'business' || !user.id) return;
+        void updateAuthProfile({ account_type: 'business', is_business: true }).catch(() => undefined);
+    }, [user?.id, user?.accountType]);
+
+    useEffect(() => {
+        if (!user?.id || !showLocalBusinessCards) {
+            setPromotedLocalBusinesses([]);
+            return;
+        }
+        let cancelled = false;
+        void fetchPaidDelivery('business')
+            .then((rows) => {
+                if (!cancelled) setPromotedLocalBusinesses(paidSlotPostsFromDelivery(rows));
+            })
+            .catch(() => {
+                if (!cancelled) setPromotedLocalBusinesses([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.id, showLocalBusinessCards, refreshing]);
 
     const feedFetchFilter = useMemo(() => {
         if (customLocation != null && String(customLocation).trim() !== '') {
@@ -4332,6 +4359,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 businessLastShown,
                 hiddenBusinesses,
                 likedBusinesses,
+                promotedLocalPosts: promotedLocalBusinesses,
+                homeFeedScope: headerFeedScope === 'following' ? 'following' : headerFeedScope,
             }),
         [
             flatStream,
@@ -4347,6 +4376,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             businessLastShown,
             hiddenBusinesses,
             likedBusinesses,
+            promotedLocalBusinesses,
+            headerFeedScope,
         ],
     );
 

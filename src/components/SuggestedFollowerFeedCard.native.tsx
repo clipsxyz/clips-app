@@ -73,6 +73,40 @@ function SuggestedThumbPreviewVideo({ url }: { url: string }) {
   );
 }
 
+function BusinessPreview({
+  preview,
+}: {
+  preview: SuggestedFollowerSuggestion['previews'][number];
+}) {
+  const videoUrl = preview.mediaUrl || preview.thumbnailUrl;
+  const stillIsImage =
+    Boolean(preview.thumbnailUrl) &&
+    !looksLikeVideoUrl(preview.thumbnailUrl) &&
+    !preview.thumbnailUrl.startsWith('/demo-videos/') &&
+    !preview.thumbnailUrl.startsWith('#');
+  const needsVideoFrame =
+    preview.isVideo &&
+    Boolean(videoUrl) &&
+    (isMockDemoVideoPath(videoUrl) || looksLikeVideoUrl(videoUrl)) &&
+    !stillIsImage;
+
+  return (
+    <View style={styles.bizHero}>
+      {needsVideoFrame ? (
+        <SuggestedThumbPreviewVideo url={videoUrl} />
+      ) : stillIsImage ? (
+        <CachedImage source={{ uri: preview.thumbnailUrl }} style={styles.thumbImage} resizeMode="cover" />
+      ) : (
+        <View style={[styles.thumbImage, styles.thumbPlaceholder]} />
+      )}
+      <View style={styles.viewsOverlay}>
+        <Icon name="play" size={10} color="#fff" />
+        <Text style={styles.viewsText}>{formatViews(preview.views)}</Text>
+      </View>
+    </View>
+  );
+}
+
 export default function SuggestedFollowerFeedCard({
   suggestion,
   onFollow,
@@ -84,6 +118,10 @@ export default function SuggestedFollowerFeedCard({
   const [thumbWidth, setThumbWidth] = React.useState(100);
   const avatar = suggestion.avatarUrl || getAvatarForHandle(suggestion.userHandle);
   const previewCount = suggestion.previews.length;
+  const isBusiness =
+    suggestion.accountType === 'business' ||
+    suggestion.representativePost.userAccountType === 'business' ||
+    suggestion.representativePost.isBoosted === true;
 
   const onThumbRowLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -100,6 +138,50 @@ export default function SuggestedFollowerFeedCard({
       setFollowBusy(false);
     }
   };
+
+  if (isBusiness) {
+    const hero = suggestion.previews[0];
+    return (
+      <View style={styles.bizCard}>
+        <View style={styles.bizHeader}>
+          <Text style={styles.bizHeading}>Local businesses you might like</Text>
+          <TouchableOpacity
+            onPress={onNotInterested}
+            style={styles.bizClose}
+            accessibilityLabel="Not interested"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Icon name="close" size={16} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.92}
+          onPress={() => onOpenProfile(suggestion.userHandle)}
+        >
+          {hero ? <BusinessPreview preview={hero} /> : <View style={styles.bizHero} />}
+          <View style={styles.bizIdentity}>
+            <Avatar src={avatar} name={suggestion.displayName} size={44} />
+            <View style={styles.bizIdentityText}>
+              <Text style={styles.bizName} numberOfLines={1}>
+                {suggestion.userHandle}
+              </Text>
+              <Text style={styles.bizContext} numberOfLines={1}>
+                {suggestion.contextLabel}
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.viewBanner}
+          onPress={() => onOpenProfile(suggestion.userHandle)}
+        >
+          <Text style={styles.viewBannerText}>View profile</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.card}>
@@ -222,11 +304,84 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     minHeight: 300,
   },
+  bizCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  bizHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 16,
+    paddingRight: 10,
+    paddingTop: 12,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  bizHeading: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  bizClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  bizHero: {
+    marginHorizontal: 12,
+    height: 220,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  bizIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  bizIdentityText: {
+    flex: 1,
+  },
+  bizName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  bizContext: {
+    marginTop: 2,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.68)',
+  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 16,
     paddingTop: 8,
     minHeight: 300,
+  },
+  viewBanner: {
+    backgroundColor: '#FFFFFF',
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewBannerText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111111',
   },
   iconBtn: {
     position: 'absolute',

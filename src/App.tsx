@@ -100,6 +100,8 @@ import EditPostModal from './components/EditPostModal';
 import ShareToStoriesModal from './components/ShareToStoriesModal';
 import { getCollectionsForPost, savePostToDefaultCollection, unsavePost } from './api/collections';
 import type { Post, Ad, StickerOverlay } from './types';
+import { selectLocalBusinessStrip } from './utils/feedStreamInjection';
+import { fetchPaidDelivery, paidSlotPostsFromDelivery } from './utils/paidFeedSlots';
 import StickerOverlayComponent from './components/StickerOverlay';
 import EffectWrapper from './components/EffectWrapper';
 import type { EffectConfig } from './utils/effects';
@@ -6645,7 +6647,7 @@ function FeedPageWrapper() {
   const BUSINESS_LIKED_KEY = 'clips:likedBusinessSuggestions';
   const BUSINESS_STRIP_LAST_INSERTED_KEY = 'clips:businessStripLastInsertedAt';
   const BUSINESS_STRIP_MIN_INTERVAL_MS = 8 * 60 * 1000; // 8 min pacing
-  const BUSINESS_SUGGESTION_CAP_MS = 12 * 60 * 60 * 1000; // 12 hours per business per user
+  const [promotedLocalBusinesses, setPromotedLocalBusinesses] = React.useState<Post[]>([]);
   const [businessStripEligible, setBusinessStripEligible] = React.useState(() => {
     try {
       const last = Number(sessionStorage.getItem(BUSINESS_STRIP_LAST_INSERTED_KEY) || '0');
@@ -8040,6 +8042,40 @@ function FeedPageWrapper() {
     return feedItems;
   }, [pages, ads, userId, user?.handle, currentFilter, feedPrefsVersion]);
 
+  const homeBusinessScope =
+    customLocation || showFollowingFeed || active === 'Following'
+      ? 'following'
+      : String(currentFilter || '').trim().toLowerCase() === String(user?.local || '').trim().toLowerCase()
+        ? 'local'
+        : String(currentFilter || '').trim().toLowerCase() === String(user?.regional || '').trim().toLowerCase()
+          ? 'regional'
+          : String(currentFilter || '').trim().toLowerCase() === String(user?.national || '').trim().toLowerCase()
+            ? 'national'
+            : null;
+
+  React.useEffect(() => {
+    if (user?.accountType !== 'business' || !user.id) return;
+    void updateAuthProfile({ account_type: 'business', is_business: true }).catch(() => undefined);
+  }, [user?.id, user?.accountType]);
+
+  React.useEffect(() => {
+    if (!user?.id || (homeBusinessScope !== 'local' && homeBusinessScope !== 'regional' && homeBusinessScope !== 'national')) {
+      setPromotedLocalBusinesses([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchPaidDelivery('business')
+      .then((rows) => {
+        if (!cancelled) setPromotedLocalBusinesses(paidSlotPostsFromDelivery(rows));
+      })
+      .catch(() => {
+        if (!cancelled) setPromotedLocalBusinesses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, homeBusinessScope]);
+
   /** Insert â€œSuggested for your placesâ€ strips between posts (skipped on custom venue/location feeds). */
   const flatWithSuggested = React.useMemo(() => {
     if (!suggestedCardsV2Enabled) return flat;
@@ -8089,32 +8125,6 @@ function FeedPageWrapper() {
           });
     const matched = shuffle(matchedRaw, `${seedBase}:places`);
 
-    const hasBusinessSignal = (p: Post) => {
-      return p.userAccountType === 'business';
-    };
-    const localNorm = (user?.local || '').trim().toLowerCase();
-    const postTimeMs = (p: Post) => {
-      if (typeof p.createdAt === 'number' && Number.isFinite(p.createdAt)) return p.createdAt;
-      if (typeof p.created_at === 'string') {
-        const parsed = Date.parse(p.created_at);
-        if (Number.isFinite(parsed)) return parsed;
-      }
-      return 0;
-    };
-    const businessRankScore = (p: Post): number => {
-      const handleKey = String(p.userHandle || '').trim().toLowerCase();
-      const inLocalScore =
-        ((p.userLocal || '').trim().toLowerCase() === localNorm ? 2 : 0) +
-        ((p.locationLabel || '').trim().toLowerCase().includes(localNorm) ? 1.2 : 0) +
-        ((p.venue || '').trim().toLowerCase().includes(localNorm) ? 1 : 0) +
-        ((p.landmark || '').trim().toLowerCase().includes(localNorm) ? 1 : 0);
-      const businessSignalScore = p.boostFeedType === 'local' ? 1.4 : (p.venue || p.landmark ? 1.0 : 0.4);
-      const followScore = p.isFollowing ? -1.5 : 0.8;
-      const preferenceScore = likedBusinesses.has(handleKey) ? 1.8 : 0;
-      const ageHours = Math.max(0, (Date.now() - postTimeMs(p)) / (1000 * 60 * 60));
-      const freshness = ageHours <= 24 ? 1.4 : ageHours <= 72 ? 0.7 : 0.2;
-      return inLocalScore + businessSignalScore + followScore + preferenceScore + freshness;
-    };
     const readBusinessLastShown = (): Record<string, number> => {
       try {
         const raw = localStorage.getItem(BUSINESS_SUGGESTION_LAST_SHOWN_KEY);
@@ -8141,49 +8151,29 @@ function FeedPageWrapper() {
         return new Set<string>();
       }
     };
-    const businessLastShown = readBusinessLastShown();
-    const hiddenBusinesses = readHiddenBusinesses();
-    const likedBusinesses = readLikedBusinesses();
-    const canShowBusinessNow = (businessKey: string) => {
-      const last = businessLastShown[businessKey] || 0;
-      return Date.now() - last >= BUSINESS_SUGGESTION_CAP_MS;
-    };
-    const localBusinessCandidatesRaw = suggestionPool.filter((p) => {
-      if (!localNorm) return false;
-      const handleKey = String(p.userHandle || '').trim().toLowerCase();
-      if (handleKey && hiddenBusinesses.has(handleKey)) return false;
-      const inLocal =
-        (p.userLocal || '').trim().toLowerCase() === localNorm ||
-        (p.locationLabel || '').trim().toLowerCase().includes(localNorm) ||
-        (p.venue || '').trim().toLowerCase().includes(localNorm) ||
-        (p.landmark || '').trim().toLowerCase().includes(localNorm);
-      return inLocal && hasBusinessSignal(p);
+    const tabName = String(currentFilter || '').trim().toLowerCase();
+    const homeFeedScope =
+      customLocation || showFollowingFeed || active === 'Following'
+        ? 'following'
+        : tabName && tabName === String(user?.local || '').trim().toLowerCase()
+          ? 'local'
+          : tabName && tabName === String(user?.regional || '').trim().toLowerCase()
+            ? 'regional'
+            : tabName && tabName === String(user?.national || '').trim().toLowerCase()
+              ? 'national'
+              : null;
+    const businessStrip = selectLocalBusinessStrip({
+      posts,
+      promotedPosts: promotedLocalBusinesses,
+      user,
+      seedBase,
+      hiddenBusinesses: readHiddenBusinesses(),
+      likedBusinesses: readLikedBusinesses(),
+      businessLastShown: readBusinessLastShown(),
+      homeFeedScope,
     });
-    // Keep business suggestions local to the viewer's area.
-    const scoredBusinesses = [...localBusinessCandidatesRaw]
-      .map((p) => ({ post: p, score: businessRankScore(p) }))
-      .sort((a, b) => b.score - a.score);
-    const rankedBusinesses = scoredBusinesses
-      .filter((entry) => entry.score >= 1.6)
-      .map((entry) => entry.post);
-    const shuffledBusinesses = shuffle(rankedBusinesses, `${seedBase}:business`);
-    const isActiveLocalBoost = (p: Post) => {
-      const boosted = p.boostFeedType === 'local' || p.isBoosted;
-      const notExpired = !p.boostExpiresAt || p.boostExpiresAt > Date.now();
-      return boosted && notExpired;
-    };
-    const paidPinned = shuffledBusinesses.find((p) => {
-      if (!isActiveLocalBoost(p)) return false;
-      const key = `${userId}:${String(p.id)}`;
-      return canShowBusinessNow(key);
-    });
-    const topBusinessScore = scoredBusinesses[0]?.score ?? -Infinity;
-    const passesHardFallback = topBusinessScore >= 2.4;
-    const localBusinessCandidates = paidPinned
-      ? [paidPinned, ...shuffledBusinesses.filter((p) => String(p.id) !== String(paidPinned.id))]
-      : passesHardFallback
-        ? shuffledBusinesses
-        : [];
+    const localBusinessCandidates = businessStrip.posts;
+    const paidPinnedId = businessStrip.pinnedPaidPostId;
 
     type StreamRow =
       | { type: 'post'; item: Post; createdAt: number }
@@ -8219,7 +8209,7 @@ function FeedPageWrapper() {
         if (businessStripEligible && localBusinessCandidates.length > 0 && postCount === 2) {
           out.push({
             type: 'local_business',
-            item: { posts: localBusinessCandidates.slice(0, 8), pinnedPaidPostId: paidPinned ? String(paidPinned.id) : undefined },
+            item: { posts: localBusinessCandidates.slice(0, 8), pinnedPaidPostId: paidPinnedId },
             createdAt: 0,
           });
         }
@@ -8236,12 +8226,12 @@ function FeedPageWrapper() {
     if (businessStripEligible && localBusinessCandidates.length > 0 && !out.some((r) => r.type === 'local_business')) {
       out.unshift({
         type: 'local_business',
-        item: { posts: localBusinessCandidates.slice(0, 8), pinnedPaidPostId: paidPinned ? String(paidPinned.id) : undefined },
+        item: { posts: localBusinessCandidates.slice(0, 8), pinnedPaidPostId: paidPinnedId },
         createdAt: 0,
       });
     }
     return out;
-  }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions, previewSuggestedCards, previewSuggestedCardsFromQuery, userId, businessStripEligible, suggestedCardsV2Enabled, active]);
+  }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions, previewSuggestedCards, previewSuggestedCardsFromQuery, userId, businessStripEligible, suggestedCardsV2Enabled, active, currentFilter, showFollowingFeed, promotedLocalBusinesses]);
 
   React.useEffect(() => {
     setInterestsDraft(user?.interests ?? []);

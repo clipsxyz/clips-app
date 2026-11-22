@@ -2,16 +2,12 @@ import React from 'react';
 import {
   View,
   Text,
+  Image,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import LinearGradient from 'react-native-linear-gradient';
-import {
-  UEFA_PASSPORT_GRADIENT,
-  UEFA_PASSPORT_GRADIENT_LOCATIONS,
-} from '../theme/gazetteerAmbientNative';
 import Avatar from './Avatar.native';
 import { getAvatarForHandle } from '../api/users';
 import type { Post } from '../types';
@@ -49,6 +45,33 @@ function normalizeHandle(v: string | null | undefined): string {
   return String(v || '').replace(/^@/, '').trim().toLowerCase();
 }
 
+function coverStill(post: Post | undefined): string | undefined {
+  if (!post) return undefined;
+  const extra = post as Post & {
+    thumbnail_url?: string;
+    poster_url?: string;
+    image_url?: string;
+    media_url?: string;
+  };
+  const candidates = [
+    post.thumbnailUrl,
+    extra.thumbnail_url,
+    post.videoPosterUrl,
+    extra.poster_url,
+    extra.image_url,
+    post.mediaItems?.find((item) => item.type === 'image' && item.url)?.url,
+    extra.media_url,
+    post.mediaUrl,
+  ];
+  for (const value of candidates) {
+    if (typeof value !== 'string') continue;
+    const uri = value.trim();
+    if (!uri || /\.(mp4|mov|m4v|webm)(\?|$)/i.test(uri)) continue;
+    return uri;
+  }
+  return undefined;
+}
+
 function mockBusinessAvatar(name: string): string {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0d1318&color=8ab4ff&rounded=true&bold=true&size=256&format=png`;
 }
@@ -61,7 +84,7 @@ export default function LocalBusinessSuggestionCard({
   viewerHandle = null,
   onHideBusiness,
   onUnhideBusiness,
-  onLikeBusiness,
+  onLikeBusiness: _onLikeBusiness,
   onOpenProfile,
   onScrollToPost,
   onStripShown,
@@ -166,15 +189,7 @@ export default function LocalBusinessSuggestionCard({
   if (!posts.length) {
     return (
       <View style={styles.section}>
-        <LinearGradient
-          colors={[...UEFA_PASSPORT_GRADIENT]}
-          locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={StyleSheet.absoluteFill}
-          pointerEvents="none"
-        />
-        <Text style={styles.title}>Local business you might like</Text>
+        <Text style={styles.title}>Local businesses you might like</Text>
         <Text style={styles.emptyText}>No strong local business matches yet. Check back soon.</Text>
       </View>
     );
@@ -196,21 +211,7 @@ export default function LocalBusinessSuggestionCard({
 
   return (
     <View style={styles.section}>
-      <LinearGradient
-        colors={[...UEFA_PASSPORT_GRADIENT]}
-        locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-      <View style={styles.headerRow}>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Local business you might like</Text>
-          <Text style={styles.subtitle}>Connect with businesses near {userLocal || 'you'}.</Text>
-        </View>
-        <Text style={styles.badge}>Suggested</Text>
-      </View>
+      <Text style={styles.title}>Local businesses you might like</Text>
 
       {visibleBusinessCards.length === 0 ? (
         <View style={styles.emptyCard}>
@@ -220,70 +221,26 @@ export default function LocalBusinessSuggestionCard({
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
           {visibleBusinessCards.map((card) => {
             const isSponsored = Boolean(pinnedPaidPostId && card.postId && card.postId === pinnedPaidPostId);
+            const cover = coverStill(card.post) || card.avatarSrc;
             return (
               <View key={card.id} style={styles.card}>
-                <TouchableOpacity onPress={() => openCard(card)} disabled={!card.canViewProfile}>
-                  <View style={styles.avatarWrap}>
-                    <Avatar src={card.avatarSrc} name={card.name} size={94} />
-                  </View>
-                  <Text style={styles.cardName} numberOfLines={1}>
-                    {card.name}
-                  </Text>
-                  <Text style={styles.cardSubtitle} numberOfLines={1}>
-                    {card.subtitle}
-                  </Text>
-                  {isSponsored ? (
-                    <View style={styles.sponsoredBadge}>
-                      <Text style={styles.sponsoredText}>SPONSORED</Text>
-                    </View>
-                  ) : null}
-                </TouchableOpacity>
-
                 <TouchableOpacity
-                  disabled={card.isOwn || !card.canViewProfile}
                   onPress={() => openCard(card)}
-                  style={[styles.viewBtnWrap, card.isOwn && styles.viewBtnOwn]}
+                  disabled={!card.canViewProfile}
+                  style={styles.coverTap}
+                  activeOpacity={0.9}
                 >
-                  {card.isOwn ? (
-                    <Text style={styles.viewBtnOwnText}>You</Text>
+                  {cover ? (
+                    <Image source={{ uri: cover }} style={styles.cover} resizeMode="cover" />
                   ) : (
-                    <LinearGradient
-                      colors={['#f6e27a', '#d4af37', '#f4f4f4', '#bfc5cc', '#ffe8a3']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.viewBtnGradient}
-                    >
-                      <Text style={styles.viewBtnText}>View</Text>
-                    </LinearGradient>
+                    <View style={styles.coverFallback}>
+                      <Avatar src={card.avatarSrc} name={card.name} size={72} />
+                    </View>
                   )}
-                </TouchableOpacity>
-
-                <View style={styles.locationRow}>
-                  <Icon name="location-outline" size={12} color="#8e8e8e" />
-                  <Text style={styles.locationText} numberOfLines={1}>
-                    {userLocal || 'Local match'}
-                  </Text>
-                </View>
-
-                {!card.isOwn && card.handle && onHideBusiness ? (
-                  <View style={styles.metaRow}>
-                    {onLikeBusiness ? (
-                      <TouchableOpacity
-                        onPress={() => {
-                          const key = normalizeHandle(card.handle);
-                          if (!key) return;
-                          emitSuggestedPlacesAnalytics({
-                            action: 'business_card_more_like_this',
-                            businessKey: key,
-                            postId: card.postId,
-                          });
-                          onLikeBusiness(key);
-                        }}
-                      >
-                        <Text style={styles.moreLike}>More like this</Text>
-                      </TouchableOpacity>
-                    ) : null}
+                  <View style={styles.scrim} />
+                  {!card.isOwn && card.handle && onHideBusiness ? (
                     <TouchableOpacity
+                      style={styles.dismiss}
                       onPress={() => {
                         const key = normalizeHandle(card.handle);
                         if (!key) return;
@@ -297,10 +254,25 @@ export default function LocalBusinessSuggestionCard({
                         onHideBusiness(key);
                       }}
                     >
-                      <Text style={styles.notInterested}>Not interested</Text>
+                      <Icon name="close" size={14} color="#FFFFFF" />
                     </TouchableOpacity>
+                  ) : null}
+                  <View style={styles.caption}>
+                    <Text style={styles.cardName} numberOfLines={1}>
+                      {card.name}
+                    </Text>
+                    <Text style={styles.cardSubtitle} numberOfLines={1}>
+                      {isSponsored ? 'Sponsored' : card.subtitle}
+                    </Text>
                   </View>
-                ) : null}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  disabled={card.isOwn || !card.canViewProfile}
+                  onPress={() => openCard(card)}
+                  style={[styles.viewBanner, (card.isOwn || !card.canViewProfile) && styles.viewBannerDisabled]}
+                >
+                  <Text style={styles.viewBannerText}>{card.isOwn ? 'You' : 'View profile'}</Text>
+                </TouchableOpacity>
               </View>
             );
           })}
@@ -337,39 +309,16 @@ export default function LocalBusinessSuggestionCard({
 
 const styles = StyleSheet.create({
   section: {
-    marginHorizontal: 12,
-    marginBottom: 16,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    backgroundColor: '#000000',
-    overflow: 'hidden',
-    padding: 12,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 8,
-  },
-  headerText: {
-    flex: 1,
+    marginBottom: 8,
+    backgroundColor: 'transparent',
   },
   title: {
-    fontSize: 14,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    fontSize: 16,
+    lineHeight: 21,
     fontWeight: '700',
     color: '#FFFFFF',
-  },
-  subtitle: {
-    marginTop: 4,
-    fontSize: 11,
-    color: '#8e8e8e',
-  },
-  badge: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#8ab4ff',
   },
   emptyText: {
     marginTop: 8,
@@ -377,10 +326,11 @@ const styles = StyleSheet.create({
     color: '#8e8e8e',
   },
   emptyCard: {
+    marginHorizontal: 16,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    backgroundColor: '#000000',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -391,102 +341,78 @@ const styles = StyleSheet.create({
   },
   strip: {
     gap: 10,
+    paddingHorizontal: 16,
     paddingBottom: 4,
   },
   card: {
-    width: 165,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    backgroundColor: '#000000',
-    padding: 10,
+    width: 168,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
   },
-  avatarWrap: {
+  coverTap: {
+    height: 210,
+  },
+  cover: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  coverFallback: {
+    flex: 1,
     alignItems: 'center',
-    marginBottom: 10,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  scrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 78,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  dismiss: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  caption: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 8,
   },
   cardName: {
-    textAlign: 'center',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   cardSubtitle: {
     marginTop: 2,
-    textAlign: 'center',
     fontSize: 12,
-    color: '#8e8e8e',
+    color: 'rgba(255,255,255,0.86)',
   },
-  sponsoredBadge: {
-    alignSelf: 'center',
-    marginTop: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  sponsoredText: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: 'rgba(255,255,255,0.85)',
-  },
-  viewBtnWrap: {
-    marginTop: 12,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  viewBtnOwn: {
-    borderWidth: 1,
-    borderColor: '#3a3a3a',
-    paddingVertical: 8,
+  viewBanner: {
+    backgroundColor: '#FFFFFF',
+    minHeight: 40,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  viewBtnOwnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  viewBannerDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.72)',
   },
-  viewBtnGradient: {
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    borderRadius: 12,
-  },
-  viewBtnText: {
+  viewBannerText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#111111',
-  },
-  locationRow: {
-    marginTop: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  locationText: {
-    flex: 1,
-    fontSize: 10,
-    color: '#8e8e8e',
-  },
-  metaRow: {
-    marginTop: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  moreLike: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: '#8ab4ff',
-  },
-  notInterested: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 0.2,
   },
   undoRow: {
     marginTop: 8,

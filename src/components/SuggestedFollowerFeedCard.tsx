@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { IoBusinessOutline, IoInformationCircleOutline, IoPlay } from 'react-icons/io5';
+import { IoBusinessOutline, IoClose, IoInformationCircleOutline, IoPlay } from 'react-icons/io5';
 import Avatar from './Avatar';
 import { getAvatarForHandle } from '../api/users';
 import { resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
@@ -73,6 +73,10 @@ export default function SuggestedFollowerFeedCard({
   const [infoOpen, setInfoOpen] = React.useState(false);
   const avatar = suggestion.avatarUrl || getAvatarForHandle(suggestion.userHandle);
   const previewCount = suggestion.previews.length;
+  const isBusiness =
+    suggestion.accountType === 'business' ||
+    suggestion.representativePost.userAccountType === 'business' ||
+    suggestion.representativePost.isBoosted === true;
 
   const openProfile = () => navigate(`/user/${suggestion.userHandle}`);
 
@@ -84,6 +88,67 @@ export default function SuggestedFollowerFeedCard({
       setFollowBusy(false);
     }
   };
+
+  if (isBusiness) {
+    const hero = suggestion.previews[0];
+    const videoSrc =
+      hero && hero.isVideo && hero.mediaUrl
+        ? resolveMockFeedVideoUrl(hero.mediaUrl)
+        : hero && hero.isVideo && VIDEO_SRC_RE.test(hero.thumbnailUrl)
+          ? resolveMockFeedVideoUrl(hero.thumbnailUrl)
+          : undefined;
+    const stillSrc =
+      hero && hero.thumbnailUrl && !VIDEO_SRC_RE.test(hero.thumbnailUrl) ? hero.thumbnailUrl : undefined;
+    return (
+      <article
+        className="relative mx-4 mb-3 overflow-hidden rounded-[20px] border border-white/20 bg-white/[0.08]"
+        aria-label="Local businesses you might like"
+      >
+        <div className="flex items-center justify-between gap-2 px-4 pb-2.5 pt-3">
+          <p className="text-[15px] font-bold leading-5 text-white">Local businesses you might like</p>
+          <button
+            type="button"
+            onClick={onNotInterested}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white"
+            aria-label="Not interested"
+          >
+            <IoClose className="h-4 w-4" />
+          </button>
+        </div>
+        <button type="button" onClick={openProfile} className="block w-full text-left">
+          <div className="relative mx-3 h-[220px] overflow-hidden rounded-[14px] bg-black/40">
+            {videoSrc ? (
+              <PreviewVideo src={videoSrc} poster={stillSrc} className="h-full w-full object-cover" />
+            ) : stillSrc ? (
+              <img src={stillSrc} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="block h-full w-full bg-[#121212]" />
+            )}
+            {hero ? (
+              <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded bg-black/50 px-1.5 py-0.5">
+                <IoPlay className="h-2.5 w-2.5 text-white" aria-hidden />
+                <span className="text-[10px] font-semibold text-white">{formatViews(hero.views)}</span>
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2.5 px-3.5 py-3">
+            <Avatar src={avatar} name={suggestion.displayName} size={44} hideBorder />
+            <div className="min-w-0">
+              <p className="truncate text-[15px] font-bold text-white">{suggestion.userHandle}</p>
+              <p className="mt-0.5 truncate text-xs text-white/70">{suggestion.contextLabel}</p>
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={openProfile}
+          className="flex min-h-12 w-full items-center justify-center bg-white text-base font-bold text-[#111111]"
+        >
+          View profile
+        </button>
+      </article>
+    );
+  }
 
   return (
     <article
