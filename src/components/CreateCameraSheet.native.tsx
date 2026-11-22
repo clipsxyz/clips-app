@@ -41,6 +41,12 @@ type Props = {
     mode: CameraCaptureMode;
     onClose: () => void;
     onCapture: (media: CapturedCameraMedia) => void;
+    /** Chat can flip between a photo and a short video without leaving the sheet. */
+    canSwitchMode?: boolean;
+    onModeChange?: (mode: CameraCaptureMode) => void;
+    maxVideoSeconds?: number;
+    /** Show time left (15, 14, …) instead of time elapsed. Used by chat clips. */
+    countdown?: boolean;
 };
 
 function formatTimer(totalSeconds: number) {
@@ -49,7 +55,16 @@ function formatTimer(totalSeconds: number) {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export default function CreateCameraSheet({ visible, mode, onClose, onCapture }: Props) {
+export default function CreateCameraSheet({
+    visible,
+    mode,
+    onClose,
+    onCapture,
+    canSwitchMode = false,
+    onModeChange,
+    maxVideoSeconds = MAX_VIDEO_SECONDS,
+    countdown = false,
+}: Props) {
     const { width: screenW, height: screenH } = useWindowDimensions();
     const insets = useSafeAreaInsets();
     const { hasPermission, requestPermission } = useCameraPermission();
@@ -189,14 +204,14 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
         if (!recording) return;
         const timer = setInterval(() => {
             const started = recordingStartedAt.current ?? Date.now();
-            const seconds = Math.min(MAX_VIDEO_SECONDS, Math.floor((Date.now() - started) / 1000));
+            const seconds = Math.min(maxVideoSeconds, Math.floor((Date.now() - started) / 1000));
             setElapsed(seconds);
-            if (seconds >= MAX_VIDEO_SECONDS) {
+            if (seconds >= maxVideoSeconds) {
                 void cameraRef.current?.stopRecording();
             }
         }, 250);
         return () => clearInterval(timer);
-    }, [recording]);
+    }, [recording, maxVideoSeconds]);
 
     const takePhoto = async () => {
         if (busy || recording || !cameraAllowed || !cameraRef.current) return;
@@ -275,9 +290,9 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
                             style={{ width: cardW, height: cardH, backgroundColor: BLACK }}
                             device={device}
                             isActive={visible}
-                            photo={mode === 'photo'}
-                            video={mode === 'video'}
-                            audio={mode === 'video' && micAllowed}
+                            photo={mode === 'photo' || canSwitchMode}
+                            video={mode === 'video' || canSwitchMode}
+                            audio={(mode === 'video' || canSwitchMode) && micAllowed}
                             outputOrientation="preview"
                             androidPreviewViewType="surface-view"
                             resizeMode="cover"
@@ -292,11 +307,34 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
                         <View style={styles.timerWrap} pointerEvents="none">
                             <View style={styles.timerPill}>
                                 <View style={styles.timerDot} />
-                                <Text style={styles.timerText}>{formatTimer(elapsed)}</Text>
+                                <Text style={styles.timerText}>
+                                    {countdown
+                                        ? String(Math.max(0, maxVideoSeconds - (recording ? elapsed : 0)))
+                                        : formatTimer(elapsed)}
+                                </Text>
                             </View>
                         </View>
                     ) : null}
                     {error ? <Text style={styles.error}>{error}</Text> : null}
+                    <View style={styles.controlsColumn}>
+                    {canSwitchMode ? (
+                        <View style={[styles.modeRow, recording && styles.modeRowHidden]} pointerEvents={recording ? 'none' : 'auto'}>
+                            <Pressable
+                                onPress={() => onModeChange?.('photo')}
+                                accessibilityRole="button"
+                                accessibilityLabel="Photo"
+                            >
+                                <Text style={[styles.modeLabel, mode === 'photo' && styles.modeLabelOn]}>Photo</Text>
+                            </Pressable>
+                            <Pressable
+                                onPress={() => onModeChange?.('video')}
+                                accessibilityRole="button"
+                                accessibilityLabel="Video"
+                            >
+                                <Text style={[styles.modeLabel, mode === 'video' && styles.modeLabelOn]}>Video</Text>
+                            </Pressable>
+                        </View>
+                    ) : null}
                     <View style={styles.controls}>
                         <Pressable style={styles.sideBtn} onPress={finishClose} accessibilityLabel="Close camera">
                             <Icon name="close" size={26} color="#FFFFFF" />
@@ -331,6 +369,7 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
                         >
                             <Icon name="camera-reverse-outline" size={24} color="#FFFFFF" />
                         </Pressable>
+                    </View>
                     </View>
                 </View>
             </Animated.View>
@@ -416,12 +455,32 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         zIndex: 4,
     },
-    controls: {
+    modeRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 28,
+        marginBottom: 18,
+    },
+    modeRowHidden: {
+        opacity: 0,
+    },
+    modeLabel: {
+        color: 'rgba(255,255,255,0.55)',
+        fontSize: 13,
+        fontWeight: '700',
+        letterSpacing: 0.4,
+    },
+    modeLabelOn: {
+        color: '#FFFFFF',
+    },
+    controlsColumn: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 18,
         zIndex: 5,
+    },
+    controls: {
         paddingHorizontal: 22,
         flexDirection: 'row',
         alignItems: 'center',

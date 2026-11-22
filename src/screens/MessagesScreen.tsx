@@ -27,8 +27,8 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
-import { launchNativeCamera } from '../utils/launchNativeCamera';
-import { ensureCameraCapturePermission, ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet.native';
+import { ensureGalleryMediaPermission, requestInAppCameraAccess } from '../utils/galleryMediaPermissionsNative';
 import {
     listDmRecentMedia,
     materializeDmFile,
@@ -1187,7 +1187,10 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [isMuted, setIsMuted] = useState(false);
     const [isBlocked, setIsBlocked] = useState(false);
     const [imageCompose, setImageCompose] = useState<DmComposeDraft | null>(null);
+    const [imageComposeSending, setImageComposeSending] = useState(false);
+    const imageComposeSendingRef = useRef(false);
     const [attachSheetOpen, setAttachSheetOpen] = useState(false);
+    const [dmCameraMode, setDmCameraMode] = useState<CameraCaptureMode | null>(null);
     const [recentFiles, setRecentFiles] = useState<DmRecentFile[]>([]);
     const [recentFilesLoading, setRecentFilesLoading] = useState(false);
     const [messageReactions, setMessageReactions] = useState<Record<string, Array<{ emoji: string; users: string[] }>>>({});
@@ -2923,8 +2926,9 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const openDmCamera = () => {
         if (!user?.handle) return;
+        Keyboard.dismiss();
         void (async () => {
-            const allowed = await ensureCameraCapturePermission('video');
+            const allowed = await requestInAppCameraAccess('video');
             if (!allowed) {
                 showAlert({
                     title: 'Camera access needed',
@@ -2934,38 +2938,47 @@ export default function MessagesScreen({ route, navigation }: any) {
                 });
                 return;
             }
-            launchNativeCamera(
-                { mediaType: 'mixed', durationLimitSec: DM_CAMERA_VIDEO_SEC, saveToPhotos: true, cameraType: 'back' },
-                (response) => {
-                    if (response.didCancel) return;
-                    if (response.errorCode) {
-                        showAlert({
-                            title: 'Camera error',
-                            message: response.errorMessage || 'Could not open the camera.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-                    const asset = response.assets?.[0];
-                    const uri = String(asset?.uri || '').trim();
-                    if (!uri) return;
-                    const mime = String(asset?.type || '');
-                    const fileName = asset?.fileName || undefined;
-                    const isVideo = dmMediaIsVideo(mime, fileName, uri);
-                    const seconds = cameraClipSeconds(asset?.duration);
-                    if (isVideo && seconds > DM_CAMERA_VIDEO_SEC + 0.4) {
-                        showAlert({
-                            title: '15 second limit',
-                            message: 'Camera clips in chat are limited to 15 seconds. Record a shorter one.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-                    presentDmCompose({ imageUrl: uri, mime, fileName, isVideo });
-                },
-            );
+            setDmCameraMode('photo');
+        })();
+    };
+
+    const acceptDmCameraCapture = (media: { uri: string; type: string; fileName: string; duration?: number }) => {
+        const uri = String(media.uri || '').trim();
+        if (!uri) return;
+        const isVideo = dmMediaIsVideo(media.type, media.fileName, uri);
+        const seconds = cameraClipSeconds(media.duration);
+        if (isVideo && seconds > DM_CAMERA_VIDEO_SEC + 0.4) {
+            setDmCameraMode(null);
+            showAlert({
+                title: '15 second limit',
+                message: 'Camera clips in chat are limited to 15 seconds. Record a shorter one.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
+        void (async () => {
+            let previewUri = uri;
+            if (isVideo) {
+                previewUri = '';
+                try {
+                    const mod = await import('react-native-compressor');
+                    const source = uri.replace(/^file:\/\//, '');
+                    const frame = await mod.createVideoThumbnail(source).catch(() => mod.createVideoThumbnail(uri));
+                    const path = typeof frame?.path === 'string' ? frame.path.trim() : '';
+                    if (path) previewUri = path.startsWith('file://') ? path : `file://${path}`;
+                } catch (err) {
+                    console.warn('DM camera thumbnail failed', err);
+                }
+            }
+            setDmCameraMode(null);
+            presentDmCompose({
+                imageUrl: uri,
+                mime: media.type,
+                fileName: media.fileName,
+                previewUri: previewUri || undefined,
+                isVideo,
+            });
         })();
     };
 
@@ -3109,14 +3122,18 @@ export default function MessagesScreen({ route, navigation }: any) {
     };
 
     const handleCancelImageCompose = () => {
+        if (imageComposeSendingRef.current) return;
         setImageCompose(null);
     };
 
     const handleSendImageWithCaption = async () => {
-        if (!imageCompose || !user?.handle) return;
+        if (!imageCompose || !user?.handle || imageComposeSendingRef.current) return;
         const localImageUrl = imageCompose.imageUrl;
         const trimmedCaption = imageCompose.caption.trim();
+        const sendingVideo = imageCompose.isVideo === true;
         const replyToPayload = buildReplyToPayload();
+        imageComposeSendingRef.current = true;
+        setImageComposeSending(true);
         let hostedImageUrl: string;
         try {
             hostedImageUrl = await hostDmImageUrl(localImageUrl, {
@@ -3125,9 +3142,11 @@ export default function MessagesScreen({ route, navigation }: any) {
             });
         } catch (error) {
             console.error('Error uploading DM image:', error);
+            imageComposeSendingRef.current = false;
+            setImageComposeSending(false);
             showAlert({
                 title: 'Upload failed',
-                message: error instanceof Error ? error.message : 'Could not upload this photo. Try again.',
+                message: error instanceof Error ? error.message : sendingVideo ? 'Could not upload this video. Try again.' : 'Could not upload this photo. Try again.',
                 icon: 'alert',
                 confirmButtonText: 'OK',
             });
@@ -3159,6 +3178,8 @@ export default function MessagesScreen({ route, navigation }: any) {
                 confirmButtonText: 'OK',
             });
         } finally {
+            imageComposeSendingRef.current = false;
+            setImageComposeSending(false);
             // Quote is consumed by this send — never carry it into the next message.
             setReplyingTo(null);
         }
@@ -4683,18 +4704,37 @@ export default function MessagesScreen({ route, navigation }: any) {
                                         maxLength={280}
                                         multiline
                                         textAlignVertical="top"
+                                        editable={!imageComposeSending}
                                     />
                                 </View>
                             </View>
+                            {imageComposeSending ? (
+                                <Text style={styles.imageComposeUploading}>
+                                    {imageCompose?.isVideo
+                                        ? 'Sending your video. This can take a moment.'
+                                        : 'Sending…'}
+                                </Text>
+                            ) : null}
                             <TouchableOpacity
-                                style={styles.imageComposeSendBtn}
+                                style={[styles.imageComposeSendBtn, imageComposeSending && styles.imageComposeSendBtnBusy]}
                                 onPress={handleSendImageWithCaption}
+                                disabled={imageComposeSending}
                             >
-                                <Text style={styles.imageComposeSendText}>Send</Text>
+                                {imageComposeSending ? (
+                                    <View style={styles.imageComposeSendRow}>
+                                        <ActivityIndicator color={UCL_CANVAS_NAVY} size="small" />
+                                        <Text style={styles.imageComposeSendText}>
+                                            {imageCompose?.isVideo ? 'Uploading video…' : 'Uploading…'}
+                                        </Text>
+                                    </View>
+                                ) : (
+                                    <Text style={styles.imageComposeSendText}>Send</Text>
+                                )}
                             </TouchableOpacity>
                             <TouchableOpacity
-                                style={styles.imageComposeCancelBtn}
+                                style={[styles.imageComposeCancelBtn, imageComposeSending && styles.imageComposeCancelBtnBusy]}
                                 onPress={handleCancelImageCompose}
+                                disabled={imageComposeSending}
                             >
                                 <Text style={styles.imageComposeCancelText}>Cancel</Text>
                             </TouchableOpacity>
@@ -4746,6 +4786,16 @@ export default function MessagesScreen({ route, navigation }: any) {
                 subtitle={sheetMenu?.subtitle}
                 options={sheetMenu?.options ?? []}
                 onDismiss={() => setSheetMenu(null)}
+            />
+            <CreateCameraSheet
+                visible={dmCameraMode != null}
+                mode={dmCameraMode ?? 'photo'}
+                canSwitchMode
+                maxVideoSeconds={DM_CAMERA_VIDEO_SEC}
+                countdown
+                onModeChange={setDmCameraMode}
+                onClose={() => setDmCameraMode(null)}
+                onCapture={acceptDmCameraCapture}
             />
         </GazetteerScreenShell>
     );
@@ -6036,7 +6086,7 @@ const styles = StyleSheet.create({
     },
     imageComposeThumb: {
         width: 80,
-        aspectRatio: 1,
+        height: 80,
         borderRadius: 12,
         overflow: 'hidden',
         borderWidth: 1,
@@ -6045,8 +6095,8 @@ const styles = StyleSheet.create({
         marginRight: 14,
     },
     imageComposePreview: {
-        width: '100%',
-        height: '100%',
+        width: 80,
+        height: 80,
     },
     imageComposeBody: {
         flex: 1,
@@ -6073,12 +6123,27 @@ const styles = StyleSheet.create({
         lineHeight: 20,
         textAlignVertical: 'top',
     },
+    imageComposeUploading: {
+        textAlign: 'center',
+        color: UCL_TEXT_PRIMARY,
+        fontSize: 13,
+        fontWeight: '600',
+        marginBottom: 10,
+    },
     imageComposeSendBtn: {
         borderRadius: 999,
         backgroundColor: UCL_TEXT_PRIMARY,
         paddingVertical: 14,
         alignItems: 'center',
         marginBottom: 8,
+    },
+    imageComposeSendBtnBusy: {
+        opacity: 0.9,
+    },
+    imageComposeSendRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
     },
     imageComposeSendText: {
         fontSize: 15,
@@ -6093,6 +6158,9 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         alignItems: 'center',
         marginBottom: 8,
+    },
+    imageComposeCancelBtnBusy: {
+        opacity: 0.4,
     },
     imageComposeCancelText: {
         fontSize: 15,
