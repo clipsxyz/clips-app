@@ -90,8 +90,10 @@ import LocationPlaceSummaryCard from './components/LocationPlaceSummaryCard';
 import LocationPlaceSummaryModal from './components/LocationPlaceSummaryModal';
 import LocalBusinessSuggestionCard from './components/LocalBusinessSuggestionCard';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
-import { getActiveBoost, getBoostTimeRemaining, getBoostAnalytics } from './api/boost';
+import { getActiveBoost, getBoostTimeRemaining, getBoostAnalytics, getBoostWindow } from './api/boost';
+import { boostReachProgress, boostTimeProgress, formatBoostRemaining, formatBoostWindow } from './utils/boostProgress';
 import BoostSelectionModal from './components/BoostSelectionModal';
+import ActiveBoostStatusCard from './components/ActiveBoostStatusCard';
 import SavePostModal from './components/SavePostModal';
 import PostMenuModal from './components/PostMenuModal';
 import CreateGroupModal from './components/CreateGroupModal';
@@ -9764,6 +9766,7 @@ function FeedPageWrapper() {
                 estimatedReach: meta?.estimatedReach,
                 radiusKm: meta?.radiusKm,
                 eligibleUsersCount: meta?.eligibleUsersCount,
+                action: meta?.action,
               }
             });
             setBoostModalOpen(false);
@@ -10002,6 +10005,12 @@ function BoostPageWrapper() {
     selectedPostForScenesBoostRef.current = selectedPostForScenes;
   }, [selectedPostForScenes]);
   const [boostModalOpen, setBoostModalOpen] = React.useState(false);
+  const [boostDraft, setBoostDraft] = React.useState<{
+    action: 'extend' | 'create';
+    radiusKm: number;
+    durationHours: 6 | 12 | 24 | 72;
+    goal?: 'views' | 'profile_visits' | 'messages';
+  } | null>(null);
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
   const [boostTap, setBoostTap] = React.useState<{ post: Post; origin: ProfileGridTapOrigin } | null>(null);
   const selectedPostForBoostRef = React.useRef<Post | null>(null);
@@ -10269,6 +10278,27 @@ function BoostPageWrapper() {
                 </div>
               </div>
             </div>
+            ${(() => {
+              const starts = data?.startsAt ? new Date(data.startsAt).getTime() : NaN;
+              const expires = data?.expiresAt ? new Date(data.expiresAt).getTime() : NaN;
+              if (!Number.isFinite(starts) || !Number.isFinite(expires)) return '';
+              const remaining = Math.max(0, expires - Date.now());
+              const active = !!data?.isActive && remaining > 0;
+              const timePct = Math.round((active ? boostTimeProgress(starts, expires) : 1) * 100);
+              const views = Number(data?.viewsDelivered ?? metrics.impressions) || 0;
+              const reach = Number(data?.eligibleUsersCount) || 0;
+              const reachPct = Math.round(boostReachProgress(views, reach) * 100);
+              const windowLabel = formatBoostWindow(Number(data?.durationHours) || 6);
+              return `
+                <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+                  <p class="text-[11px] uppercase tracking-[0.12em] text-emerald-300 font-semibold">${active ? 'Active boost' : 'Boost ended'}</p>
+                  <p class="mt-1 text-sm font-semibold text-white">${active ? `${formatBoostRemaining(remaining)} remaining of ${windowLabel}` : 'This boost has finished'}</p>
+                  <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"><div class="h-full rounded-full bg-sky-400" style="width:${timePct}%"></div></div>
+                  <p class="mt-2 text-xs text-gray-300">${views.toLocaleString()} views${reach > 0 ? ` of ${reach.toLocaleString()} estimated` : ''}</p>
+                  ${reach > 0 ? `<div class="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10"><div class="h-full rounded-full bg-violet-400" style="width:${reachPct}%"></div></div>` : ''}
+                </div>
+              `;
+            })()}
             <div class="flex items-center justify-between gap-2">
               <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass}">
                 ${data?.hasBoost ? (data?.isActive ? 'Active boost' : 'Boost ended') : 'No boost record yet'}
@@ -10349,17 +10379,29 @@ function BoostPageWrapper() {
 
   const beginBoost = React.useCallback(async (post: Post) => {
     setBoostTap(null);
+    const windowState = await getBoostWindow(post.id);
+    if (windowState.isActive) {
+      setBoostDraft(null);
+      await Swal.fire(bottomSheet({
+        title: 'Already boosted',
+        message: 'This boost is still running. Use Extend boost on the post to add more time.',
+        icon: 'alert',
+      }));
+      return;
+    }
+    if (windowState.hasBoost) {
+      const hours = windowState.durationHours;
+      setBoostDraft({
+        action: 'create',
+        radiusKm: windowState.radiusKm && windowState.radiusKm > 0 ? windowState.radiusKm : 2,
+        durationHours: hours === 12 || hours === 24 || hours === 72 ? hours : 6,
+        goal: windowState.goal,
+      });
+    } else {
+      setBoostDraft(null);
+    }
     setSelectedPostForBoost(post);
     setBoostModalOpen(true);
-    const existing = await getActiveBoost(post.id);
-    if (!existing?.isActive) return;
-    setBoostModalOpen(false);
-    setSelectedPostForBoost(null);
-    await Swal.fire(bottomSheet({
-      title: 'Already boosted',
-      message: 'This post is already boosted. It will expire in 6 hours.',
-      icon: 'alert',
-    }));
   }, []);
 
   // Not logged in
@@ -10581,6 +10623,21 @@ function BoostPageWrapper() {
                 }}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
+              {(classifyBoostStatus(p) === 'active' || classifyBoostStatus(p) === 'ended') ? (
+                <ActiveBoostStatusCard
+                  postId={p.id}
+                  onExtend={(draft) => {
+                    setSelectedPostForBoost(p);
+                    setBoostDraft(draft);
+                    setBoostModalOpen(true);
+                  }}
+                  onBoostAgain={(draft) => {
+                    setSelectedPostForBoost(p);
+                    setBoostDraft(draft);
+                    setBoostModalOpen(true);
+                  }}
+                />
+              ) : null}
               <button
                 type="button"
                 onClick={() => { void handleViewBoostInsights(p); }}
@@ -10698,9 +10755,15 @@ function BoostPageWrapper() {
         <BoostSelectionModal
           isOpen={boostModalOpen}
           post={selectedPostForBoost}
+          checkoutAction={boostDraft?.action === 'extend' ? 'extend' : 'create'}
+          initialRadiusKm={boostDraft?.radiusKm}
+          initialDurationHours={boostDraft?.durationHours}
+          initialGoal={boostDraft?.goal}
+          startStep={boostDraft ? 3 : 1}
           onClose={() => {
             setBoostModalOpen(false);
             setSelectedPostForBoost(null);
+            setBoostDraft(null);
           }}
           onSelect={(feedType, price, meta) => {
             setBoostModalOpen(false);
@@ -10715,6 +10778,7 @@ function BoostPageWrapper() {
                 estimatedReach: meta?.estimatedReach,
                 radiusKm: meta?.radiusKm,
                 eligibleUsersCount: meta?.eligibleUsersCount,
+                action: meta?.action,
               }
             });
           }}

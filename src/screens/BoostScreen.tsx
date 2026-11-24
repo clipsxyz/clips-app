@@ -21,7 +21,7 @@ import {
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser, mapLaravelProfilePosts } from '../api/posts';
 import type { Post } from '../types';
-import BoostSelectionModal from '../components/BoostSelectionModal.native';
+import BoostSelectionModal, { type BoostDuration } from '../components/BoostSelectionModal.native';
 import BoostPostTile, {
     BOOST_POST_TILE_ASPECT_RATIO,
     boostTileSize,
@@ -29,7 +29,8 @@ import BoostPostTile, {
 import {
     FEED_CARD_RADIUS,
 } from '../components/FeedPageLayout.native';
-import { fetchBoostPosts, getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
+import { fetchBoostPosts, getBoostWindow, getAllActiveBoostLabels } from '../api/boost';
+import { boostTimeProgress, formatBoostRemaining } from '../utils/boostProgress';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import {
     classifyBoostStatus,
@@ -91,11 +92,29 @@ function stampApiBoostPosts(raw: unknown[]): Post[] {
             ? rawStatus
             : undefined;
         const feedType = item?.boost_feed_type ?? item?.boostFeedType;
+        const startsRaw = item?.boost_starts_at ?? item?.boostStartsAt;
+        const expiresRaw = item?.boost_expires_at ?? item?.boostExpiresAt;
+        const startsAt = typeof startsRaw === 'string' ? Date.parse(startsRaw) : typeof startsRaw === 'number' ? startsRaw : NaN;
+        const expiresAt = typeof expiresRaw === 'string' ? Date.parse(expiresRaw) : typeof expiresRaw === 'number' ? expiresRaw : NaN;
+        const duration = Number(item?.boost_duration_hours ?? item?.boostDurationHours);
+        const radius = Number(item?.boost_radius_km ?? item?.boostRadiusKm);
+        const eligible = Number(item?.boost_eligible_users ?? item?.boostEligibleUsers);
+        const views = Number(item?.boost_views ?? item?.boostViews);
         return {
             ...post,
             boostStatus,
             isBoosted: boostStatus === 'active' || post.isBoosted,
             boostFeedType: (typeof feedType === 'string' ? feedType : post.boostFeedType) as Post['boostFeedType'],
+            boostStartsAt: Number.isFinite(startsAt) ? startsAt : post.boostStartsAt,
+            boostExpiresAt: Number.isFinite(expiresAt) ? expiresAt : post.boostExpiresAt,
+            boostDurationHours: Number.isFinite(duration) ? duration : post.boostDurationHours,
+            boostRadiusKm: Number.isFinite(radius) ? radius : post.boostRadiusKm,
+            boostEligibleUsers: Number.isFinite(eligible) ? eligible : post.boostEligibleUsers,
+            boostViews: Number.isFinite(views) ? views : post.boostViews,
+            boostPaused: item?.boost_paused === true || item?.boostPaused === true,
+            boostGoal: item?.boost_goal === 'profile_visits' || item?.boost_goal === 'messages' || item?.boost_goal === 'views'
+                ? item.boost_goal
+                : post.boostGoal,
         };
     });
 }
@@ -132,11 +151,23 @@ function BoostCanvas({
 const BoostScreen: React.FC = ({ navigation, route }: any) => {
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
+
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 30000);
+        return () => clearInterval(timer);
+    }, []);
     const [posts, setPosts] = useState<Post[]>([]);
+    const [now, setNow] = useState(() => Date.now());
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [showBoostModal, setShowBoostModal] = useState(false);
+    const [boostDraft, setBoostDraft] = useState<{
+        action: 'extend' | 'create';
+        radiusKm: number;
+        durationHours: BoostDuration;
+        goal?: 'views' | 'profile_visits' | 'messages';
+    } | null>(null);
     const [boostFilter, setBoostFilter] = useState<BoostPostFilter>('all');
     const [counts, setCounts] = useState<BoostPostCounts>(EMPTY_COUNTS);
     const [listLoading, setListLoading] = useState(false);
@@ -252,33 +283,59 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
     };
 
     const openBoostModal = useCallback(async (post: Post) => {
-        if (classifyBoostStatus(post) === 'active') {
+        const status = classifyBoostStatus(post);
+        if (status === 'active') {
             openInsights(post);
             return;
         }
+        if (status === 'ended') {
+            let radiusKm = post.boostRadiusKm && post.boostRadiusKm > 0 ? post.boostRadiusKm : 2;
+            let hours = post.boostDurationHours ?? 0;
+            let goal = post.boostGoal;
+            if (!post.boostRadiusKm || !hours) {
+                try {
+                    const windowState = await getBoostWindow(post.id);
+                    if (windowState.isActive) {
+                        openInsights({ ...post, isBoosted: true, boostStatus: 'active', boostFeedType: windowState.feedType ?? post.boostFeedType });
+                        return;
+                    }
+                    if (windowState.radiusKm && windowState.radiusKm > 0) radiusKm = windowState.radiusKm;
+                    if (windowState.durationHours) hours = windowState.durationHours;
+                    goal = windowState.goal;
+                } catch {
+                    // Open with the last known radius and a 6 hour duration.
+                }
+            }
+            const durationHours: BoostDuration = hours === 12 || hours === 24 || hours === 72 ? hours : 6;
+            setBoostDraft({
+                action: 'create',
+                radiusKm,
+                durationHours,
+                goal,
+            });
+            setSelectedPost(post);
+            setShowBoostModal(true);
+            return;
+        }
+        setBoostDraft(null);
         setSelectedPost(post);
         setShowBoostModal(true);
-        try {
-            const existing = await getActiveBoost(post.id);
-            if (existing?.isActive) {
-                setShowBoostModal(false);
-                setSelectedPost(null);
-                openInsights({
-                    ...post,
-                    isBoosted: true,
-                    boostStatus: 'active',
-                    boostFeedType: existing.feedType ?? post.boostFeedType,
-                    boostSpendEur: existing.price > 0 ? existing.price : post.boostSpendEur,
-                });
-            }
-        } catch {
-            // Keep modal open if status check fails offline
-        }
     }, []);
 
     const closeBoostModal = () => {
         setShowBoostModal(false);
         setSelectedPost(null);
+        setBoostDraft(null);
+    };
+
+    const openBoostDraft = (
+        post: Post,
+        draft: { action: 'extend' | 'create'; radiusKm: number; durationHours: BoostDuration; goal?: 'views' | 'profile_visits' | 'messages' },
+    ) => {
+        setInsightsVisible(false);
+        setSelectedPost(post);
+        setBoostDraft(draft);
+        setShowBoostModal(true);
     };
 
     const tileWidth = useMemo(
@@ -432,7 +489,12 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                     contentContainerStyle={styles.gridContent}
                     renderItem={({ item }) => {
                         const isSelected = showBoostModal && selectedPost?.id === item.id;
-                        const isBoosting = classifyBoostStatus(item) === 'active';
+                        const status = classifyBoostStatus(item);
+                        const isBoosting = status === 'active';
+                        const remainingMs = item.boostExpiresAt ? Math.max(0, item.boostExpiresAt - now) : 0;
+                        const timeProgress = item.boostStartsAt && item.boostExpiresAt
+                            ? boostTimeProgress(item.boostStartsAt, item.boostExpiresAt, now)
+                            : isBoosting ? 0 : 1;
                         return (
                             <View style={[styles.gridCell, { width: tileWidth }]}>
                                 <View
@@ -454,7 +516,13 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                                             style={[styles.tapToBoostPill, isBoosting && styles.boostingPill]}
                                             numberOfLines={1}
                                         >
-                                            {isBoosting ? 'Boosting' : 'Tap to boost'}
+                                            {isBoosting
+                                                ? (item.boostPaused
+                                                    ? 'Paused'
+                                                    : remainingMs > 0 ? `${formatBoostRemaining(remainingMs)} left` : 'Boosting')
+                                                : status === 'ended'
+                                                    ? 'Boost again'
+                                                    : 'Tap to boost'}
                                         </Text>
                                     </View>
                                     {isSelected ? (
@@ -463,6 +531,11 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                                         </View>
                                     ) : null}
                                 </View>
+                                {status === 'active' || status === 'ended' ? (
+                                    <View style={styles.tileProgressTrack}>
+                                        <View style={[styles.tileProgressFill, { width: `${Math.round(timeProgress * 100)}%` }]} />
+                                    </View>
+                                ) : null}
                                 <TouchableOpacity
                                     onPress={() => openInsights(item)}
                                     style={styles.insightsBtn}
@@ -483,6 +556,12 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                     setInsightsVisible(false);
                     setInsightsPost(null);
                 }}
+                onExtend={(draft) => {
+                    if (insightsPost) openBoostDraft(insightsPost, draft);
+                }}
+                onBoostAgain={(draft) => {
+                    if (insightsPost) openBoostDraft(insightsPost, draft);
+                }}
             />
             {gridTap ? (
                 <ProfileGridPeekSheet
@@ -493,7 +572,11 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                     onClose={() => setGridTap(null)}
                     actions={[
                         {
-                            label: 'Boost',
+                            label: classifyBoostStatus(gridTap.post) === 'active'
+                                ? 'View boost'
+                                : classifyBoostStatus(gridTap.post) === 'ended'
+                                    ? 'Boost again'
+                                    : 'Boost',
                             icon: 'flame-outline',
                             onPress: () => {
                                 const tapped = gridTap.post;
@@ -512,6 +595,11 @@ const BoostScreen: React.FC = ({ navigation, route }: any) => {
                 isOpen={showBoostModal}
                 post={selectedPost}
                 selectedPost={selectedPost}
+                checkoutAction={boostDraft?.action === 'extend' ? 'extend' : 'create'}
+                initialRadiusKm={boostDraft?.radiusKm}
+                initialDurationHours={boostDraft?.durationHours}
+                initialGoal={boostDraft?.goal}
+                startStep={boostDraft ? 3 : 1}
                 onClose={closeBoostModal}
                 onSelect={(feedType, price, meta) => {
                     setShowBoostModal(false);
@@ -686,6 +774,17 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.72)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.28)',
+    },
+    tileProgressTrack: {
+        marginTop: ox(6),
+        height: ox(4),
+        borderRadius: ox(4),
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        overflow: 'hidden',
+    },
+    tileProgressFill: {
+        height: '100%',
+        backgroundColor: '#38BDF8',
     },
     insightsBtn: {
         marginTop: ox(6),

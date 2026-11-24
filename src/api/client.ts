@@ -1627,6 +1627,8 @@ export async function createBoostPaymentIntent(params: {
     userId: string;
     radiusKm: number;
     durationHours: 6 | 12 | 24 | 72;
+    action?: 'create' | 'extend';
+    goal?: 'views' | 'profile_visits' | 'messages';
 }) {
     const data = await apiRequest('/boost/create-payment-intent', {
         method: 'POST',
@@ -1636,6 +1638,8 @@ export async function createBoostPaymentIntent(params: {
             userId: params.userId,
             radiusKm: params.radiusKm,
             durationHours: params.durationHours,
+            action: params.action ?? 'create',
+            goal: params.goal ?? 'views',
         }),
     }) as { clientSecret?: string; client_secret?: string; error?: string };
     if (data.error) throw new Error(data.error);
@@ -1655,6 +1659,8 @@ export async function activateBoostApi(params: {
     eligibleUsersCount?: number;
     durationHours?: 6 | 12 | 24 | 72;
     centerLocal?: string;
+    action?: 'create' | 'extend';
+    goal?: 'views' | 'profile_visits' | 'messages';
 }) {
     return apiRequest('/boost/activate', {
         method: 'POST',
@@ -1668,6 +1674,8 @@ export async function activateBoostApi(params: {
             eligibleUsersCount: params.eligibleUsersCount,
             durationHours: params.durationHours,
             centerLocal: params.centerLocal,
+            action: params.action,
+            goal: params.goal,
         }),
     }) as Promise<{ boost: { id: number; postId: string; feedType: string; activatedAt: string; expiresAt: string } }>;
 }
@@ -1686,21 +1694,55 @@ export async function getActiveBoostedPostIdsApi(feedType: 'local' | 'regional' 
 /** Get boost status for a single post. */
 export async function getBoostStatusApi(postId: string): Promise<{
     isActive: boolean;
+    hasBoost?: boolean;
     timeRemaining: number;
     feedType: string | null;
+    startsAt?: string | null;
     activatedAt: string | null;
     expiresAt: string | null;
+    durationHours?: number;
+    radiusKm?: number | null;
+    eligibleUsersCount?: number;
+    viewsDelivered?: number;
+    profileVisits?: number;
+    messageStarts?: number;
+    goal?: 'views' | 'profile_visits' | 'messages';
+    goalDelivered?: number;
+    paused?: boolean;
+    stopped?: boolean;
     spendEur?: number;
 }> {
     const data = await apiRequest(`/boost/status/${encodeURIComponent(postId)}`) as {
         isActive: boolean;
+        hasBoost?: boolean;
         timeRemaining: number;
         feedType: string | null;
+        startsAt?: string | null;
         activatedAt: string | null;
         expiresAt: string | null;
+        durationHours?: number;
+        radiusKm?: number | null;
+        eligibleUsersCount?: number;
+        viewsDelivered?: number;
+        profileVisits?: number;
+        messageStarts?: number;
+        goal?: 'views' | 'profile_visits' | 'messages';
+        goalDelivered?: number;
+        paused?: boolean;
+        stopped?: boolean;
         spendEur?: number;
     };
     return data;
+}
+
+export async function updateBoostDeliveryApi(
+    postId: string,
+    action: 'pause' | 'resume' | 'stop',
+) {
+    return apiRequest(`/boosts/${encodeURIComponent(postId)}/delivery`, {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+    });
 }
 
 /** Get boost analytics for a post owned by the current user. */

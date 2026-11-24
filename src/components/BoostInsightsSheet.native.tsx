@@ -26,13 +26,24 @@ import {
     UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
 import { getQualityLabel, getQualityReason, estimateReachTeaser } from '../utils/boostPostGrid';
+import ActiveBoostStatusCard from './ActiveBoostStatusCard.native';
+import type { BoostDuration } from './BoostSelectionModal.native';
 import { getPostBodyText } from '../utils/effectiveTextPostStyleNative';
+
+type BoostDraft = {
+    action: 'extend' | 'create';
+    radiusKm: number;
+    durationHours: BoostDuration;
+    goal?: 'views' | 'profile_visits' | 'messages';
+};
 
 type Props = {
     visible: boolean;
     post: Post | null;
     range: '24h' | '7d' | 'all';
     onClose: () => void;
+    onExtend?: (draft: BoostDraft) => void;
+    onBoostAgain?: (draft: BoostDraft) => void;
 };
 
 function sparkline(values: number[]): string {
@@ -45,7 +56,7 @@ function sparkline(values: number[]): string {
     }).join('');
 }
 
-export default function BoostInsightsSheet({ visible, post, range, onClose }: Props) {
+export default function BoostInsightsSheet({ visible, post, range, onClose, onExtend, onBoostAgain }: Props) {
     const [data, setData] = useState<BoostAnalytics | null>(null);
     const [loading, setLoading] = useState(false);
     const sheetOpen = visible && !!post;
@@ -170,6 +181,7 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
                     style={styles.scrollFlex}
                     contentContainerStyle={styles.scroll}
                 >
+                    <ActiveBoostStatusCard post={post} onExtend={onExtend} onBoostAgain={onBoostAgain} />
                     {loading ? (
                         <View style={styles.loadingBanner}>
                             <Text style={styles.loadingText}>Updating with latest analytics…</Text>

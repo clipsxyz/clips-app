@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { activateBoost } from '../api/boost';
+import { formatBoostWindow } from '../utils/boostProgress';
 import type { BoostFeedType, BoostDuration } from '../components/BoostSelectionModal';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -23,7 +24,7 @@ export default function PaymentSuccessPage() {
             navigate('/boost');
             return;
         }
-        let data: { postId: string; feedType: BoostFeedType; price: number; userId: string; radiusKm?: number; eligibleUsersCount?: number; durationHours?: BoostDuration; centerLocal?: string };
+        let data: { postId: string; feedType: BoostFeedType; price: number; userId: string; radiusKm?: number; eligibleUsersCount?: number; durationHours?: BoostDuration; centerLocal?: string; action?: 'create' | 'extend'; goal?: 'views' | 'profile_visits' | 'messages' };
         try {
             data = JSON.parse(raw);
         } catch {
@@ -49,12 +50,18 @@ export default function PaymentSuccessPage() {
             eligibleUsersCount: data.eligibleUsersCount,
             durationHours: data.durationHours,
             centerLocal: data.centerLocal,
+            action: data.action,
+            goal: data.goal,
         })
             .then(() => {
                 const label = data.feedType === 'local' ? 'Local' : data.feedType === 'regional' ? 'Regional' : 'National';
+                const windowLabel = formatBoostWindow(data.durationHours ?? 6);
+                const message = data.action === 'extend'
+                    ? `Added ${windowLabel} to this boost in the ${label} feed.`
+                    : `Your post is boosted for ${windowLabel} in the ${label} feed.`;
                 return Swal.fire(bottomSheet({
                     title: 'Payment Complete!',
-                    message: `Your post is boosted for 6 hours in the ${label} feed.`,
+                    message,
                     icon: 'success',
                     confirmButtonText: 'OK',
                 }));

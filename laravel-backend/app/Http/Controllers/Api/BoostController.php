@@ -136,6 +136,13 @@ class BoostController extends Controller
     /**
      * The ad budget for one gateway: card is €0.010 per person, store is €0.0125, times duration.
      */
+    public function quotedAudienceCount(string $userId, string $feedType, float $radiusKm): int
+    {
+        return $this->audienceCountForEnvironment(
+            $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
+        );
+    }
+
     public function audiencePriceCents(string $userId, string $feedType, float $radiusKm, int $durationHours, string $gateway = 'stripe'): int
     {
         $eligibleUsers = $this->audienceCountForEnvironment(
@@ -165,6 +172,8 @@ class BoostController extends Controller
             'userId'   => 'required|string|max:255',
             'radiusKm' => 'required|numeric|min:0.1',
             'durationHours' => 'required|integer|in:6,12,24,72',
+            'action' => 'sometimes|string|in:create,extend',
+            'goal' => 'sometimes|string|in:views,profile_visits,messages',
         ]);
 
         $secret = config('services.stripe.secret');
@@ -178,6 +187,18 @@ class BoostController extends Controller
         $userId = (string) $request->input('userId');
         $radiusKm = (float) $request->input('radiusKm');
         $durationHours = (int) $request->input('durationHours');
+        $action = (string) $request->input('action', 'create');
+        $live = Boost::query()
+            ->where('post_id', $request->input('postId'))
+            ->where('user_id', $userId)
+            ->openWindow()
+            ->exists();
+        if ($action === 'extend' && ! $live) {
+            return response()->json(['error' => 'There is no active boost to extend'], 409);
+        }
+        if ($action === 'create' && $live) {
+            return response()->json(['error' => 'This post already has an active boost. Extend it instead.'], 409);
+        }
 
         $eligibleUsers = $this->audienceCountForEnvironment(
             $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm)
@@ -206,6 +227,8 @@ class BoostController extends Controller
                     'radius_km' => $radiusKm,
                     'duration_hours' => $durationHours,
                     'eligible_users_count' => $eligibleUsers,
+                    'action' => $action,
+                    'goal' => $this->normalizeGoal($request->input('goal')),
                 ],
             ]);
 
@@ -285,6 +308,8 @@ class BoostController extends Controller
             'eligibleUsersCount' => 'nullable|integer|min:0',
             'durationHours' => 'nullable|integer|in:6,12,24,72',
             'centerLocal' => 'nullable|string|max:200',
+            'action' => 'sometimes|string|in:create,extend',
+            'goal' => 'sometimes|string|in:views,profile_visits,messages',
         ]);
 
         $secret = config('services.stripe.secret');
@@ -330,12 +355,70 @@ class BoostController extends Controller
 
             $now = now();
             $durationHours = (int) ($request->input('durationHours') ?? self::BOOST_DURATION_HOURS);
+            $metaAction = isset($intent->metadata->action) ? (string) $intent->metadata->action : null;
+            $action = in_array($metaAction, ['create', 'extend'], true)
+                ? $metaAction
+                : (string) $request->input('action', 'create');
+            $live = Boost::query()
+                ->where('post_id', $postId)
+                ->where('user_id', $userId)
+                ->openWindow()
+                ->orderByDesc('expires_at')
+                ->first();
+
+            if ($action === 'extend' && $live) {
+                $paused = $live->status === 'paused';
+                if ($paused) {
+                    $live->paused_remaining_seconds = (int) $live->paused_remaining_seconds + ($durationHours * 3600);
+                }
+                $expiresAt = $paused && $live->paused_at
+                    ? $live->paused_at->copy()->addSeconds((int) $live->paused_remaining_seconds)
+                    : $live->expires_at->copy()->addHours($durationHours);
+                $live->fill([
+                    'expires_at' => $expiresAt,
+                    'duration_hours' => (int) $live->duration_hours + $durationHours,
+                    'price' => round((float) $live->price + (float) $request->input('price'), 2),
+                    'radius_km' => $request->input('radiusKm') ?: $live->radius_km,
+                    'status' => $paused ? 'paused' : 'active',
+                    'payment_intent_id' => $intent->id,
+                ])->save();
+                $live->post()->update([
+                    'is_boosted' => true,
+                    'boosted_until' => $expiresAt,
+                ]);
+
+                return response()->json([
+                    'boost' => [
+                        'id' => $live->id,
+                        'postId' => $live->post_id,
+                        'feedType' => $live->feed_type,
+                        'startsAt' => optional($live->activated_at)->toIso8601String(),
+                        'activatedAt' => optional($live->activated_at)->toIso8601String(),
+                        'expiresAt' => $live->expires_at->toIso8601String(),
+                        'extended' => true,
+                    ],
+                ]);
+            }
+
+            if ($live) {
+                return response()->json([
+                    'error' => 'This post already has an active boost. Extend it instead.',
+                    'boost' => [
+                        'id' => $live->id,
+                        'expiresAt' => $live->expires_at->toIso8601String(),
+                    ],
+                ], 409);
+            }
+
             $expiresAt = $now->copy()->addHours($durationHours);
+            $metaGoal = isset($intent->metadata->goal) ? (string) $intent->metadata->goal : null;
 
             $boost = Boost::create([
                 'post_id'          => $request->input('postId'),
                 'user_id'          => $request->input('userId'),
                 'feed_type'        => $request->input('feedType'),
+                'status'           => 'active',
+                'goal'             => $this->normalizeGoal($metaGoal ?: $request->input('goal')),
                 'price'            => $request->input('price'),
                 'radius_km'        => $request->input('radiusKm'),
                 'center_local'     => $request->input('centerLocal'),
@@ -430,28 +513,24 @@ class BoostController extends Controller
     public function status(Request $request, string $postId)
     {
         try {
-            $boost = Boost::where('post_id', $postId)->active()->first();
+            $boost = Boost::where('post_id', $postId)
+                ->orderByRaw('CASE WHEN expires_at > ? THEN 0 ELSE 1 END', [now()])
+                ->orderByDesc('expires_at')
+                ->first();
 
             if (!$boost) {
                 return response()->json([
                     'isActive'     => false,
+                    'hasBoost'     => false,
                     'timeRemaining' => 0,
                     'feedType'     => null,
+                    'startsAt'     => null,
                     'activatedAt'  => null,
                     'expiresAt'    => null,
                 ]);
             }
 
-            $remaining = max(0, (int) $boost->expires_at->diffInMilliseconds(now(), false));
-
-            return response()->json([
-                'isActive'      => true,
-                'timeRemaining' => $remaining,
-                'feedType'      => $boost->feed_type,
-                'activatedAt'   => $boost->activated_at->toIso8601String(),
-                'expiresAt'     => $boost->expires_at->toIso8601String(),
-                'spendEur'      => $this->spendEurForBoost($boost),
-            ]);
+            return response()->json($this->boostWindowPayload($boost));
         } catch (\Throwable $e) {
             Log::warning('Boost status failed', ['postId' => $postId, 'error' => $e->getMessage()]);
             return response()->json([
@@ -606,8 +685,17 @@ class BoostController extends Controller
             'postId' => $boost->post_id,
             'range' => $range,
             'feedType' => $boost->feed_type,
+            'goal' => $this->normalizeGoal($boost->goal),
+            'paused' => $boost->status === 'paused',
+            'startsAt' => optional($boost->activated_at)->toIso8601String(),
             'activatedAt' => optional($boost->activated_at)->toIso8601String(),
             'expiresAt' => optional($boost->expires_at)->toIso8601String(),
+            'durationHours' => (int) ($boost->duration_hours ?? 0),
+            'radiusKm' => $boost->radius_km !== null ? (float) $boost->radius_km : null,
+            'eligibleUsersCount' => (int) ($boost->eligible_users_count ?? 0),
+            'viewsDelivered' => $this->viewsDelivered($boost),
+            'profileVisits' => $profileVisits,
+            'messageStarts' => $messagesStarted,
             'spend' => $price,
             'spendEur' => $price,
             'analytics' => [
@@ -651,7 +739,7 @@ class BoostController extends Controller
 
         $activeIds = Boost::query()
             ->where('user_id', $viewer->id)
-            ->where('expires_at', '>', now())
+            ->openWindow()
             ->pluck('post_id');
 
         $endedIds = Boost::query()
@@ -707,6 +795,14 @@ class BoostController extends Controller
             $data['is_boosted'] = $boostStatus === 'active';
             $data['boost_feed_type'] = $representative?->feed_type;
             $data['spend_eur'] = $representative ? $this->spendEurForBoost($representative) : 0;
+            $data['boost_starts_at'] = optional($representative?->activated_at)->toIso8601String();
+            $data['boost_expires_at'] = optional($representative?->expires_at)->toIso8601String();
+            $data['boost_duration_hours'] = $representative ? (int) ($representative->duration_hours ?? 0) : null;
+            $data['boost_radius_km'] = $representative && $representative->radius_km !== null ? (float) $representative->radius_km : null;
+            $data['boost_eligible_users'] = $representative ? (int) ($representative->eligible_users_count ?? 0) : 0;
+            $data['boost_views'] = $representative ? $this->viewsDelivered($representative) : 0;
+            $data['boost_goal'] = $representative ? $this->normalizeGoal($representative->goal) : null;
+            $data['boost_paused'] = $representative ? $representative->status === 'paused' : false;
 
             return $data;
         })->values();
@@ -749,6 +845,161 @@ class BoostController extends Controller
         return response()->json([
             'candidates' => $delivery->candidates($viewer, $surface, $feedType),
         ]);
+    }
+
+    /**
+     * Pause, resume, or stop the owner's live boost.
+     * Pause freezes the time left. Stop ends delivery and leaves the post up.
+     */
+    public function deliveryControl(Request $request, string $postId): JsonResponse
+    {
+        $validated = $request->validate([
+            'action' => 'required|string|in:pause,resume,stop',
+        ]);
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $boost = $this->liveBoostForOwner($postId, (string) $user->id);
+        if (! $boost) {
+            return response()->json(['error' => 'There is no active boost on this post'], 409);
+        }
+
+        $action = (string) $validated['action'];
+        if ($action === 'pause') {
+            if ($boost->status === 'paused') {
+                return response()->json($this->boostWindowPayload($boost));
+            }
+            $remaining = $boost->expires_at
+                ? max(0, $boost->expires_at->getTimestamp() - now()->getTimestamp())
+                : 0;
+            $boost->fill([
+                'status' => 'paused',
+                'paused_at' => now(),
+                'paused_remaining_seconds' => $remaining,
+            ])->save();
+        } elseif ($action === 'resume') {
+            if ($boost->status !== 'paused') {
+                return response()->json(['error' => 'This boost is not paused'], 409);
+            }
+            $seconds = max(0, (int) $boost->paused_remaining_seconds);
+            $expiresAt = now()->addSeconds($seconds);
+            $windowSeconds = max($seconds, (int) $boost->duration_hours * 3600);
+            $boost->fill([
+                'status' => 'active',
+                'paused_at' => null,
+                'paused_remaining_seconds' => null,
+                'activated_at' => now()->subSeconds(max(0, $windowSeconds - $seconds)),
+                'expires_at' => $expiresAt,
+            ])->save();
+            $boost->post()->update([
+                'is_boosted' => $seconds > 0,
+                'boosted_until' => $expiresAt,
+            ]);
+        } else {
+            $boost->fill([
+                'status' => 'stopped',
+                'paused_at' => null,
+                'paused_remaining_seconds' => null,
+                'expires_at' => now(),
+            ])->save();
+            $boost->post()->update([
+                'is_boosted' => false,
+                'boosted_until' => now(),
+            ]);
+        }
+
+        return response()->json($this->boostWindowPayload($boost->fresh()));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function boostWindowPayload(Boost $boost): array
+    {
+        $paused = $boost->status === 'paused';
+        $stopped = $boost->status === 'stopped';
+        $active = ! $stopped && ($paused || ($boost->expires_at && $boost->expires_at->isFuture()));
+        $counts = $this->goalCounts($boost);
+        $goal = $this->normalizeGoal($boost->goal);
+
+        return [
+            'isActive' => $active,
+            'hasBoost' => true,
+            'paused' => $paused,
+            'stopped' => $stopped,
+            'timeRemaining' => $this->remainingMs($boost),
+            'feedType' => $boost->feed_type,
+            'goal' => $goal,
+            'goalDelivered' => $counts[$goal] ?? $counts['views'],
+            'startsAt' => optional($boost->activated_at)->toIso8601String(),
+            'activatedAt' => optional($boost->activated_at)->toIso8601String(),
+            'expiresAt' => optional($boost->expires_at)->toIso8601String(),
+            'durationHours' => (int) ($boost->duration_hours ?? 0),
+            'radiusKm' => $boost->radius_km !== null ? (float) $boost->radius_km : null,
+            'eligibleUsersCount' => (int) ($boost->eligible_users_count ?? 0),
+            'viewsDelivered' => $counts['views'],
+            'profileVisits' => $counts['profile_visits'],
+            'messageStarts' => $counts['messages'],
+            'spendEur' => $this->spendEurForBoost($boost),
+        ];
+    }
+
+    private function liveBoostForOwner(string $postId, string $userId): ?Boost
+    {
+        return Boost::query()
+            ->where('post_id', $postId)
+            ->where('user_id', $userId)
+            ->openWindow()
+            ->orderByDesc('expires_at')
+            ->first();
+    }
+
+    private function remainingMs(Boost $boost): int
+    {
+        if ($boost->status === 'stopped' || $boost->status === 'paused') {
+            return max(0, (int) $boost->paused_remaining_seconds) * 1000;
+        }
+        if (! $boost->expires_at || $boost->expires_at->isPast()) {
+            return 0;
+        }
+
+        return max(0, ($boost->expires_at->getTimestamp() - now()->getTimestamp()) * 1000);
+    }
+
+    private function normalizeGoal(mixed $goal): string
+    {
+        return in_array($goal, ['views', 'profile_visits', 'messages'], true) ? (string) $goal : 'views';
+    }
+
+    /**
+     * @return array{views: int, profile_visits: int, messages: int}
+     */
+    private function goalCounts(Boost $boost): array
+    {
+        $rows = BoostAnalyticsEvent::query()
+            ->where('boost_id', $boost->id)
+            ->whereIn('event_type', ['profile_visit', 'message_start'])
+            ->selectRaw('event_type, COUNT(*) as total')
+            ->groupBy('event_type')
+            ->pluck('total', 'event_type');
+
+        return [
+            'views' => $this->viewsDelivered($boost),
+            'profile_visits' => (int) ($rows['profile_visit'] ?? 0),
+            'messages' => (int) ($rows['message_start'] ?? 0),
+        ];
+    }
+
+    private function viewsDelivered(Boost $boost): int
+    {
+        $fromEvents = (int) BoostAnalyticsEvent::query()
+            ->where('boost_id', $boost->id)
+            ->where('event_type', 'impression')
+            ->count();
+
+        return max($fromEvents, (int) ($boost->impressions_count ?? 0));
     }
 
     private function spendEurForBoost(Boost $boost): float

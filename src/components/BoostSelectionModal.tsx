@@ -12,6 +12,11 @@ export type BoostDuration = 6 | 12 | 24 | 72;
 interface BoostSelectionModalProps {
     isOpen: boolean;
     post: Post | null;
+    checkoutAction?: 'create' | 'extend';
+    initialRadiusKm?: number;
+    initialDurationHours?: BoostDuration;
+    initialGoal?: BoostGoal;
+    startStep?: 1 | 2 | 3;
     onClose: () => void;
     onSelect: (
         feedType: BoostFeedType,
@@ -22,6 +27,7 @@ interface BoostSelectionModalProps {
             estimatedReach: string;
             radiusKm: number;
             eligibleUsersCount: number;
+            action?: 'create' | 'extend';
         }
     ) => void;
 }
@@ -45,12 +51,18 @@ const DEFAULT_REGIONAL_BOUNDARY_KM = 6;
 export default function BoostSelectionModal({
     isOpen,
     post,
+    checkoutAction = 'create',
+    initialRadiusKm,
+    initialDurationHours,
+    initialGoal,
+    startStep = 1,
     onClose,
     onSelect
 }: BoostSelectionModalProps) {
-    const [selectedDuration, setSelectedDuration] = React.useState<BoostDuration>(6);
-    const [activeStep, setActiveStep] = React.useState<1 | 2 | 3>(1);
-    const [radiusKm, setRadiusKm] = React.useState<number>(2);
+    const [selectedDuration, setSelectedDuration] = React.useState<BoostDuration>(initialDurationHours ?? 6);
+    const [selectedGoal, setSelectedGoal] = React.useState<BoostGoal>(initialGoal ?? 'views');
+    const [activeStep, setActiveStep] = React.useState<1 | 2 | 3>(startStep);
+    const [radiusKm, setRadiusKm] = React.useState<number>(initialRadiusKm && initialRadiusKm > 0 ? initialRadiusKm : 2);
     const [localBoundaryKm, setLocalBoundaryKm] = React.useState<number>(() => {
         try {
             const raw = localStorage.getItem('clips:boostLocalBoundaryKm');
@@ -79,6 +91,17 @@ export default function BoostSelectionModal({
     const [isSliderDragging, setIsSliderDragging] = React.useState(false);
 
     const { user } = useAuth();
+
+    React.useEffect(() => {
+        if (!isOpen) return;
+        const nextRadius = initialRadiusKm && initialRadiusKm > 0 ? initialRadiusKm : 2;
+        setRadiusKm(nextRadius);
+        setSliderRadiusKm(nextRadius);
+        setDebouncedRadiusKm(nextRadius);
+        setSelectedDuration(initialDurationHours ?? 6);
+        setSelectedGoal(initialGoal ?? 'views');
+        setActiveStep(startStep);
+    }, [isOpen, initialRadiusKm, initialDurationHours, initialGoal, startStep]);
 
     const selectedDurationMeta = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
 
@@ -189,11 +212,12 @@ export default function BoostSelectionModal({
         if (estimatedTotalPrice <= 0) return;
 
         onSelect(selectedOption, estimatedTotalPrice, {
-            goal: 'views',
+            goal: selectedGoal,
             durationHours: selectedDuration,
             estimatedReach,
             radiusKm,
             eligibleUsersCount,
+            action: checkoutAction,
         });
     };
 
@@ -393,6 +417,27 @@ export default function BoostSelectionModal({
                                     </li>
                                 </ul>
                             </div>
+                            <div className="space-y-2">
+                                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">What should this boost do?</p>
+                                {goalOptions.map((option) => {
+                                    const selected = selectedGoal === option.id;
+                                    return (
+                                        <button
+                                            key={option.id}
+                                            type="button"
+                                            onClick={() => setSelectedGoal(option.id)}
+                                            className={`w-full rounded-xl border px-3 py-2.5 text-left ${
+                                                selected
+                                                    ? 'border-white bg-white/10'
+                                                    : 'border-white/15 bg-white/[0.03]'
+                                            }`}
+                                        >
+                                            <span className="block text-sm font-semibold text-white">{option.label}</span>
+                                            <span className="mt-0.5 block text-xs text-gray-400">{option.description}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                             <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/[0.03] p-3">
                                 <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Next: pick your audience radius</p>
                                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -531,6 +576,28 @@ export default function BoostSelectionModal({
                     {activeStep === 3 && (
                         <div className="space-y-2.5 sm:space-y-3">
                             <h3 className="text-xl sm:text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Budget and duration</h3>
+                            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                                Goal: {goalOptions.find((option) => option.id === selectedGoal)?.label ?? 'More views'}
+                            </p>
+                            {checkoutAction === 'create' ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {goalOptions.map((option) => {
+                                        const selected = selectedGoal === option.id;
+                                        return (
+                                            <button
+                                                key={option.id}
+                                                type="button"
+                                                onClick={() => setSelectedGoal(option.id)}
+                                                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                                                    selected ? 'border-white bg-white text-black' : 'border-white/25 text-white'
+                                                }`}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            ) : null}
                             <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Set how long this boost should run.</p>
                             <div className="rounded-2xl border border-gray-200 dark:border-white/10 p-2.5 sm:p-3">
                                 <div className="flex items-center justify-between">
@@ -641,7 +708,7 @@ export default function BoostSelectionModal({
                                         : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
                                 }`}
                             >
-                                Continue to Payment
+                                {checkoutAction === 'extend' ? 'Extend with payment' : 'Continue to Payment'}
                             </button>
                         )}
                     </div>

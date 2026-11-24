@@ -34,6 +34,11 @@ interface BoostSelectionModalProps {
     isOpen: boolean;
     post?: Post | null;
     selectedPost?: Post | null;
+    checkoutAction?: 'create' | 'extend';
+    initialRadiusKm?: number;
+    initialDurationHours?: BoostDuration;
+    initialGoal?: BoostGoal;
+    startStep?: 1 | 2 | 3;
     onClose: () => void;
     onSelect: (
         feedType: BoostFeedType,
@@ -47,6 +52,12 @@ interface BoostSelectionModalProps {
         }
     ) => void;
 }
+
+const goalOptions: Array<{ id: BoostGoal; label: string; detail: string }> = [
+    { id: 'views', label: 'More views', detail: 'Show this post to more people' },
+    { id: 'profile_visits', label: 'Profile visits', detail: 'Bring people to your profile' },
+    { id: 'messages', label: 'Messages', detail: 'Get more replies and chats' },
+];
 
 const durationOptions: Array<{ hours: BoostDuration; label: string; multiplier: number }> = [
     { hours: 6, label: '6h', multiplier: 1 },
@@ -86,12 +97,18 @@ export default function BoostSelectionModal({
     isOpen,
     post,
     selectedPost,
+    checkoutAction = 'create',
+    initialRadiusKm,
+    initialDurationHours,
+    initialGoal,
+    startStep = 1,
     onClose,
     onSelect,
 }: BoostSelectionModalProps) {
     const { user } = useAuth();
     const [activeStep, setActiveStep] = React.useState<1 | 2 | 3>(1);
     const [selectedDuration, setSelectedDuration] = React.useState<BoostDuration>(6);
+    const [selectedGoal, setSelectedGoal] = React.useState<BoostGoal>(initialGoal ?? 'views');
     const [radiusKm, setRadiusKm] = React.useState<number>(2);
     const [localBoundaryKm, setLocalBoundaryKm] = React.useState<number>(DEFAULT_LOCAL_BOUNDARY_KM);
     const [regionalBoundaryKm, setRegionalBoundaryKm] = React.useState<number>(DEFAULT_REGIONAL_BOUNDARY_KM);
@@ -105,6 +122,17 @@ export default function BoostSelectionModal({
     const [debouncedRadiusKm, setDebouncedRadiusKm] = React.useState<number>(2);
     const [sliderRadiusKm, setSliderRadiusKm] = React.useState<number>(2);
     const [isSliderDragging, setIsSliderDragging] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!isOpen) return;
+        const nextRadius = initialRadiusKm && initialRadiusKm > 0 ? initialRadiusKm : 2;
+        setRadiusKm(nextRadius);
+        setSliderRadiusKm(nextRadius);
+        setDebouncedRadiusKm(nextRadius);
+        setSelectedDuration(initialDurationHours ?? 6);
+        setSelectedGoal(initialGoal ?? 'views');
+        setActiveStep(startStep);
+    }, [isOpen, initialRadiusKm, initialDurationHours, initialGoal, startStep]);
 
     const effectiveLocalBoundary = Math.max(0.5, Number.isFinite(localBoundaryKm) ? localBoundaryKm : DEFAULT_LOCAL_BOUNDARY_KM);
     const effectiveRegionalBoundary = Math.max(
@@ -291,6 +319,8 @@ export default function BoostSelectionModal({
                     tier,
                     duration,
                     gateway: 'stripe',
+                    action: checkoutAction,
+                    goal: selectedGoal,
                 }),
             }) as {
                 checkout_url?: string;
@@ -367,7 +397,22 @@ export default function BoostSelectionModal({
                         {activeStep === 1 && (
                             <View style={styles.card}>
                                 <Text style={styles.sectionTitle}>Boost overview</Text>
-                                <Text style={styles.sectionMuted}>Reach more people based on radius and duration.</Text>
+                                <Text style={styles.sectionMuted}>Choose what this boost is for, then set the radius and duration.</Text>
+                                <View style={styles.goalList}>
+                                    {goalOptions.map((option) => {
+                                        const selected = selectedGoal === option.id;
+                                        return (
+                                            <Pressable
+                                                key={option.id}
+                                                style={[styles.goalOption, selected && styles.goalOptionSelected]}
+                                                onPress={() => setSelectedGoal(option.id)}
+                                            >
+                                                <Text style={[styles.goalLabel, selected && styles.goalLabelSelected]}>{option.label}</Text>
+                                                <Text style={styles.goalDetail}>{option.detail}</Text>
+                                            </Pressable>
+                                        );
+                                    })}
+                                </View>
                                 <Text style={styles.bullet}>- Appears across more feeds based on selected radius.</Text>
                                 <Text style={styles.bullet}>- Audience and budget are estimated before payment.</Text>
                                 <Text style={styles.bullet}>
@@ -460,6 +505,25 @@ export default function BoostSelectionModal({
                             >
                                 <View style={styles.stepThreeCard}>
                                     <Text style={styles.stepThreeTitle}>Budget and duration</Text>
+                                    <Text style={styles.sectionMuted}>
+                                        Goal: {goalOptions.find((option) => option.id === selectedGoal)?.label ?? 'More views'}
+                                    </Text>
+                                    {checkoutAction === 'create' ? (
+                                        <View style={styles.goalList}>
+                                            {goalOptions.map((option) => {
+                                                const selected = selectedGoal === option.id;
+                                                return (
+                                                    <Pressable
+                                                        key={option.id}
+                                                        style={[styles.goalOption, selected && styles.goalOptionSelected]}
+                                                        onPress={() => setSelectedGoal(option.id)}
+                                                    >
+                                                        <Text style={[styles.goalLabel, selected && styles.goalLabelSelected]}>{option.label}</Text>
+                                                    </Pressable>
+                                                );
+                                            })}
+                                        </View>
+                                    ) : null}
                                     <View style={styles.priceTable}>
                                         <View style={styles.priceRow}>
                                             <Text style={styles.priceHead}>Length</Text>
@@ -551,7 +615,7 @@ export default function BoostSelectionModal({
                                                     <Text style={styles.stripeMarkText}>S</Text>
                                                 </View>
                                                 <Text style={styles.stripePayText} numberOfLines={1}>
-                                                    Pay with Stripe
+                                                    {checkoutAction === 'extend' ? 'Extend with Stripe' : 'Pay with Stripe'}
                                                 </Text>
                                             </>
                                         )}
@@ -687,6 +751,22 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
     },
     toggleBtnText: { color: '#E5E7EB', fontSize: 12, fontWeight: '700' },
+    goalList: { gap: 8, marginTop: 12 },
+    goalOption: {
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.16)',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: 'rgba(255,255,255,0.04)',
+    },
+    goalOptionSelected: {
+        borderColor: '#FFFFFF',
+        backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    goalLabel: { color: '#E5E7EB', fontSize: 14, fontWeight: '700' },
+    goalLabelSelected: { color: '#FFFFFF' },
+    goalDetail: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
     durationBtn: {
         paddingHorizontal: 12,
         paddingVertical: 8,

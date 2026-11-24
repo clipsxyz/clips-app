@@ -17,6 +17,7 @@ class Boost extends Model
         'user_id',
         'feed_type',
         'status',
+        'goal',
         'price',
         'radius_km',
         'center_local',
@@ -29,12 +30,15 @@ class Boost extends Model
         'last_analytics_event_at',
         'payment_intent_id',
         'activated_at',
+        'paused_at',
+        'paused_remaining_seconds',
         'expires_at',
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
         'activated_at' => 'datetime',
+        'paused_at' => 'datetime',
         'expires_at' => 'datetime',
         'last_analytics_event_at' => 'datetime',
     ];
@@ -103,7 +107,25 @@ class Boost extends Model
 
     public function scopeActive($query)
     {
-        return $query->where('expires_at', '>', now());
+        return $query->where('expires_at', '>', now())
+            ->where(function ($inner) {
+                $inner->whereNull('status')
+                    ->orWhereNotIn('status', ['paused', 'stopped']);
+            });
+    }
+
+    /**
+     * A boost the owner can still extend, pause, or resume.
+     * Paused boosts stay open after the original clock time passes.
+     */
+    public function scopeOpenWindow($query)
+    {
+        return $query->where(function ($inner) {
+            $inner->where('status', 'paused')
+                ->orWhere('expires_at', '>', now());
+        })->where(function ($inner) {
+            $inner->whereNull('status')->orWhere('status', '!=', 'stopped');
+        });
     }
 
     public function scopeForFeedType($query, string $feedType)

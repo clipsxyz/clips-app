@@ -27,6 +27,11 @@ class BoostCheckoutActivator
         $radius = $metadata->radius ?? null;
         $tier = (string) ($metadata->tier ?? '');
         $duration = (int) ($metadata->duration ?? 0);
+        $action = $this->normalizeAction($metadata->action ?? null);
+        $eligible = (int) ($metadata->eligible_users_count ?? 0);
+        $goal = in_array($metadata->goal ?? null, ['views', 'profile_visits', 'messages'], true)
+            ? (string) $metadata->goal
+            : 'views';
         $sessionId = (string) ($session->id ?? '');
 
         if ($postId === '' || $userId === '' || $tier === '' || $duration < 1) {
@@ -38,11 +43,14 @@ class BoostCheckoutActivator
         }
 
         if ($sessionId !== '' && ($existingTx = BoostTransaction::query()->where('stripe_session_id', $sessionId)->first())) {
-            $created = $this->ensureLiveBoost($existingTx, $this->paymentIntentId($session));
+            $created = $action === 'extend'
+                ? false
+                : $this->ensureLiveBoost($existingTx, $this->paymentIntentId($session));
 
             return [
                 'status' => 'success',
                 'created' => $created,
+                'extended' => $action === 'extend',
                 'post_id' => (string) $existingTx->post_id,
                 'feed_type' => $this->feedTypeForTier((string) $existingTx->tier),
             ];
@@ -67,14 +75,7 @@ class BoostCheckoutActivator
         $feedType = $this->feedTypeForTier($tier);
         $paymentIntentId = $this->paymentIntentId($session);
 
-        DB::transaction(function () use ($post, $boostedUntil, $radius, $tier, $sessionId, $userId, $duration, $amountCents, $session, $paymentIntentId) {
-            $post->fill([
-                'is_boosted' => true,
-                'boosted_until' => $boostedUntil,
-                'boost_radius' => $radius,
-                'boost_tier' => $tier,
-            ])->save();
-
+        DB::transaction(function () use ($post, $boostedUntil, $radius, $tier, $sessionId, $userId, $duration, $amountCents, $session, $paymentIntentId, $action, $eligible, $goal) {
             $transaction = BoostTransaction::query()->create([
                 'stripe_session_id' => $sessionId,
                 'post_id' => $post->id,
@@ -87,7 +88,31 @@ class BoostCheckoutActivator
                 'paid_at' => now(),
             ]);
 
-            $this->ensureLiveBoost($transaction, $paymentIntentId);
+            if ($action === 'extend') {
+                $this->extendLiveBoost($transaction, $paymentIntentId);
+            } else {
+                $this->ensureLiveBoost($transaction, $paymentIntentId, $goal);
+                if ($eligible > 0) {
+                    $createdBoost = Boost::query()
+                        ->where('post_id', $post->id)
+                        ->where('user_id', $userId)
+                        ->orderByDesc('id')
+                        ->first();
+                    if ($createdBoost) {
+                        $createdBoost->eligible_users_count = $eligible;
+                        $createdBoost->save();
+                    }
+                }
+            }
+
+            $post->refresh();
+            $until = $post->boosted_until ?: $boostedUntil;
+            $post->fill([
+                'is_boosted' => $until->isFuture(),
+                'boosted_until' => $until,
+                'boost_radius' => $radius,
+                'boost_tier' => $tier,
+            ])->save();
         });
 
         Log::info('Boost checkout completed', [
@@ -96,11 +121,13 @@ class BoostCheckoutActivator
             'user_id' => $userId,
             'tier' => $tier,
             'duration' => $duration,
+            'action' => $action,
         ]);
 
         return [
             'status' => 'success',
-            'created' => true,
+            'created' => $action !== 'extend',
+            'extended' => $action === 'extend',
             'post_id' => (string) $post->id,
             'feed_type' => $feedType,
         ];
@@ -171,12 +198,12 @@ class BoostCheckoutActivator
      * The payment row can exist without a boost when an earlier insert failed.
      * Returns true only when this call creates the live boost.
      */
-    private function ensureLiveBoost(BoostTransaction $transaction, ?string $paymentIntentId): bool
+    private function ensureLiveBoost(BoostTransaction $transaction, ?string $paymentIntentId, string $goal = 'views'): bool
     {
         $live = Boost::query()
             ->where('post_id', $transaction->post_id)
             ->where('user_id', $transaction->user_id)
-            ->where('expires_at', '>', now())
+            ->openWindow()
             ->exists();
         if ($live) {
             return false;
@@ -192,6 +219,7 @@ class BoostCheckoutActivator
             'user_id' => $transaction->user_id,
             'feed_type' => $this->feedTypeForTier($tier),
             'status' => 'active',
+            'goal' => $goal,
             'price' => round(((int) $transaction->amount_cents) / 100, 2),
             'radius_km' => $transaction->radius,
             'duration_hours' => $hours,
@@ -208,6 +236,54 @@ class BoostCheckoutActivator
         ]);
 
         return true;
+    }
+
+    /**
+     * Add paid hours onto the boost that is already running.
+     * The original start stays put. Only expires_at moves forward.
+     * If the window already ended, this starts a new one instead.
+     */
+    private function extendLiveBoost(BoostTransaction $transaction, ?string $paymentIntentId): bool
+    {
+        $live = Boost::query()
+            ->where('post_id', $transaction->post_id)
+            ->where('user_id', $transaction->user_id)
+            ->openWindow()
+            ->orderByDesc('expires_at')
+            ->first();
+        if (! $live) {
+            return $this->ensureLiveBoost($transaction, $paymentIntentId);
+        }
+
+        $hours = max(1, (int) $transaction->duration);
+        $paused = $live->status === 'paused';
+        if ($paused) {
+            $live->paused_remaining_seconds = (int) $live->paused_remaining_seconds + ($hours * 3600);
+        }
+        $expiresAt = $paused && $live->paused_at
+            ? $live->paused_at->copy()->addSeconds((int) $live->paused_remaining_seconds)
+            : $live->expires_at->copy()->addHours($hours);
+        $live->fill([
+            'expires_at' => $expiresAt,
+            'duration_hours' => (int) $live->duration_hours + $hours,
+            'price' => round((float) $live->price + (((int) $transaction->amount_cents) / 100), 2),
+            'radius_km' => $transaction->radius ?: $live->radius_km,
+            'status' => $paused ? 'paused' : 'active',
+        ])->save();
+
+        Post::query()->whereKey($transaction->post_id)->update([
+            'is_boosted' => true,
+            'boosted_until' => $expiresAt,
+            'boost_radius' => $transaction->radius,
+            'boost_tier' => (string) $transaction->tier,
+        ]);
+
+        return true;
+    }
+
+    private function normalizeAction(mixed $action): string
+    {
+        return $action === 'extend' ? 'extend' : 'create';
     }
 
     private function feedTypeForTier(string $tier): string

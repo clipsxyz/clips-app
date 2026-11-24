@@ -200,6 +200,13 @@ export type Post = {
   boostStatus?: 'ready' | 'active' | 'ended';
   isBoosted?: boolean;
   boostExpiresAt?: number; // Epoch timestamp when boost expires
+  boostStartsAt?: number;
+  boostDurationHours?: number;
+  boostRadiusKm?: number;
+  boostEligibleUsers?: number;
+  boostViews?: number;
+  boostPaused?: boolean;
+  boostGoal?: 'views' | 'profile_visits' | 'messages';
   boostFeedType?: 'local' | 'regional' | 'national';
   /** Euro amount charged for the current boost, when the API knows it. */
   boostSpendEur?: number;

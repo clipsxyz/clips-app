@@ -123,6 +123,8 @@ export async function activateBoost(
         eligibleUsersCount?: number;
         durationHours?: 6 | 12 | 24 | 72;
         centerLocal?: string;
+        action?: 'create' | 'extend';
+        goal?: 'views' | 'profile_visits' | 'messages';
     }
 ): Promise<BoostedPost> {
     if (paymentIntentId) {
@@ -137,6 +139,8 @@ export async function activateBoost(
                 eligibleUsersCount: meta?.eligibleUsersCount,
                 durationHours: meta?.durationHours,
                 centerLocal: meta?.centerLocal,
+                action: meta?.action,
+                goal: meta?.goal,
             });
             notifyBoostActivated(postId, feedType);
             const now = Date.now();
@@ -166,15 +170,17 @@ export async function activateBoost(
     const expiresAt = now + durationHours * 60 * 60 * 1000;
     const existingBoost = boostedPosts.find((bp) => String(bp.postId) === String(postId) && bp.isActive);
 
-    if (existingBoost) {
-        existingBoost.feedType = feedType;
-        existingBoost.price = price;
-        existingBoost.activatedAt = now;
-        existingBoost.expiresAt = expiresAt;
+    if (existingBoost && meta?.action === 'extend') {
+        existingBoost.expiresAt += durationHours * 60 * 60 * 1000;
+        existingBoost.price += price;
         existingBoost.isActive = true;
         notifyBoostActivated(postId, feedType);
         await markPostBoostedLocally(postId, feedType);
         return existingBoost;
+    }
+
+    if (existingBoost) {
+        throw new Error('This post already has an active boost. Extend it instead.');
     }
 
     const boostedPost: BoostedPost = {
@@ -227,6 +233,7 @@ export async function getActiveBoost(postId: string): Promise<BoostedPost | null
                 userId: '',
                 feedType: status.feedType as BoostFeedType,
                 price: Number(status.spendEur) > 0 ? Number(status.spendEur) : 0,
+                radiusKm: status.radiusKm ?? undefined,
                 activatedAt: status.activatedAt ? new Date(status.activatedAt).getTime() : 0,
                 expiresAt: status.expiresAt ? new Date(status.expiresAt).getTime() : 0,
                 isActive: true,
@@ -317,6 +324,107 @@ export async function getUserActiveBoosts(userId: string): Promise<BoostedPost[]
  * @param postId - Post ID
  * @returns Time remaining in milliseconds, or 0 if not boosted or expired
  */
+export type BoostGoalName = 'views' | 'profile_visits' | 'messages';
+
+export type BoostWindow = {
+    isActive: boolean;
+    hasBoost: boolean;
+    paused: boolean;
+    stopped: boolean;
+    timeRemaining: number;
+    startsAt: number | null;
+    expiresAt: number | null;
+    durationHours: number;
+    radiusKm: number | null;
+    eligibleUsersCount: number;
+    viewsDelivered: number;
+    profileVisits: number;
+    messageStarts: number;
+    goal: BoostGoalName;
+    goalDelivered: number;
+    feedType: BoostFeedType | null;
+};
+
+export async function getBoostWindow(postId: string): Promise<BoostWindow> {
+    const empty: BoostWindow = {
+        isActive: false,
+        hasBoost: false,
+        paused: false,
+        stopped: false,
+        timeRemaining: 0,
+        startsAt: null,
+        expiresAt: null,
+        durationHours: 0,
+        radiusKm: null,
+        eligibleUsersCount: 0,
+        viewsDelivered: 0,
+        profileVisits: 0,
+        messageStarts: 0,
+        goal: 'views',
+        goalDelivered: 0,
+        feedType: null,
+    };
+    const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
+    if (!useLaravel) {
+        const local = boostedPosts.find((bp) => String(bp.postId) === String(postId));
+        if (!local) return empty;
+        return {
+            isActive: local.isActive && local.expiresAt > Date.now(),
+            hasBoost: true,
+            paused: false,
+            stopped: false,
+            timeRemaining: Math.max(0, local.expiresAt - Date.now()),
+            startsAt: local.activatedAt,
+            expiresAt: local.expiresAt,
+            durationHours: 6,
+            radiusKm: local.radiusKm ?? null,
+            eligibleUsersCount: 0,
+            viewsDelivered: 0,
+            profileVisits: 0,
+            messageStarts: 0,
+            goal: 'views',
+            goalDelivered: 0,
+            feedType: local.feedType,
+        };
+    }
+    try {
+        const status = await apiClient.getBoostStatusApi(postId);
+        const starts = status.startsAt || status.activatedAt;
+        const goal = status.goal === 'profile_visits' || status.goal === 'messages' ? status.goal : 'views';
+        return {
+            isActive: !!status.isActive,
+            hasBoost: status.hasBoost !== false && !!(status.expiresAt || status.activatedAt),
+            paused: !!status.paused,
+            stopped: !!status.stopped,
+            timeRemaining: Number(status.timeRemaining) || 0,
+            startsAt: starts ? new Date(starts).getTime() : null,
+            expiresAt: status.expiresAt ? new Date(status.expiresAt).getTime() : null,
+            durationHours: Number(status.durationHours) || 0,
+            radiusKm: status.radiusKm ?? null,
+            eligibleUsersCount: Number(status.eligibleUsersCount) || 0,
+            viewsDelivered: Number(status.viewsDelivered) || 0,
+            profileVisits: Number(status.profileVisits) || 0,
+            messageStarts: Number(status.messageStarts) || 0,
+            goal,
+            goalDelivered: Number(status.goalDelivered) || 0,
+            feedType: (status.feedType as BoostFeedType) || null,
+        };
+    } catch {
+        return empty;
+    }
+}
+
+export async function updateBoostDelivery(
+    postId: string,
+    action: 'pause' | 'resume' | 'stop',
+): Promise<BoostWindow> {
+    const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
+    if (useLaravel) {
+        await apiClient.updateBoostDeliveryApi(postId, action);
+    }
+    return getBoostWindow(postId);
+}
+
 export async function getBoostTimeRemaining(postId: string): Promise<number> {
     const boost = await getActiveBoost(postId);
     if (!boost) return 0;

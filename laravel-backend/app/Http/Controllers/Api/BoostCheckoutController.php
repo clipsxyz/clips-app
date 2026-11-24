@@ -37,6 +37,8 @@ class BoostCheckoutController extends Controller
             'tier' => 'required|string|in:standard,premium,featured',
             'duration' => 'required|integer|in:6,12,24,72',
             'gateway' => 'sometimes|string|in:stripe,store',
+            'action' => 'sometimes|string|in:create,extend',
+            'goal' => 'sometimes|string|in:views,profile_visits,messages',
         ]);
 
         $post = Post::query()->findOrFail($validated['post_id']);
@@ -48,11 +50,24 @@ class BoostCheckoutController extends Controller
         $radius = (float) $validated['radius'];
         $duration = (int) $validated['duration'];
         $gateway = (string) ($validated['gateway'] ?? 'stripe');
+        $action = (string) ($validated['action'] ?? 'create');
+        $live = Boost::query()
+            ->where('post_id', $post->id)
+            ->where('user_id', $user->id)
+            ->openWindow()
+            ->exists();
+        if ($action === 'extend' && ! $live) {
+            return response()->json(['error' => 'There is no active boost to extend'], 409);
+        }
+        if ($action === 'create' && $live) {
+            return response()->json(['error' => 'This post already has an active boost. Extend it instead.'], 409);
+        }
         $feedType = match ($tier) {
             'premium' => 'regional',
             'featured' => 'national',
             default => 'local',
         };
+        $eligible = app(BoostController::class)->quotedAudienceCount((string) $user->id, $feedType, $radius);
         $amount = app(BoostController::class)->audiencePriceCents((string) $user->id, $feedType, $radius, $duration, $gateway);
         if ($amount <= 0) {
             return response()->json(['error' => 'No audience for this boost'], 422);
@@ -66,6 +81,11 @@ class BoostCheckoutController extends Controller
             'duration' => (string) $duration,
             'amount_cents' => (string) $amount,
             'gateway' => $gateway,
+            'action' => $action,
+            'goal' => in_array($request->input('goal'), ['views', 'profile_visits', 'messages'], true)
+                ? (string) $request->input('goal')
+                : 'views',
+            'eligible_users_count' => (string) $eligible,
         ];
 
         if ($gateway === 'store') {
@@ -101,8 +121,8 @@ class BoostCheckoutController extends Controller
                         'currency' => 'eur',
                         'unit_amount' => $amount,
                         'product_data' => [
-                            'name' => 'Gazetteer Post Boost',
-                            'description' => ucfirst($tier).' boost for '.$duration.' hours',
+                            'name' => $action === 'extend' ? 'Gazetteer Boost Extension' : 'Gazetteer Post Boost',
+                            'description' => ($action === 'extend' ? 'Extend boost by ' : ucfirst($tier).' boost for ').$duration.' hours',
                         ],
                     ],
                 ]],

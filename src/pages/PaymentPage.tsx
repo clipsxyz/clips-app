@@ -24,6 +24,7 @@ interface PaymentPageLocationState {
     estimatedReach?: string;
     radiusKm?: number;
     eligibleUsersCount?: number;
+    action?: 'create' | 'extend';
 }
 
 function getFeedTypeLabel(type: BoostFeedType): string {
@@ -53,6 +54,8 @@ function StripePaymentForm({
     radiusKm,
     durationHours,
     eligibleUsersCount,
+    action,
+    goal,
     onSuccess,
 }: {
     post: Post;
@@ -63,6 +66,8 @@ function StripePaymentForm({
     radiusKm?: number;
     durationHours?: BoostDuration;
     eligibleUsersCount?: number;
+    action?: 'create' | 'extend';
+    goal?: BoostGoal;
     onSuccess: () => void;
 }) {
     const stripe = useStripe();
@@ -85,6 +90,8 @@ function StripePaymentForm({
                 radiusKm,
                 eligibleUsersCount,
                 durationHours,
+                action,
+                goal,
             }));
             const { error } = await stripe.confirmPayment({
                 elements,
@@ -103,6 +110,8 @@ function StripePaymentForm({
                 radiusKm,
                 eligibleUsersCount,
                 durationHours,
+                action,
+                goal,
             });
             sessionStorage.removeItem('boostPaymentPending');
             onSuccess();
@@ -181,10 +190,12 @@ export default function PaymentPage() {
             userId: user.id,
             radiusKm: state.radiusKm ?? 2,
             durationHours: state.durationHours ?? 6,
+            action: state.action ?? 'create',
+            goal: state.goal,
         })
             .then(({ clientSecret: secret }) => setClientSecret(secret))
             .catch((err) => setStripeError(err?.message ?? 'Could not start payment'));
-    }, [state?.post?.id, state?.feedType, state?.radiusKm, state?.durationHours, user?.id, stripePromise]);
+    }, [state?.post?.id, state?.feedType, state?.radiusKm, state?.durationHours, state?.action, state?.goal, user?.id, stripePromise]);
 
     React.useEffect(() => {
         if (!state || !stripePromise) return;
@@ -245,6 +256,8 @@ export default function PaymentPage() {
                     radiusKm: state.radiusKm ?? undefined,
                     eligibleUsersCount: state.eligibleUsersCount ?? undefined,
                     durationHours: state.durationHours ?? undefined,
+                    action: state.action,
+                    goal: state.goal,
                 });
             }
             setIsProcessing(false);
@@ -314,6 +327,8 @@ export default function PaymentPage() {
                                 radiusKm={state.radiusKm}
                                 durationHours={durationHours}
                                 eligibleUsersCount={state.eligibleUsersCount}
+                                action={state.action}
+                                goal={state.goal}
                                 onSuccess={showSuccessAndNavigate}
                             />
                         </Elements>
