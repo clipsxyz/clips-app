@@ -11,3 +11,9 @@ Artisan::command('inspire', function () {
 Schedule::command('fcm:prune')->weekly();
 Schedule::command('gazetteer:prune-notifications')->daily();
 
+// Manual `php artisan gazetteer:fetch-news` still runs when this is false.
+Schedule::command('gazetteer:fetch-news')
+    ->everyThreeHours()
+    ->withoutOverlapping()
+    ->when(fn () => (bool) config('automated_seeding.enabled'));
+

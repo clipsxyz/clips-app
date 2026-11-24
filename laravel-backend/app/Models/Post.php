@@ -90,6 +90,8 @@ class Post extends Model
         'music_track_id', // Reference to music track from library
         'music_attribution', // Attribution text for music track
         'link_preview', // JSON: server-resolved OG/oEmbed payload { url, title, description, image_url, source, ... }
+        'source_guid',
+        'source_url',
         'is_boosted',
         'boosted_until',
         'boost_radius',
