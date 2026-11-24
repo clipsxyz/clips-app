@@ -924,6 +924,9 @@ export async function createPost(postData: {
     editTimeline?: any;
     musicTrackId?: number;
     templateStyle?: 'default' | 'polaroid' | 'neon' | 'glass' | 'magazine';
+    /** UTC ISO timestamp. A future value stores the post as scheduled. */
+    scheduledAt?: string;
+    scheduled_at?: string;
 }) {
     if (isMockMode()) {
         console.log('[createPost/client] IS_MOCK=true → skip Laravel');
@@ -1051,6 +1054,30 @@ export async function updatePost(postId: string, postData: {
     });
 }
 
+export async function fetchScheduledPosts(): Promise<{ items: any[] }> {
+    const payload = await apiRequest('/posts/scheduled');
+    return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+export async function reschedulePost(postId: string, scheduledAt: string) {
+    return apiRequest(`/posts/${postId}/schedule`, {
+        method: 'PATCH',
+        body: JSON.stringify({ scheduled_at: scheduledAt }),
+    });
+}
+
+export async function publishScheduledPostNow(postId: string) {
+    return apiRequest(`/posts/${postId}/publish-now`, {
+        method: 'POST',
+    });
+}
+
+export async function cancelScheduledPost(postId: string) {
+    return apiRequest(`/posts/${postId}/schedule`, {
+        method: 'DELETE',
+    });
+}
+
 export async function deletePost(postId: string) {
     return apiRequest(`/posts/${postId}`, {
         method: 'DELETE',
@@ -1162,6 +1189,31 @@ function normalizeReplyToMessageId(value: string | null | undefined): string | n
     return trimmed;
 }
 
+/** A locked profile is a normal response, not a failed request. */
+function privateProfilePayload(payload: any): any | null {
+    if (!payload || typeof payload !== 'object' || payload.is_private !== true) return null;
+    const displayName =
+        (typeof payload.display_name === 'string' && payload.display_name) ||
+        (typeof payload.displayName === 'string' && payload.displayName) ||
+        '';
+    const avatar =
+        (typeof payload.avatar_url === 'string' && payload.avatar_url) ||
+        (typeof payload.avatarUrl === 'string' && payload.avatarUrl) ||
+        null;
+    return {
+        handle: typeof payload.handle === 'string' ? payload.handle : '',
+        display_name: displayName,
+        displayName,
+        avatar_url: avatar,
+        avatarUrl: avatar,
+        is_private: true,
+        can_view: false,
+        requires_follow: payload.requires_follow !== false,
+        has_pending_request: Boolean(payload.has_pending_request ?? payload.hasPendingRequest),
+        posts: [],
+    };
+}
+
 async function laravelUsersGet(pathAndQuery: string): Promise<any> {
     if (isMockMode()) {
         console.log('[laravelUsersGet] IS_MOCK=true → skip Laravel', pathAndQuery);
@@ -1190,6 +1242,10 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
             payload = text;
         }
         if (!response.ok) {
+            if (response.status === 403) {
+                const locked = privateProfilePayload(payload);
+                if (locked) return locked;
+            }
             const errorMessage =
                 payload?.error ||
                 payload?.message ||
@@ -1207,6 +1263,9 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
         }
         return payload;
     } catch (error: any) {
+        if (error?.status === 403 && error?.response?.is_private === true) {
+            throw error;
+        }
         console.error('[laravelUsersGet] fetch error', {
             path,
             name: error?.name,

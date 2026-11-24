@@ -116,7 +116,9 @@ export default function InboxConversationRow({
     const swipeRef = useRef<Swipeable | null>(null);
     const rowId = inboxConversationRowId(conv);
     const isGroup = conv.kind === 'group';
-    const name = isGroup ? conv.groupName || 'Group chat' : displayHandle(conv.otherHandle);
+    const name = isGroup
+        ? conv.groupName || 'Group chat'
+        : conv.displayName?.trim() || displayHandle(conv.otherHandle);
     const lastMessage = conversationPreviewText(conv, viewerHandle);
     const timestamp = compactInboxTime(conv.lastMessage?.timestamp);
     const unread = conv.unread || 0;

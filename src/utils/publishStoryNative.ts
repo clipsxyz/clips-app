@@ -77,6 +77,7 @@ export async function publishMediaStory24(options: {
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>;
     videoPosterUrl?: string;
     audience?: 'public' | 'close_friends' | 'only_me';
+    scheduledAt?: string;
 }): Promise<Story> {
     const composerStickers = buildStoryComposerStickers({
         caption: options.caption,
@@ -102,8 +103,11 @@ export async function publishMediaStory24(options: {
         options.venue,
         options.videoPosterUrl,
         options.audience ?? 'public',
+        options.scheduledAt,
     );
-    notifyStoryCreated(options.userHandle);
+    if (!options.scheduledAt) {
+        notifyStoryCreated(options.userHandle);
+    }
     return story;
 }
 

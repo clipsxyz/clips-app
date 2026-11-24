@@ -92,6 +92,8 @@ class Post extends Model
         'link_preview', // JSON: server-resolved OG/oEmbed payload { url, title, description, image_url, source, ... }
         'source_guid',
         'source_url',
+        'status',
+        'scheduled_at',
         'is_boosted',
         'boosted_until',
         'boost_radius',
@@ -125,6 +127,7 @@ class Post extends Model
         'longitude' => 'float',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'scheduled_at' => 'datetime',
         'deleted_at' => 'datetime',
     ];
 
@@ -299,6 +302,12 @@ class Post extends Model
     public function scopeNotReclipped($query)
     {
         return $query->where('is_reclipped', false);
+    }
+
+    /** Public feeds only. Scheduled posts stay off the feed until the publisher runs. */
+    public function scopePublished($query)
+    {
+        return $query->where('status', 'published');
     }
 
     public function scopeByLocation($query, $location)

@@ -7,6 +7,7 @@ use App\Models\ProfilePostSubscription;
 use App\Models\User;
 use App\Models\Notification;
 use App\Services\BoostAnalyticsService;
+use App\Services\PublishScheduledContent;
 use App\Services\StoryService;
 use App\Services\VideoThumbnailService;
 use App\Support\PublicMediaUrl;
@@ -93,6 +94,7 @@ class UserController extends Controller
             return $denied;
         }
 
+        $this->publishDueContent();
         $page = $this->paginateProfilePosts($request, $user, $viewer instanceof User ? $viewer : null);
 
         // Pagination reuses this endpoint with postsCursor — do not count those as visits.
@@ -170,6 +172,8 @@ class UserController extends Controller
         if ($denied = $this->privateProfileDenied($user, $viewer instanceof User ? $viewer : null)) {
             return $denied;
         }
+
+        $this->publishDueContent();
 
         return response()->json($this->paginateProfilePosts(
             $request,
@@ -641,6 +645,15 @@ class UserController extends Controller
      *
      * @return array{posts: \Illuminate\Support\Collection, postsNextCursor: ?string, postsHasMore: bool, posts_count: int, likes_count: int, views_count: int, stats: array{likes: int, views: int, followers: int, following: int}}
      */
+    private function publishDueContent(): void
+    {
+        try {
+            app(PublishScheduledContent::class)->publishDue();
+        } catch (\Throwable $e) {
+            \Log::warning('profile publish scheduled failed', ['error' => $e->getMessage()]);
+        }
+    }
+
     private function paginateProfilePosts(Request $request, User $user, ?User $viewer): array
     {
         $postsLimit = max(1, min((int) $request->get('postsLimit', 20), 50));
@@ -653,6 +666,7 @@ class UserController extends Controller
         $query = \App\Models\Post::query()
             ->where('posts.user_id', $user->id)
             ->notReclipped()
+            ->published()
             ->with([
                 'user:id,handle,display_name,username,avatar_url,location_local,location_regional,location_national',
             ])
@@ -810,6 +824,7 @@ class UserController extends Controller
             'posts_count' => (int) \App\Models\Post::query()
                 ->where('user_id', $user->id)
                 ->notReclipped()
+                ->published()
                 ->count(),
             'likes_count' => $likesTotal,
             'views_count' => $viewsTotal,

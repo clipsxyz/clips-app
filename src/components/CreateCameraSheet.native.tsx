@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
     Animated,
     BackHandler,
     Easing,
@@ -12,6 +11,7 @@ import {
     useWindowDimensions,
     View,
 } from 'react-native';
+import CameraShutterButton from './CameraShutterButton.native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {
@@ -339,25 +339,15 @@ export default function CreateCameraSheet({
                         <Pressable style={styles.sideBtn} onPress={finishClose} accessibilityLabel="Close camera">
                             <Icon name="close" size={26} color="#FFFFFF" />
                         </Pressable>
-                        {mode === 'video' ? (
-                            <Pressable
-                                style={styles.shutterRing}
-                                onPress={toggleRecording}
-                                disabled={!cameraAllowed}
-                                accessibilityLabel={recording ? 'Stop recording' : 'Start recording'}
-                            >
-                                {recording ? <View style={styles.recordStop} /> : <View style={styles.recordDot} />}
-                            </Pressable>
-                        ) : (
-                            <Pressable
-                                style={styles.shutterRing}
-                                onPress={() => void takePhoto()}
-                                disabled={!cameraAllowed || busy}
-                                accessibilityLabel="Take photo"
-                            >
-                                {busy ? <ActivityIndicator color="#111111" /> : <View style={styles.shutter} />}
-                            </Pressable>
-                        )}
+                        <CameraShutterButton
+                            mode={mode}
+                            busy={busy}
+                            recording={recording}
+                            maxVideoSeconds={maxVideoSeconds}
+                            disabled={!cameraAllowed}
+                            onTakePhoto={() => void takePhoto()}
+                            onToggleRecording={toggleRecording}
+                        />
                         <Pressable
                             style={[styles.sideBtn, recording && styles.sideBtnDisabled]}
                             onPress={() => {
@@ -496,32 +486,5 @@ const styles = StyleSheet.create({
     },
     sideBtnDisabled: {
         opacity: 0.4,
-    },
-    shutterRing: {
-        width: 78,
-        height: 78,
-        borderRadius: 39,
-        borderWidth: 4,
-        borderColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    shutter: {
-        width: 62,
-        height: 62,
-        borderRadius: 31,
-        backgroundColor: '#FFFFFF',
-    },
-    recordDot: {
-        width: 62,
-        height: 62,
-        borderRadius: 31,
-        backgroundColor: '#FF3B30',
-    },
-    recordStop: {
-        width: 30,
-        height: 30,
-        borderRadius: 8,
-        backgroundColor: '#FF3B30',
     },
 });

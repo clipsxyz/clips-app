@@ -71,9 +71,12 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             undefined,
             undefined,
             job.cardStyle,
+            job.scheduledAt,
         );
         completePendingFeedUpload(job.tempId, createdPost);
-        getUploadOverlayForJob(job.tempId)?.success();
+        getUploadOverlayForJob(job.tempId)?.success(
+            job.scheduledAt ? 'Your post is scheduled' : undefined,
+        );
         return;
     }
 
@@ -164,9 +167,13 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             // the feed sizes the first frame on first paint. Per-slide dims ride on `uploaded`.
             first.width,
             first.height,
+            undefined,
+            job.scheduledAt,
         );
         completePendingFeedUpload(job.tempId, createdPost);
-        getUploadOverlayForJob(job.tempId)?.success();
+        getUploadOverlayForJob(job.tempId)?.success(
+            job.scheduledAt ? 'Your post is scheduled' : undefined,
+        );
         return;
     }
 
@@ -255,10 +262,14 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         // persist width/height and the feed lay out on first paint (no onLoad snap).
         job.mediaWidth,
         job.mediaHeight,
+        undefined,
+        job.scheduledAt,
     );
 
     completePendingFeedUpload(job.tempId, createdPost);
-    getUploadOverlayForJob(job.tempId)?.success();
+    getUploadOverlayForJob(job.tempId)?.success(
+        job.scheduledAt ? 'Your post is scheduled' : undefined,
+    );
 }
 
 /** Map errors for the overlay — no custom 413 / size-specific messaging. */

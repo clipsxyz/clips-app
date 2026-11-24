@@ -154,6 +154,10 @@ export type Post = {
   linkPreview?: LinkPreview;
   createdAt: number; // Epoch timestamp in milliseconds (like Date.now())
   created_at?: string; // Backend field (ISO string)
+  /** published posts are in the feed. scheduled posts stay private until scheduledAt. */
+  status?: 'published' | 'scheduled';
+  /** Epoch ms. Set when the author chose a future publish time. */
+  scheduledAt?: number;
   stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
   isBookmarked: boolean;
   isFollowing: boolean;

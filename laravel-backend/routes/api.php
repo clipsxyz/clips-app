@@ -215,6 +215,8 @@ Route::get('/dev/ava-follows-barry', function () {
 // Public posts routes (allow viewing posts without auth)
 Route::prefix('posts')->group(function () {
     Route::get('/', [PostController::class, 'index']); // Public - anyone can view feed
+    // Must be registered before /{id} so "scheduled" is not parsed as a post id.
+    Route::get('/scheduled', [PostController::class, 'scheduled'])->middleware('auth:sanctum');
     // Must be registered before /{id} so "suggested-by-places" is not parsed as a UUID
     Route::match(['get', 'post'], '/suggested-by-places', [SuggestedPlacesController::class, 'index'])
         ->middleware('auth:sanctum');
@@ -274,6 +276,9 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     // Posts routes (protected - require auth for actions)
     Route::prefix('posts')->group(function () {
         Route::post('/', [PostController::class, 'store']);
+        Route::patch('/{id}/schedule', [PostController::class, 'reschedule']);
+        Route::post('/{id}/publish-now', [PostController::class, 'publishNow']);
+        Route::delete('/{id}/schedule', [PostController::class, 'cancelSchedule']);
         Route::put('/{id}', [PostController::class, 'update']);
         Route::delete('/{id}', [PostController::class, 'destroy']);
         Route::post('/{id}/like', [PostController::class, 'toggleLike']);
@@ -380,7 +385,12 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/paged', [StoryController::class, 'paged']);
         Route::get('/insights', [StoryController::class, 'ownerInsights']);
         Route::get('/user/{handle}', [StoryController::class, 'getUserStories']);
+        Route::get('/scheduled', [StoryController::class, 'scheduled']);
         Route::post('/', [StoryController::class, 'store']);
+        Route::patch('/{id}/schedule', [StoryController::class, 'reschedule']);
+        Route::post('/{id}/publish-now', [StoryController::class, 'publishNow']);
+        Route::delete('/{id}/schedule', [StoryController::class, 'cancelSchedule']);
+        Route::patch('/{id}/caption', [StoryController::class, 'updateCaption']);
         Route::get('/{id}/insights', [StoryController::class, 'insights']);
         Route::post('/{id}/view', [StoryController::class, 'view']);
         Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);

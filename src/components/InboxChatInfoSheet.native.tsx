@@ -55,7 +55,7 @@ export default function InboxChatInfoSheet({
     if (!conv) return null;
 
     const isGroup = conv.kind === 'group' && !!conv.chatGroupId;
-    const title = isGroup ? conv.groupName || 'Group' : conv.otherHandle;
+    const title = isGroup ? conv.groupName || 'Group' : conv.displayName?.trim() || conv.otherHandle;
     const unread = conv.unread || 0;
 
     const Row = ({

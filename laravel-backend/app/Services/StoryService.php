@@ -60,6 +60,7 @@ class StoryService
     {
         $query = Story::query()
             ->active()
+            ->published()
             ->where('created_at', '>=', now()->subHours(24));
 
         $this->applyRailScope($query, $viewer, $userIdParam);

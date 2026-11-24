@@ -10,6 +10,7 @@ use App\Models\StoryView;
 use App\Models\User;
 use App\Models\Post;
 use App\Services\LinkPreviewService;
+use App\Services\PublishScheduledContent;
 use App\Services\StoryService;
 use App\Services\VideoThumbnailService;
 use App\Support\PublicMediaUrl;
@@ -43,6 +44,7 @@ class StoryController extends Controller
         }
 
         $limit = (int) $request->get('limit', 20);
+        $this->publishDueContent();
         $cursorState = $this->decodeStoryCursor((string) $request->get('cursor', ''));
         $viewer = Auth::user();
         $userId = $viewer?->id ?: $request->get('userId');
@@ -106,6 +108,7 @@ class StoryController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $this->publishDueContent();
         $viewer = Auth::user();
         $userId = $viewer?->id ?: $request->get('userId');
         $hasViewer = !empty($userId);
@@ -177,6 +180,7 @@ class StoryController extends Controller
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
+        $this->publishDueContent();
         $user = User::where('handle', $handle)->firstOrFail();
         $userId = $request->get('userId') ?: Auth::id();
         $hasViewer = !empty($userId);
@@ -194,6 +198,7 @@ class StoryController extends Controller
 
         $query = Story::where('user_id', $user->id)
             ->active()
+            ->published()
             ->withCount(['reactions', 'replies', 'views'])
             ->orderBy('created_at', 'desc');
 
@@ -271,7 +276,7 @@ class StoryController extends Controller
             return response()->json(['error' => 'Story not found'], 404);
         }
 
-        if ($story->isExpired()) {
+        if (($story->status ?: 'published') !== 'published' || $story->isExpired()) {
             return response()->json([
                 'error' => 'Story no longer available',
                 'expired' => true,
@@ -344,6 +349,8 @@ class StoryController extends Controller
             'taggedUsersPositions.*.x' => 'nullable|numeric',
             'taggedUsersPositions.*.y' => 'nullable|numeric',
             'audience' => 'nullable|in:public,close_friends,only_me',
+            'scheduled_at' => 'nullable|date',
+            'scheduledAt' => 'nullable|date',
             // Poster is optional decoration; never reject a story just because the still is
             // not an absolute URL (local file://, blob:, or empty are all acceptable).
             'video_poster_url' => 'nullable|string|max:500',
@@ -362,6 +369,22 @@ class StoryController extends Controller
 
         $user = Auth::user();
 
+        if (! $request->filled('scheduled_at') && $request->filled('scheduledAt')) {
+            $request->merge(['scheduled_at' => $request->input('scheduledAt')]);
+        }
+
+        $scheduledFor = null;
+        if ($request->filled('scheduled_at')) {
+            try {
+                $scheduledFor = Carbon::parse((string) $request->input('scheduled_at'));
+            } catch (\Throwable $e) {
+                return response()->json(['error' => 'scheduled_at must be a valid date'], 422);
+            }
+            if ($scheduledFor->lessThanOrEqualTo(now())) {
+                return response()->json(['error' => 'scheduled_at must be in the future'], 422);
+            }
+        }
+
         // Resolve the referenced post ourselves instead of a strict `exists` rule so a
         // story is never rejected just because the share references a post we can't find
         // (mock/local/optimistic card). The FK on stories.shared_from_post_id requires a
@@ -374,7 +397,7 @@ class StoryController extends Controller
         $linkPreview = $this->resolveLinkPreview($request);
 
         $shareStillLive = false;
-        $story = DB::transaction(function () use ($request, $user, $sharedPost, $linkPreview, &$shareStillLive) {
+        $story = DB::transaction(function () use ($request, $user, $sharedPost, $linkPreview, $scheduledFor, &$shareStillLive) {
             // One live story per newsfeed card. The same card can be shared again only
             // after this story expires and drops off Stories (24 hours).
             if ($sharedPost && Story::query()
@@ -406,7 +429,9 @@ class StoryController extends Controller
                 'tagged_users' => $request->taggedUsers,
                 'audience' => $request->audience ?: 'public',
                 'video_poster_url' => $request->video_poster_url,
-                'expires_at' => now()->addHours(24), // 24 hours from now
+                'status' => $scheduledFor ? 'scheduled' : 'published',
+                'scheduled_at' => $scheduledFor,
+                'expires_at' => ($scheduledFor ?? now())->copy()->addHours(24),
                 'link_preview' => $linkPreview,
             ];
             if (Schema::hasColumn('stories', 'tagged_users_positions')) {
@@ -424,6 +449,160 @@ class StoryController extends Controller
         }
 
         return response()->json($this->presentStory($story, false), 201);
+    }
+
+    public function scheduled(): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $stories = Story::query()
+            ->where('user_id', $user->id)
+            ->where('status', 'scheduled')
+            ->orderBy('scheduled_at')
+            ->orderBy('id')
+            ->limit(50)
+            ->get();
+
+        return response()->json([
+            'items' => $stories->map(fn (Story $story) => $this->presentStory($story, false))->values(),
+        ]);
+    }
+
+    public function reschedule(Request $request, string $id): JsonResponse
+    {
+        $story = $this->ownedScheduledStory($id);
+        if (! $story) {
+            return response()->json(['error' => 'Scheduled Short not found'], 404);
+        }
+
+        if (! $request->filled('scheduled_at') && $request->filled('scheduledAt')) {
+            $request->merge(['scheduled_at' => $request->input('scheduledAt')]);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'scheduled_at' => 'required|date',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        try {
+            $when = Carbon::parse((string) $request->input('scheduled_at'));
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'scheduled_at must be a valid date'], 422);
+        }
+        if ($when->lessThanOrEqualTo(now())) {
+            return response()->json(['error' => 'scheduled_at must be in the future'], 422);
+        }
+
+        $story->scheduled_at = $when;
+        $story->expires_at = $when->copy()->addHours(24);
+        $story->save();
+
+        return response()->json($this->presentStory($story->fresh(), false));
+    }
+
+    public function publishNow(string $id): JsonResponse
+    {
+        $story = $this->ownedScheduledStory($id);
+        if (! $story) {
+            return response()->json(['error' => 'Scheduled Short not found'], 404);
+        }
+
+        $now = now();
+        $updated = Story::query()
+            ->whereKey($story->id)
+            ->where('status', 'scheduled')
+            ->update([
+                'status' => 'published',
+                'scheduled_at' => null,
+                'created_at' => $now,
+                'expires_at' => $now->copy()->addHours(24),
+            ]);
+        if ($updated !== 1) {
+            return response()->json(['error' => 'Scheduled Short not found'], 404);
+        }
+
+        StoryService::forgetRailCacheForUser((string) $story->user_id);
+        $story->refresh();
+
+        return response()->json($this->presentStory($story, false));
+    }
+
+    public function cancelSchedule(string $id): JsonResponse
+    {
+        $story = $this->ownedScheduledStory($id);
+        if (! $story) {
+            return response()->json(['error' => 'Scheduled Short not found'], 404);
+        }
+
+        $story->delete();
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function updateCaption(Request $request, string $id): JsonResponse
+    {
+        $story = $this->ownedScheduledStory($id);
+        if (! $story) {
+            return response()->json(['error' => 'Scheduled Short not found'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'text' => 'nullable|string|max:500',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $text = trim((string) $request->input('text', ''));
+        $story->text = $text !== '' ? $text : null;
+        $stickers = is_array($story->stickers) ? $story->stickers : [];
+        foreach ($stickers as &$sticker) {
+            $category = $sticker['sticker']['category'] ?? $sticker['category'] ?? null;
+            if ($category !== 'Text') {
+                continue;
+            }
+            $sticker['textContent'] = $text;
+            if (isset($sticker['sticker']) && is_array($sticker['sticker'])) {
+                $sticker['sticker']['name'] = $text;
+            }
+        }
+        unset($sticker);
+        $story->stickers = $stickers;
+        $story->save();
+
+        return response()->json($this->presentStory($story->fresh(), false));
+    }
+
+    private function ownedScheduledStory(string $id): ?Story
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return null;
+        }
+
+        return Story::query()
+            ->where('user_id', $user->id)
+            ->where('status', 'scheduled')
+            ->find($id);
+    }
+
+    private function publishDueContent(): void
+    {
+        try {
+            app(PublishScheduledContent::class)->publishDue();
+        } catch (\Throwable $e) {
+            \Log::warning('stories publish scheduled failed', ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function storyIsPubliclyLive(Story $story): bool
+    {
+        return ($story->status ?: 'published') === 'published' && ! $story->isExpired();
     }
 
     /**
@@ -446,7 +625,7 @@ class StoryController extends Controller
 
         $story = Story::findOrFail($id);
 
-        if ($story->isExpired()) {
+        if (! $this->storyIsPubliclyLive($story)) {
             return response()->json(['error' => 'Story has expired'], 400);
         }
 
@@ -485,6 +664,7 @@ class StoryController extends Controller
         $stories = Story::query()
             ->where('user_id', $user->id)
             ->active()
+            ->published()
             ->with([
                 'views' => function ($q) use ($user) {
                     $q->whereNotNull('user_id')
@@ -610,7 +790,7 @@ class StoryController extends Controller
         $user = Auth::user();
         $story = Story::findOrFail($id);
 
-        if ($story->isExpired()) {
+        if (! $this->storyIsPubliclyLive($story)) {
             return response()->json(['error' => 'Story has expired'], 400);
         }
 
@@ -655,7 +835,7 @@ class StoryController extends Controller
         $user = Auth::user();
         $story = Story::findOrFail($id);
 
-        if ($story->isExpired()) {
+        if (! $this->storyIsPubliclyLive($story)) {
             return response()->json(['error' => 'Story has expired'], 400);
         }
 

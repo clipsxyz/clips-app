@@ -1211,6 +1211,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     </TouchableOpacity>
 
                 <TouchableOpacity
+                    style={[styles.tab, styles.tabChip]}
+                    onPress={() => navigation.navigate('ScheduledPosts')}
+                >
+                    <Icon name="time-outline" size={ox(20)} color="#FFFFFF" />
+                    <Text style={styles.tabLabel}>Scheduled</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                     style={[styles.tab, styles.tabCommentSafety]}
                     onPress={() => {
                         setSettingsOpen(false);
@@ -1764,6 +1772,22 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     }}
                                 >
                                     <Text style={styles.smallActionButtonText}>Open comment safety</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Scheduled content</Text>
+                                <Text style={styles.toggleDescription}>
+                                    Post now, change the time, edit the caption, or delete a post before it goes live
+                                </Text>
+                                <TouchableOpacity
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
+                                    onPress={() => {
+                                        setSettingsOpen(false);
+                                        navigation.navigate('ScheduledPosts');
+                                    }}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Open scheduled posts</Text>
                                 </TouchableOpacity>
                             </View>
 

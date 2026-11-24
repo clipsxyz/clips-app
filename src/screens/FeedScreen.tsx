@@ -2440,59 +2440,55 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const storiesRailFilter = 'following';
     const railFilter = storiesRailFilter ?? 'following';
 
-    React.useEffect(() => {
+    const reloadStoriesRail = React.useCallback(() => {
         if (!user?.id) {
             setStories24Items([]);
             return;
         }
-        let cancelled = false;
-        const load = () => {
-            void (async () => {
-                const items = await buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter);
-                if (cancelled) return;
-                let sponsored = sponsoredStoryHoldRef.current;
-                try {
-                    const rows = await fetchPaidDelivery('stories');
-                    const winner = rows.find((row) => row.story?.id && row.story.handle && Number(row.boostId) > 0);
-                    if (winner?.story) {
-                        sponsored = {
-                            handle: winner.story.handle,
-                            title: winner.story.title || winner.story.handle,
-                            thumb: winner.story.thumb || undefined,
-                            avatarUrl: winner.story.avatarUrl || undefined,
-                            storyId: winner.story.id,
-                            boostId: Number(winner.boostId),
-                            sponsored: true,
-                        };
-                        sponsoredStoryHoldRef.current = sponsored;
-                    }
-                } catch {
-                    /* The organic rail still shows when delivery is unavailable. */
+        const requestUserId = user.id;
+        void (async () => {
+            const items = await buildStories24RailItems(requestUserId, user.handle, user.avatarUrl, railFilter);
+            let sponsored = sponsoredStoryHoldRef.current;
+            try {
+                const rows = await fetchPaidDelivery('stories');
+                const winner = rows.find((row) => row.story?.id && row.story.handle && Number(row.boostId) > 0);
+                if (winner?.story) {
+                    sponsored = {
+                        handle: winner.story.handle,
+                        title: winner.story.title || winner.story.handle,
+                        thumb: winner.story.thumb || undefined,
+                        avatarUrl: winner.story.avatarUrl || undefined,
+                        storyId: winner.story.id,
+                        boostId: Number(winner.boostId),
+                        sponsored: true,
+                    };
+                    sponsoredStoryHoldRef.current = sponsored;
                 }
-                if (!cancelled) {
-                    setStories24Items(sponsored ? placeSponsoredStory(items, sponsored) : items);
-                }
-            })();
-        };
-        load();
+            } catch {
+                /* The organic rail still shows when delivery is unavailable. */
+            }
+            setStories24Items(sponsored ? placeSponsoredStory(items, sponsored) : items);
+        })();
+    }, [user?.id, user?.handle, user?.avatarUrl, railFilter]);
+
+    const reloadStoriesRailRef = useRef(reloadStoriesRail);
+    reloadStoriesRailRef.current = reloadStoriesRail;
+
+    React.useEffect(() => {
+        reloadStoriesRail();
         const pollMs = getStoriesRailPollMs();
-        const interval = pollMs != null ? setInterval(load, pollMs) : null;
-        const unsubRefresh = subscribeStoriesRefresh(load);
+        const interval = pollMs != null ? setInterval(reloadStoriesRail, pollMs) : null;
+        const unsubRefresh = subscribeStoriesRefresh(reloadStoriesRail);
         return () => {
-            cancelled = true;
             if (interval) clearInterval(interval);
             unsubRefresh();
         };
-    }, [user?.id, user?.handle, user?.avatarUrl, railFilter]);
+    }, [reloadStoriesRail]);
 
     useFocusEffect(
         React.useCallback(() => {
-            if (!user?.id) return;
-            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, railFilter).then((items) => {
-                const sponsored = sponsoredStoryHoldRef.current;
-                setStories24Items(sponsored ? placeSponsoredStory(items, sponsored) : items);
-            });
-        }, [user?.id, user?.handle, user?.avatarUrl, railFilter]),
+            reloadStoriesRailRef.current();
+        }, []),
     );
 
     React.useEffect(() => {
@@ -3760,6 +3756,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }, [updateUnreadCount])
     );
 
+    const skipFeedFocusReloadRef = useRef(true);
+    useFocusEffect(
+        React.useCallback(() => {
+            if (skipFeedFocusReloadRef.current) {
+                skipFeedFocusReloadRef.current = false;
+                return;
+            }
+            void reloadFeedFromStartRef.current({ quiet: true });
+        }, []),
+    );
+
     const applyScenesPostUpdates = React.useCallback((updates: Post[]) => {
         if (!updates.length) return;
         const pinnedY = feedScrollYRef.current;
@@ -3806,6 +3813,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useEffect(() => {
         return subscribePendingFeedUploadComplete((tempId, createdPost) => {
             const decorated = decorateForUser(userId, createdPost);
+            if (decorated.status === 'scheduled') {
+                setPendingUploadTick((tick) => tick + 1);
+                return;
+            }
             recentCreatedPostsRef.current = [
                 decorated,
                 ...recentCreatedPostsRef.current.filter((p) => String(p.id) !== String(decorated.id)),
@@ -4125,6 +4136,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         refreshingLockRef.current = true;
         setRefreshing(true);
         try {
+            reloadStoriesRailRef.current();
             await reloadFeedFromStartRef.current({ quiet: true });
         } catch (err) {
             console.error('Feed pull-to-refresh failed:', err);

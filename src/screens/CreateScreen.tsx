@@ -25,6 +25,7 @@ import { saveDraft } from '../api/drafts.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet.native';
+import SchedulePostSheet, { formatScheduleWhen } from '../components/SchedulePostSheet.native';
 import {
     MAX_FEED_VIDEO_DURATION_SEC,
     MAX_STORIES_VIDEO_DURATION_SEC,
@@ -125,6 +126,9 @@ export default function CreateScreen({ navigation, route }: any) {
         Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : '',
     );
     const [isUploading, setIsUploading] = useState(false);
+    const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
+    const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
+    const [scheduleTip, setScheduleTip] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
     const [cameraCapture, setCameraCapture] = useState<CameraCaptureMode | null>(null);
@@ -589,22 +593,37 @@ export default function CreateScreen({ navigation, route }: any) {
                 placeId,
                 latitude: placeLatitude,
                 longitude: placeLongitude,
+                scheduledAt: scheduledAt ? scheduledAt.toISOString() : undefined,
             });
             showUploadOverlayNative({
                 jobId: tempId,
                 thumbUri: localThumbUri ?? undefined,
                 thumbType: mediaType === 'video' ? 'video' : 'image',
-                uploadingTitle:
-                    mediaType === 'video' ? 'Posting your clip…' : 'Preparing post…',
-                initialMessage:
-                    mediaType === 'video'
-                        ? 'This may take a moment.'
-                        : 'Posting to Gazetteer…',
+                uploadingTitle: scheduledAt
+                    ? 'Scheduling your post…'
+                    : mediaType === 'video'
+                      ? 'Posting your clip…'
+                      : 'Preparing post…',
+                successTitle: scheduledAt ? 'Scheduled' : 'Posted!',
+                initialMessage: scheduledAt
+                    ? 'It will appear on the feed at the time you chose.'
+                    : mediaType === 'video'
+                      ? 'This may take a moment.'
+                      : 'Posting to Gazetteer…',
             });
             hapticLight();
-            resetToHomeFeed(navigation);
             setIsUploading(false);
             startBackgroundFeedUpload(tempId);
+            if (scheduledAt) {
+                const when = formatScheduleWhen(scheduledAt);
+                gazetteerAlert(
+                    'Scheduled',
+                    `It will not appear on the newsfeed until ${when}.`,
+                    [{ text: 'OK', onPress: () => resetToHomeFeed(navigation) }],
+                );
+                return;
+            }
+            resetToHomeFeed(navigation);
             return;
         }
 
@@ -638,8 +657,18 @@ export default function CreateScreen({ navigation, route }: any) {
                 stickers: stickers.length > 0 ? stickers : undefined,
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
                 audience: storyAudience,
+                scheduledAt: scheduledAt ? scheduledAt.toISOString() : undefined,
             });
             hapticSuccess();
+            if (scheduledAt) {
+                const when = formatScheduleWhen(scheduledAt);
+                gazetteerAlert(
+                    'Scheduled',
+                    `It will not appear on Shorts until ${when}.`,
+                    [{ text: 'OK', onPress: () => resetToHomeFeed(navigation) }],
+                );
+                return;
+            }
             const storyAudienceLabel =
                 storyAudience === 'close_friends' ? 'Close Friends' : storyAudience === 'only_me' ? 'Only Me' : 'Public';
             gazetteerAlert(
@@ -729,6 +758,18 @@ export default function CreateScreen({ navigation, route }: any) {
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{isStory24Flow ? 'Create Shorts' : 'Create Post'}</Text>
                 <View style={styles.headerActions}>
+                    <TouchableOpacity
+                        onPress={() => {
+                            setScheduleTip(false);
+                            setScheduleSheetOpen(true);
+                        }}
+                        disabled={isUploading}
+                        style={styles.scheduleIconButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={isStory24Flow ? 'Schedule Short' : 'Schedule post'}
+                    >
+                        <Icon name="time-outline" size={ox(22)} color="#FFFFFF" />
+                    </TouchableOpacity>
                     <TouchableOpacity onPress={handleSaveDraft} disabled={isSavingDraft || isUploading} style={styles.draftButton}>
                         {isSavingDraft ? (
                             <ActivityIndicator size="small" color="#9CA3AF" />
@@ -736,19 +777,73 @@ export default function CreateScreen({ navigation, route }: any) {
                             <Text style={styles.draftButtonText}>Draft</Text>
                         )}
                     </TouchableOpacity>
-                    <TouchableOpacity
-                        onPress={handlePost}
-                        disabled={isUploading}
-                        style={styles.postButton}
-                    >
-                        {isUploading ? (
-                            <ActivityIndicator size="small" color="#3B82F6" />
-                        ) : (
-                            <Text style={styles.postButtonText}>{isStory24Flow ? 'Share' : 'Post'}</Text>
-                        )}
-                    </TouchableOpacity>
+                    <View>
+                        {scheduleTip ? (
+                            <Pressable
+                                style={styles.scheduleTip}
+                                onPress={() => {
+                                    setScheduleTip(false);
+                                    setScheduleSheetOpen(true);
+                                }}
+                            >
+                                <Icon name="time-outline" size={14} color="#111111" />
+                                <Text style={styles.scheduleTipText}>Schedule</Text>
+                            </Pressable>
+                        ) : null}
+                        <TouchableOpacity
+                            onPress={handlePost}
+                            onLongPress={() => {
+                                if (isUploading) return;
+                                setScheduleTip(true);
+                            }}
+                            delayLongPress={350}
+                            disabled={isUploading}
+                            style={styles.postButton}
+                        >
+                            {isUploading ? (
+                                <ActivityIndicator size="small" color="#3B82F6" />
+                            ) : (
+                                <Text style={styles.postButtonText}>
+                                    {scheduledAt ? 'Schedule' : isStory24Flow ? 'Share' : 'Post'}
+                                </Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </View>
+
+            {scheduledAt ? (
+                <View style={styles.scheduleBadge}>
+                    <Icon name="time-outline" size={14} color="#111111" />
+                    <Text style={styles.scheduleBadgeText}>
+                        {scheduledAt.toLocaleString(undefined, {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                        })}
+                    </Text>
+                    <Pressable
+                        onPress={() => setScheduledAt(null)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear schedule"
+                    >
+                        <Icon name="close" size={16} color="#111111" />
+                    </Pressable>
+                </View>
+            ) : null}
+            <SchedulePostSheet
+                visible={scheduleSheetOpen}
+                initial={scheduledAt}
+                onClose={() => setScheduleSheetOpen(false)}
+                onConfirm={(when) => {
+                    setScheduledAt(when);
+                    setScheduleSheetOpen(false);
+                    setScheduleTip(false);
+                }}
+            />
 
             <ScrollView
                 style={styles.content}
@@ -1361,6 +1456,48 @@ const styles = StyleSheet.create({
     postButton: {
         paddingHorizontal: ox(16),
         paddingVertical: ox(8),
+    },
+    scheduleIconButton: {
+        width: ox(36),
+        height: ox(36),
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    scheduleTip: {
+        position: 'absolute',
+        right: 0,
+        bottom: '100%',
+        marginBottom: 6,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 16,
+        backgroundColor: '#FFFFFF',
+        zIndex: 5,
+    },
+    scheduleTipText: {
+        color: '#111111',
+        fontSize: ox(13),
+        fontWeight: '700',
+    },
+    scheduleBadge: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginHorizontal: ox(16),
+        marginTop: ox(10),
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 18,
+        backgroundColor: '#FFFFFF',
+    },
+    scheduleBadgeText: {
+        color: '#111111',
+        fontSize: ox(13),
+        fontWeight: '700',
     },
     headerActions: {
         flexDirection: 'row',

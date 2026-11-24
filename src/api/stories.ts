@@ -1177,7 +1177,8 @@ export async function createStory(
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>, // Tagged users with positions
     venue?: string, // Venue / place name (for metadata when story is shown on feed)
     videoPosterUrl?: string, // Still for Stories 24 rail thumbs
-    audience: 'public' | 'close_friends' | 'only_me' = 'public'
+    audience: 'public' | 'close_friends' | 'only_me' = 'public',
+    scheduledAt?: string,
 ): Promise<Story> {
     const buildMockStory = async (): Promise<Story> => {
         await delay();
@@ -1222,7 +1223,9 @@ export async function createStory(
             sharedFromUser,
         };
 
-        stories.push(newStory);
+        if (!scheduledAt) {
+            stories.push(newStory);
+        }
         return newStory;
     };
 
@@ -1271,6 +1274,8 @@ export async function createStory(
                 venue: venue || undefined,
                 video_poster_url: videoPosterUrl || undefined,
                 audience: audience || 'public',
+                scheduled_at: scheduledAt || undefined,
+                scheduledAt: scheduledAt || undefined,
             }),
         });
 
@@ -1311,11 +1316,11 @@ export async function createStory(
             sharedFromUser: response.shared_from_user_handle || sharedFromUser || undefined,
         };
 
-          // Also add to local stories array for immediate UI update
-          stories.push(newStory);
-
-          // A brand-new story must show up in feed headers immediately.
-          clearActiveStoryProbes();
+          const isScheduled = response.status === 'scheduled' || !!scheduledAt;
+          if (!isScheduled) {
+              stories.push(newStory);
+              clearActiveStoryProbes();
+          }
           return newStory;
       } catch (error: any) {
         console.warn('createStory API failed:', error);
@@ -1855,4 +1860,40 @@ export async function isStoryMediaActive(mediaUrl: string): Promise<boolean> {
 // Utility: check if a media URL was ever a story (regardless of expiration)
 export function wasEverAStory(mediaUrl: string): boolean {
     return stories.some(s => s.mediaUrl === mediaUrl);
+}
+
+async function storyRequest(path: string, options: RequestInit = {}) {
+    const { apiRequest } = await import('./client');
+    return apiRequest(path, options);
+}
+
+export async function fetchScheduledShorts(): Promise<{ items: any[] }> {
+    const payload = await storyRequest('/stories/scheduled');
+    return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+export async function rescheduleShort(storyId: string, scheduledAt: string) {
+    return storyRequest(`/stories/${storyId}/schedule`, {
+        method: 'PATCH',
+        body: JSON.stringify({ scheduled_at: scheduledAt }),
+    });
+}
+
+export async function publishScheduledShortNow(storyId: string) {
+    return storyRequest(`/stories/${storyId}/publish-now`, {
+        method: 'POST',
+    });
+}
+
+export async function cancelScheduledShort(storyId: string) {
+    return storyRequest(`/stories/${storyId}/schedule`, {
+        method: 'DELETE',
+    });
+}
+
+export async function updateScheduledShortCaption(storyId: string, text: string) {
+    return storyRequest(`/stories/${storyId}/caption`, {
+        method: 'PATCH',
+        body: JSON.stringify({ text }),
+    });
 }

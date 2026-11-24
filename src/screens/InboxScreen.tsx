@@ -470,34 +470,33 @@ export default function InboxScreen({ navigation, route }: any) {
     }, [actionableInsights, resolveInsightAvatar, user?.id]);
 
     useEffect(() => {
-        const handles = Array.from(
-            new Set(
-                [
-                    ...notifications.map((n) => n.fromHandle),
-                    ...conversations.filter((c) => c.kind !== 'group').map((c) => c.otherHandle),
-                ].filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
-            )
-        );
-        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !dmAvatarMap[handle]);
-        if (missing.length === 0) return;
-
-        missing.forEach((handle) => {
-            if (avatarFetchInFlightRef.current.has(handle)) return;
-            avatarFetchInFlightRef.current.add(handle);
-            fetchUserProfile(handle, user?.id)
-                .then((profile: any) => {
-                    const avatarUrl = extractAvatarUrl(profile);
-                    if (avatarUrl.length > 0) {
-                        setAvatarForHandle(handle, avatarUrl);
-                        setDmAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
-                    }
-                })
-                .catch(() => {})
-                .finally(() => {
-                    avatarFetchInFlightRef.current.delete(handle);
-                });
+        const known: Record<string, string> = {};
+        const remember = (handle: string, avatar?: string | null) => {
+            const url = typeof avatar === 'string' ? avatar.trim() : '';
+            if (!handle.trim() || !url) return;
+            setAvatarForHandle(handle, url);
+            known[handle] = url;
+        };
+        conversations.forEach((conv) => {
+            if (conv.kind === 'group') return;
+            remember(conv.otherHandle, conv.avatarUrl);
         });
-    }, [notifications, conversations, dmAvatarMap, user?.id]);
+        notifications.forEach((note) => {
+            remember(note.fromHandle, note.fromAvatarUrl);
+        });
+        if (Object.keys(known).length === 0) return;
+        setDmAvatarMap((prev) => {
+            let dirty = false;
+            const merged = { ...prev };
+            Object.entries(known).forEach(([handle, url]) => {
+                if (merged[handle] !== url) {
+                    merged[handle] = url;
+                    dirty = true;
+                }
+            });
+            return dirty ? merged : prev;
+        });
+    }, [notifications, conversations]);
 
     const notificationPrefs = useMemo(() => getNotificationPreferences(), []);
     const activityNotifications = useMemo<Notification[]>(() => {
@@ -1327,7 +1326,7 @@ export default function InboxScreen({ navigation, route }: any) {
                 avatarSrc={
                     isGroup
                         ? item.groupAvatarUrl || undefined
-                        : dmAvatarMap[item.otherHandle] || getAvatarForHandle(item.otherHandle)
+                        : dmAvatarMap[item.otherHandle] || item.avatarUrl || getAvatarForHandle(item.otherHandle)
                 }
                 isSwipeOpen={openSwipeHandle === rowId}
                 onSwipeOpenChange={setOpenSwipeHandle}
@@ -2110,7 +2109,9 @@ export default function InboxScreen({ navigation, route }: any) {
                 conv={inboxChatInfo}
                 avatarSrc={
                     inboxChatInfo && inboxChatInfo.kind !== 'group'
-                        ? dmAvatarMap[inboxChatInfo.otherHandle] || getAvatarForHandle(inboxChatInfo.otherHandle)
+                        ? dmAvatarMap[inboxChatInfo.otherHandle] ||
+                          inboxChatInfo.avatarUrl ||
+                          getAvatarForHandle(inboxChatInfo.otherHandle)
                         : undefined
                 }
                 onClose={() => setInboxChatInfo(null)}

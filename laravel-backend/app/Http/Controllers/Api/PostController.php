@@ -8,6 +8,7 @@ use App\Models\Post;
 use App\Models\RenderJob;
 use App\Models\User;
 use App\Services\BoostAnalyticsService;
+use App\Services\PublishScheduledContent;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
 use App\Services\LinkPreviewService;
@@ -261,6 +262,9 @@ class PostController extends Controller
     {
         $postData = $post->toArray();
         $attrs = $post->getAttributes();
+        $postData['status'] = $post->status ?: 'published';
+        $postData['scheduled_at'] = optional($post->scheduled_at)->toISOString();
+        $postData['scheduledAt'] = $postData['scheduled_at'];
         $postData['public_share_token'] = $post->public_share_token;
         $postData['venue'] = $post->venue;
         $postData['landmark'] = $post->landmark;
@@ -419,6 +423,12 @@ class PostController extends Controller
             }
             $cursorState = $this->decodeFeedCursor($cursor);
 
+            try {
+                app(PublishScheduledContent::class)->publishDue();
+            } catch (\Throwable $e) {
+                \Log::warning('posts index publish scheduled failed', ['error' => $e->getMessage()]);
+            }
+
             // Do not cache feed pages: likes/views/comments/shares change constantly,
             // and Home refetches this endpoint. A 5-minute cache served stale zeros.
             $response = $this->buildFeedResponse($cursorState, $limit, $filter, $userId);
@@ -444,6 +454,7 @@ class PostController extends Controller
         // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
         // Location feeds: only original posts from that location.
         $query = Post::query()
+            ->published()
             ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,account_type,allow_comments,comment_audience,is_private', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url,is_private'])
             ->withCount(Post::engagementWithCounts());
 
@@ -625,6 +636,10 @@ class PostController extends Controller
         }
 
         $post = $query->findOrFail($id);
+        $viewerId = Auth::id() ?: $userId;
+        if (($post->status ?: 'published') !== 'published' && (string) $post->user_id !== (string) $viewerId) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
         $userModel = $hasViewer ? User::find($userId) : null;
 
         return response()->json(self::toApiArray($post, $userModel));
@@ -645,7 +660,7 @@ class PostController extends Controller
             ->where('public_share_token', $token)
             ->first();
 
-        if (! $post) {
+        if (! $post || ($post->status ?: 'published') !== 'published') {
             return response()->json(['error' => 'Post not found'], 404);
         }
 
@@ -711,6 +726,10 @@ class PostController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if (! $request->filled('scheduled_at') && $request->filled('scheduledAt')) {
+            $request->merge(['scheduled_at' => $request->input('scheduledAt')]);
+        }
+
         $validator = Validator::make($request->all(), [
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
@@ -763,6 +782,7 @@ class PostController extends Controller
             'editTimeline' => 'nullable|array', // Edit timeline for hybrid editing pipeline
             'aiMusicConfig' => 'nullable|array', // AI music configuration
             'musicTrackId' => 'nullable|integer|exists:music,id', // Library music track ID
+            'scheduled_at' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -795,6 +815,19 @@ class PostController extends Controller
             return response()->json(['error' => 'Unauthenticated'], 401);
         }
 
+        $scheduledFor = null;
+        if ($request->filled('scheduled_at')) {
+            try {
+                $scheduledFor = \Carbon\Carbon::parse((string) $request->input('scheduled_at'));
+            } catch (\Throwable $e) {
+                return response()->json(['error' => 'scheduled_at must be a valid date'], 422);
+            }
+            if ($scheduledFor->lessThanOrEqualTo(now())) {
+                return response()->json(['error' => 'scheduled_at must be in the future'], 422);
+            }
+        }
+        $publishStatus = $scheduledFor ? 'scheduled' : 'published';
+
         \Log::info('posts.store', [
             'user_id' => $user->id,
             'handle' => $user->handle,
@@ -806,7 +839,7 @@ class PostController extends Controller
         // Resolved outside the transaction: it may make outbound HTTP calls.
         $linkPreview = $this->resolveLinkPreview($request);
 
-        $post = DB::transaction(function () use ($request, $user, $linkPreview) {
+        $post = DB::transaction(function () use ($request, $user, $linkPreview, $scheduledFor, $publishStatus) {
             $geo = $this->resolvePostGeoFields($request, $user);
             $dimensions = $this->resolveMediaDimensions($request);
 
@@ -869,6 +902,8 @@ class PostController extends Controller
                 'edit_timeline' => $request->editTimeline,
 'music_track_id' => $request->musicTrackId,
                 'link_preview' => $linkPreview,
+                'status' => $publishStatus,
+                'scheduled_at' => $scheduledFor,
               ]);
 
             // Attach tagged users if provided
@@ -881,8 +916,9 @@ class PostController extends Controller
                 $post->attachTaggedUsersPivot($pivot);
             }
 
-            // Update user posts count
-            $user->increment('posts_count');
+            if ($publishStatus === 'published') {
+                $user->increment('posts_count');
+            }
 
             // Create render job if editTimeline is provided (hybrid editing pipeline)
             if ($request->editTimeline && is_array($request->editTimeline) && ! empty($request->editTimeline)) {
@@ -931,14 +967,19 @@ class PostController extends Controller
             'posts_count' => $user->fresh()?->posts_count,
         ]);
 
-        try {
-            app(\App\Services\InteractionPushService::class)->notifyProfilePostSubscribers($user, (string) $post->id);
-        } catch (\Throwable $e) {
-            \Log::warning('posts.store subscriber notify failed', ['error' => $e->getMessage()]);
+        if ($publishStatus === 'published') {
+            try {
+                app(\App\Services\InteractionPushService::class)->notifyProfilePostSubscribers($user, (string) $post->id);
+            } catch (\Throwable $e) {
+                \Log::warning('posts.store subscriber notify failed', ['error' => $e->getMessage()]);
+            }
         }
 
         // Transform taggedUsers to array of handles for frontend compatibility
         $postData = $post->toArray();
+        $postData['status'] = $post->status ?: 'published';
+        $postData['scheduled_at'] = optional($post->scheduled_at)->toISOString();
+        $postData['scheduledAt'] = $postData['scheduled_at'];
         $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
         $poster = $post->resolvedThumbnailUrl();
         $postData['thumbnail_url'] = $poster;
@@ -1055,6 +1096,131 @@ class PostController extends Controller
         $postData['userReclipped'] = $post->isReclippedBy($user);
 
         return response()->json($postData);
+    }
+
+    /**
+     * The signed-in author's posts that are waiting for their scheduled time.
+     */
+    public function scheduled(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $posts = Post::query()
+            ->where('user_id', $user->id)
+            ->where('status', 'scheduled')
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,account_type,allow_comments,comment_audience,is_private', 'taggedUsers:id,handle,display_name,avatar_url'])
+            ->orderBy('scheduled_at')
+            ->orderBy('id')
+            ->limit(50)
+            ->get();
+
+        return response()->json([
+            'items' => $posts->map(fn (Post $post) => self::toApiArray($post, $user))->values(),
+        ]);
+    }
+
+    /**
+     * Move one of the author's scheduled posts to a new future time.
+     */
+    public function reschedule(Request $request, string $id): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        if (! $request->filled('scheduled_at') && $request->filled('scheduledAt')) {
+            $request->merge(['scheduled_at' => $request->input('scheduledAt')]);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'scheduled_at' => 'required|date',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        try {
+            $when = \Carbon\Carbon::parse((string) $request->input('scheduled_at'));
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'scheduled_at must be a valid date'], 422);
+        }
+        if ($when->lessThanOrEqualTo(now())) {
+            return response()->json(['error' => 'scheduled_at must be in the future'], 422);
+        }
+
+        $post = Post::query()->where('user_id', $user->id)->where('status', 'scheduled')->find($id);
+        if (! $post) {
+            return response()->json(['error' => 'Scheduled post not found'], 404);
+        }
+
+        $post->scheduled_at = $when;
+        $post->save();
+
+        return response()->json(self::toApiArray($post->fresh(), $user));
+    }
+
+    /**
+     * Publish a scheduled post immediately and date it as just posted.
+     */
+    public function publishNow(string $id): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $post = Post::query()->where('user_id', $user->id)->where('status', 'scheduled')->find($id);
+        if (! $post) {
+            return response()->json(['error' => 'Scheduled post not found'], 404);
+        }
+
+        $now = now();
+        $updated = Post::query()
+            ->whereKey($post->id)
+            ->where('status', 'scheduled')
+            ->update([
+                'status' => 'published',
+                'scheduled_at' => null,
+                'created_at' => $now,
+            ]);
+        if ($updated !== 1) {
+            return response()->json(['error' => 'Scheduled post not found'], 404);
+        }
+
+        $user->increment('posts_count');
+        $post->refresh();
+
+        try {
+            app(\App\Services\InteractionPushService::class)->notifyProfilePostSubscribers($user, (string) $post->id);
+        } catch (\Throwable $e) {
+            \Log::warning('posts.publishNow subscriber notify failed', ['error' => $e->getMessage()]);
+        }
+
+        return response()->json(self::toApiArray($post, $user));
+    }
+
+    /**
+     * Drop a scheduled post so it never publishes.
+     */
+    public function cancelSchedule(string $id): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $post = Post::query()->where('user_id', $user->id)->where('status', 'scheduled')->find($id);
+        if (! $post) {
+            return response()->json(['error' => 'Scheduled post not found'], 404);
+        }
+
+        $post->delete();
+
+        return response()->json(['ok' => true]);
     }
 
     /**

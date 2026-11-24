@@ -8,6 +8,7 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+Schedule::command('posts:publish-scheduled')->everyMinute()->withoutOverlapping();
 Schedule::command('fcm:prune')->weekly();
 Schedule::command('gazetteer:prune-notifications')->daily();
 

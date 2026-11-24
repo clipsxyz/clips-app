@@ -47,6 +47,7 @@ import MessagesScreen from './src/screens/MessagesScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
 import VideoPlaybackSettingsScreen from './src/screens/VideoPlaybackSettingsScreen';
+import ScheduledPostsScreen from './src/screens/ScheduledPostsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ChangePhoneNumberScreen from './src/screens/ChangePhoneNumberScreen';
 import PaymentScreen from './src/screens/PaymentScreen';
@@ -527,6 +528,11 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="VideoPlaybackSettings"
             component={VideoPlaybackSettingsScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="ScheduledPosts"
+            component={ScheduledPostsScreen}
             options={{ presentation: 'modal' }}
           />
           <Stack.Screen

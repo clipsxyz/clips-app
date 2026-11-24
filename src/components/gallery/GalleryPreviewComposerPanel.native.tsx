@@ -70,6 +70,10 @@ type Props = {
     isSavingDraft: boolean;
     onSaveDraft: () => void;
     canSave: boolean;
+    /** Newsfeed posts only. Hidden for Shorts. */
+    onSchedule?: () => void;
+    scheduleLabel?: string | null;
+    onClearSchedule?: () => void;
 };
 
 /** Web GalleryPreviewPage bottom sheet: snap picker + caption/location/carousel. */
@@ -99,6 +103,9 @@ export default function GalleryPreviewComposerPanel({
     isSavingDraft,
     onSaveDraft,
     canSave,
+    onSchedule,
+    scheduleLabel,
+    onClearSchedule,
 }: Props) {
     const thumbRectsRef = useRef<Array<{ x: number; width: number }>>([]);
     const thumbHostRefs = useRef<Array<View | null>>([]);
@@ -178,6 +185,16 @@ export default function GalleryPreviewComposerPanel({
                     })}
                 </View>
 
+                {onSchedule ? (
+                    <TouchableOpacity
+                        style={styles.saveBtn}
+                        onPress={onSchedule}
+                        accessibilityRole="button"
+                        accessibilityLabel="Schedule post"
+                    >
+                        <Icon name="time-outline" size={22} color="#FFFFFF" />
+                    </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                     style={[styles.saveBtn, isSavingDraft && styles.saveBtnActive]}
                     onPress={onSaveDraft}
@@ -195,6 +212,23 @@ export default function GalleryPreviewComposerPanel({
                     )}
                 </TouchableOpacity>
             </View>
+
+            {scheduleLabel ? (
+                <View style={styles.scheduleBadge}>
+                    <Icon name="time-outline" size={14} color="#111111" />
+                    <Text style={styles.scheduleBadgeText} numberOfLines={1}>
+                        {scheduleLabel}
+                    </Text>
+                    <TouchableOpacity
+                        onPress={onClearSchedule}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear schedule"
+                    >
+                        <Icon name="close" size={16} color="#111111" />
+                    </TouchableOpacity>
+                </View>
+            ) : null}
 
             {cardBodyExpanded ? (
                 <ScrollView
@@ -466,6 +500,25 @@ const styles = StyleSheet.create({
         padding: 10,
         marginRight: 8,
         borderRadius: 12,
+    },
+    scheduleBadge: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginLeft: 16,
+        marginBottom: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 18,
+        backgroundColor: '#FFFFFF',
+        maxWidth: '92%',
+    },
+    scheduleBadgeText: {
+        color: '#111111',
+        fontSize: 13,
+        fontWeight: '700',
+        flexShrink: 1,
     },
     saveBtnActive: {
         backgroundColor: '#FFFFFF',

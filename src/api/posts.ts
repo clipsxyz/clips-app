@@ -1686,6 +1686,13 @@ width: response.width ?? existing?.width,
       const ts = raw ? new Date(raw).getTime() : Date.now();
       return Number.isFinite(ts) ? ts : Date.now();
     })(),
+    status: response.status === 'scheduled' ? 'scheduled' : 'published',
+    scheduledAt: (() => {
+      const raw = response.scheduled_at || response.scheduledAt;
+      if (typeof raw !== 'string' || !raw.trim()) return undefined;
+      const ts = new Date(raw).getTime();
+      return Number.isFinite(ts) ? ts : undefined;
+    })(),
     stats: mergeEngagementStats(
       {
         likes: Number(response.likes_count ?? response.stats?.likes ?? 0) || 0,
@@ -4128,6 +4135,7 @@ export async function createPost(
   mediaWidth?: number,
   mediaHeight?: number,
   cardStyle?: import('../utils/textCardStyles').TextCardStyleId,
+  scheduledAt?: string,
 ): Promise<Post> {
   const currentUserAccountType = (() => {
     try {
@@ -4183,6 +4191,8 @@ export async function createPost(
         subtitleText: subtitleText || undefined,
         editTimeline: editTimeline || undefined,
         musicTrackId: musicTrackId || undefined,
+        scheduledAt: scheduledAt || undefined,
+        scheduled_at: scheduledAt || undefined,
       });
       console.log('[createPost/posts] live create ok', {
         id: response?.id,

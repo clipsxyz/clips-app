@@ -45,6 +45,7 @@ import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
+import SchedulePostSheet, { formatScheduleWhen } from '../components/SchedulePostSheet.native';
 import { ox } from '../constants/nativeOpticalScale';
 import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
@@ -134,6 +135,8 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
+  const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
 
   const activeTemplate = useMemo(
     () => (selectedTemplateId ? TEXT_STORY_TEMPLATES.find((t) => t.id === selectedTemplateId) : undefined),
@@ -340,10 +343,15 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
       textStyle,
       templateId: selectedTemplateId || undefined,
       cardStyle: isStory24 ? undefined : textCardStyle,
+      scheduledAt: scheduledAt ? scheduledAt.toISOString() : undefined,
     });
     showUploadOverlayNative({
       jobId: tempId,
-      initialMessage: 'Posting to Gazetteer…',
+      initialMessage: scheduledAt
+        ? 'It will appear on the feed at the time you chose.'
+        : 'Posting to Gazetteer…',
+      uploadingTitle: scheduledAt ? 'Scheduling your post…' : undefined,
+      successTitle: scheduledAt ? 'Scheduled' : undefined,
       textThumbBackground: previewColors[0] || TEXT_ONLY_CANVAS_BG,
       textThumbLabel: activeTemplate?.name?.charAt(0).toUpperCase() || 'Aa',
     });
@@ -354,9 +362,18 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
         console.warn('Could not remove posted draft', err);
       });
     }
-    finishToFeed();
     startBackgroundFeedUpload(tempId);
     setIsSubmitting(false);
+    if (scheduledAt) {
+      const when = formatScheduleWhen(scheduledAt);
+      gazetteerAlert(
+        'Scheduled',
+        `It will not appear on the newsfeed until ${when}.`,
+        [{ text: 'OK', onPress: finishToFeed }],
+      );
+      return;
+    }
+    finishToFeed();
   };
 
   const handleCancel = () => {
@@ -439,6 +456,16 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
             >
               <Icon name="location-outline" size={ox(24)} color="#FFFFFF" />
             </TouchableOpacity>
+            {isStory24 ? null : (
+              <TouchableOpacity
+                onPress={() => setScheduleSheetOpen(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Schedule post"
+              >
+                <Icon name="time-outline" size={ox(22)} color="#FFFFFF" />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={() => void handleSaveToDrafts()}
               disabled={!canPost || isSavingDraft}
@@ -450,18 +477,55 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
             <TouchableOpacity
               style={[styles.postBtn, canPost && !isSubmitting && styles.postBtnActive]}
               onPress={() => void handlePost()}
+              onLongPress={() => {
+                if (isStory24 || isSubmitting) return;
+                setScheduleSheetOpen(true);
+              }}
+              delayLongPress={350}
               disabled={!canPost || isSubmitting}
             >
               {isSubmitting ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text style={[styles.postBtnText, !canPost && styles.headerDisabled]}>
-                  {isStory24 ? 'Post story' : 'Post'}
+                  {isStory24 ? 'Post story' : scheduledAt ? 'Schedule' : 'Post'}
                 </Text>
               )}
             </TouchableOpacity>
           </View>
         </View>
+
+        {!isStory24 && scheduledAt ? (
+          <View style={styles.scheduleBadge}>
+            <Icon name="time-outline" size={14} color="#111111" />
+            <Text style={styles.scheduleBadgeText}>
+              {scheduledAt.toLocaleString(undefined, {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setScheduledAt(null)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Clear schedule"
+            >
+              <Icon name="close" size={16} color="#111111" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+        <SchedulePostSheet
+          visible={scheduleSheetOpen && !isStory24}
+          initial={scheduledAt}
+          onClose={() => setScheduleSheetOpen(false)}
+          onConfirm={(when) => {
+            setScheduledAt(when);
+            setScheduleSheetOpen(false);
+          }}
+        />
 
         <ScrollView
           style={styles.flex}
@@ -830,6 +894,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: ox(10),
     flexShrink: 0,
+  },
+  scheduleBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: ox(16),
+    marginTop: ox(10),
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+  },
+  scheduleBadgeText: {
+    color: '#111111',
+    fontSize: ox(13),
+    fontWeight: '700',
   },
   cancelText: {
     color: '#FFFFFF',

@@ -39,6 +39,7 @@ import {
     STORY_STICKER_SAFE_ZONE_TOP,
 } from '../utils/stickerLayoutNative';
 import { publishMediaStory24 } from '../utils/publishStoryNative';
+import SchedulePostSheet, { formatScheduleWhen } from '../components/SchedulePostSheet.native';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 import { VideoCompressCancelled } from '../utils/compressVideoForUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
@@ -189,6 +190,8 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     const [selectedTaggedUserId, setSelectedTaggedUserId] = useState<string | null>(null);
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
     const [isPosting, setIsPosting] = useState(false);
+    const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
+    const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
 
     const [showLocationModal, setShowLocationModal] = useState(false);
     const [showLinkModal, setShowLinkModal] = useState(false);
@@ -446,14 +449,18 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     const handlePost = () => {
         if (!user || !mediaUrl || isPosting) return;
 
+        const scheduledIso = scheduledAt ? scheduledAt.toISOString() : undefined;
+        const whenLabel = scheduledAt ? formatScheduleWhen(scheduledAt) : null;
         const jobId = `story-${Date.now()}`;
         const overlay = showUploadOverlayNative({
             jobId,
             thumbUri: mediaUrl,
             thumbType: mediaType === 'video' ? 'video' : 'image',
-            initialMessage: 'Posting your story…',
-            uploadingTitle: 'Posting story…',
-            successTitle: 'Story live!',
+            initialMessage: scheduledIso
+                ? 'It will appear on Shorts at the time you chose.'
+                : 'Posting your story…',
+            uploadingTitle: scheduledIso ? 'Scheduling your Short…' : 'Posting story…',
+            successTitle: scheduledIso ? 'Scheduled' : 'Story live!',
         });
 
         const handles = taggedUsers.map((tu) => tu.handle);
@@ -515,8 +522,13 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                             ? taggedSnapshot.map((tu) => ({ handle: tu.handle, x: tu.x, y: tu.y }))
                             : undefined,
                     audience: audienceSnapshot,
+                    scheduledAt: scheduledIso,
                 });
-                overlay.success('Your story is now live.');
+                overlay.success(
+                    scheduledIso && whenLabel
+                        ? `It will not appear on Shorts until ${whenLabel}.`
+                        : 'Your story is now live.',
+                );
             } catch (err: any) {
                 if (err instanceof VideoCompressCancelled) {
                     overlay.dismiss();
@@ -627,18 +639,59 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                         <Icon name="close" size={ox(24)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Your Story</Text>
-                    <TouchableOpacity
-                        style={[styles.postBtn, isPosting && styles.postBtnDisabled]}
-                        onPress={() => void handlePost()}
-                        disabled={isPosting}
-                    >
-                        {isPosting ? (
-                            <ActivityIndicator size="small" color="#000000" />
-                        ) : (
-                            <Text style={styles.postBtnText}>Post</Text>
-                        )}
-                    </TouchableOpacity>
+                    <View style={styles.headerActions}>
+                        <TouchableOpacity
+                            onPress={() => setScheduleSheetOpen(true)}
+                            disabled={isPosting}
+                            style={styles.scheduleIconButton}
+                            accessibilityRole="button"
+                            accessibilityLabel="Schedule Short"
+                        >
+                            <Icon name="time-outline" size={ox(22)} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.postBtn, isPosting && styles.postBtnDisabled]}
+                            onPress={() => void handlePost()}
+                            onLongPress={() => {
+                                if (!isPosting) setScheduleSheetOpen(true);
+                            }}
+                            delayLongPress={350}
+                            disabled={isPosting}
+                            accessibilityLabel={scheduledAt ? 'Schedule' : 'Post'}
+                        >
+                            {isPosting ? (
+                                <ActivityIndicator size="small" color="#000000" />
+                            ) : (
+                                <Text style={styles.postBtnText}>{scheduledAt ? 'Schedule' : 'Post'}</Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
                 </View>
+
+                {scheduledAt ? (
+                    <View style={[styles.scheduleBadge, { top: Math.max(insets.top, 8) + ox(52) }]}>
+                        <Icon name="time-outline" size={14} color="#111111" />
+                        <Text style={styles.scheduleBadgeText}>{formatScheduleWhen(scheduledAt)}</Text>
+                        <Pressable
+                            onPress={() => setScheduledAt(null)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="Clear schedule"
+                        >
+                            <Icon name="close" size={16} color="#111111" />
+                        </Pressable>
+                    </View>
+                ) : null}
+
+                <SchedulePostSheet
+                    visible={scheduleSheetOpen}
+                    initial={scheduledAt}
+                    onClose={() => setScheduleSheetOpen(false)}
+                    onConfirm={(when) => {
+                        setScheduledAt(when);
+                        setScheduleSheetOpen(false);
+                    }}
+                />
 
                 {captionOpen ? null : (
                 <View
@@ -933,6 +986,21 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.2)',
     },
     headerBtn: { padding: ox(8), width: ox(40) },
+    headerActions: { flexDirection: 'row', alignItems: 'center', gap: ox(8) },
+    scheduleIconButton: { padding: ox(6) },
+    scheduleBadge: {
+        position: 'absolute',
+        right: ox(12),
+        zIndex: 60,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
+        borderRadius: ox(999),
+        backgroundColor: '#FFFFFF',
+    },
+    scheduleBadgeText: { color: '#111111', fontSize: ox(12), fontWeight: '700' },
     headerTitle: { color: '#FFFFFF', fontSize: ox(16), fontWeight: '600' },
     postBtn: {
         backgroundColor: '#FFFFFF',

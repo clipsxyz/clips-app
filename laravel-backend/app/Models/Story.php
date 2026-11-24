@@ -41,6 +41,8 @@ class Story extends Model
         'tagged_users', // JSON array of user handles
         'tagged_users_positions', // JSON array of { handle, x, y }
         'audience', // public | close_friends | only_me
+        'status',
+        'scheduled_at',
         'video_poster_url', // still frame for Stories 24 rail thumbs
         'link_preview', // JSON: server-resolved OG/oEmbed payload { url, title, description, image_url, source, ... }
     ];
@@ -48,6 +50,7 @@ class Story extends Model
     protected $casts = [
         'views_count' => 'integer',
         'expires_at' => 'datetime',
+        'scheduled_at' => 'datetime',
         'link_preview' => 'array',
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers' => 'array', // Array of StickerOverlay objects
@@ -87,6 +90,13 @@ class Story extends Model
     public function scopeActive($query)
     {
         return $query->where('expires_at', '>', now());
+    }
+
+    public function scopePublished($query)
+    {
+        return $query->where(function ($q) {
+            $q->where('status', 'published')->orWhereNull('status');
+        });
     }
 
     public function scopeExpired($query)

@@ -167,6 +167,7 @@ type FeedNativeVideoProps = {
     onLoad: React.ComponentProps<typeof Video>['onLoad'];
     onProgress: React.ComponentProps<typeof Video>['onProgress'];
     onError: React.ComponentProps<typeof Video>['onError'];
+    onEnd?: React.ComponentProps<typeof Video>['onEnd'];
 };
 
 /**
@@ -203,6 +204,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
     onLoad,
     onProgress,
     onError,
+    onEnd,
 }: FeedNativeVideoProps) {
     /**
      * Feed drag gate. It lives HERE rather than in `FeedPostMedia` because it only feeds
@@ -275,6 +277,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
             onLoad={onLoad}
             onProgress={onProgress}
             onError={onError}
+            onEnd={onEnd}
         />
     );
 },
@@ -390,6 +393,15 @@ const FeedPostMedia = React.memo(
     const mediaLoadReportedRef = useRef(false);
     const carouselScrollRef = useRef<ScrollView>(null);
     const feedVideoRef = useRef<VideoRef>(null);
+    /** Completed plays of the active newsfeed clip. Two finishes, then hold the last frame. */
+    const playCountRef = useRef(0);
+    const feedDurationRef = useRef(0);
+    const feedTwoPlayHoldRef = useRef(false);
+    const [feedTwoPlayHold, setFeedTwoPlayHold] = useState(false);
+    const onFeedPlaybackEndRef = useRef<() => void>(() => {});
+    const handleFeedPlaybackEnd = useCallback(() => {
+        onFeedPlaybackEndRef.current();
+    }, []);
     const lastEmittedIndexRef = useRef(0);
     const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
@@ -550,6 +562,31 @@ const FeedPostMedia = React.memo(
                   propIsActive));
     // Only the audio-primary card actually plays.
     const isFeedAutoplayActive = isAudioPrimary;
+    const feedClipIsSettled =
+        mode === 'feed' && storeActivePostId != null && String(storeActivePostId) === String(post.id);
+    onFeedPlaybackEndRef.current = () => {
+        if (mode !== 'feed' || !isFeedAutoplayActive || feedTwoPlayHoldRef.current) return;
+        const next = playCountRef.current + 1;
+        playCountRef.current = next;
+        const player = feedVideoRef.current as (VideoRef & { resume?: () => void }) | null;
+        if (next < 2) {
+            try {
+                player?.seek(0);
+                player?.resume?.();
+            } catch {
+                /* player may already be released */
+            }
+            return;
+        }
+        const endAt = feedDurationRef.current > 0.2 ? feedDurationRef.current - 0.05 : 0;
+        feedTwoPlayHoldRef.current = true;
+        setFeedTwoPlayHold(true);
+        try {
+            if (endAt > 0) player?.seek(endAt);
+        } catch {
+            /* keep the frame ExoPlayer already stopped on */
+        }
+    };
     // Feed-only: hold the native surface mounted (paused) while a viewer route covers us.
     const feedVideoHeld = mode === 'feed' && holdNativeVideo;
     /**
@@ -593,6 +630,14 @@ const FeedPostMedia = React.memo(
         fadeOutPosterCover();
     }, [isAudioPrimary, fadeOutPosterCover]);
 
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        if (feedClipIsSettled) return;
+        playCountRef.current = 0;
+        feedTwoPlayHoldRef.current = false;
+        setFeedTwoPlayHold(false);
+    }, [feedClipIsSettled, mode, post.id]);
+
     // Bumped when overlay suspend ends while this card is active — forces TextureView remount.
     const [playerEpoch, setPlayerEpoch] = useState(0);
     const needsRemountAfterSuspendRef = useRef(false);
@@ -608,6 +653,11 @@ const FeedPostMedia = React.memo(
     const maxCarouselIndex = Math.max(0, carouselItems.length - 1);
     const safeCarouselIndex = Math.min(Math.max(0, carouselIndex), maxCarouselIndex);
     const [currentIndex, setCurrentIndex] = useState(safeCarouselIndex);
+    useEffect(() => {
+        playCountRef.current = 0;
+        feedTwoPlayHoldRef.current = false;
+        setFeedTwoPlayHold(false);
+    }, [currentIndex, post.id]);
 
     /** Backend-supplied dimensions for the current slide, if the API provided them. */
     const apiSize = React.useMemo(() => {
@@ -1378,11 +1428,11 @@ const FeedPostMedia = React.memo(
                 paused={
                     viewerSurface
                         ? paused || !propIsActive
-                        : !isAudioPrimary || slideDragHeld || feedVideoHeld
+                        : !isAudioPrimary || slideDragHeld || feedVideoHeld || feedTwoPlayHold
                 }
                 muted={viewerSurface ? muted || !propIsActive : !soundOn || !videoSurfaceReady}
                 soundOn={soundOn}
-                repeat
+                repeat={mode !== 'feed'}
                 mode={mode}
                 resizeMode={slideResizeMode}
                 isViewable={feedSurfaceMounted}
@@ -1413,6 +1463,10 @@ const FeedPostMedia = React.memo(
                             /* ignore */
                         }
                     }
+                    const duration = Number(meta?.duration);
+                    if (Number.isFinite(duration) && duration > 0) {
+                        feedDurationRef.current = duration;
+                    }
                     const ns = meta?.naturalSize;
                     if (ns) {
                         reportMeasuredSize({
@@ -1440,6 +1494,7 @@ const FeedPostMedia = React.memo(
                     }
                 }}
                 onError={(e) => onVideoError(slideRawUrl, e)}
+                onEnd={mode === 'feed' ? handleFeedPlaybackEnd : undefined}
             />
         ) : null;
 
@@ -1528,6 +1583,21 @@ const FeedPostMedia = React.memo(
               }
             : undefined);
 
+    const replayFeedClip = () => {
+        playCountRef.current = 0;
+        feedTwoPlayHoldRef.current = false;
+        playbackTimeRef.current = 0;
+        setFeedTwoPlayHold(false);
+        const player = feedVideoRef.current as (VideoRef & { resume?: () => void }) | null;
+        try {
+            player?.seek(0);
+            player?.resume?.();
+        } catch {
+            /* the unpaused player starts at the seek target */
+        }
+    };
+    const showFeedTwoPlayOverlay = mode === 'feed' && feedTwoPlayHold && feedClipIsSettled && video;
+
     const inner = hasCarousel ? null : primarySlideItem ? renderSlide(primarySlideItem, 0) : null;
 
     const mediaBody = (
@@ -1611,6 +1681,28 @@ const FeedPostMedia = React.memo(
                 />
             ) : null}
             {renderFeedTapOverlay()}
+            {showFeedTwoPlayOverlay ? (
+                <View style={styles.twoPlayOverlay} pointerEvents="box-none">
+                    <Pressable
+                        style={styles.twoPlayFullScreen}
+                        onPress={() => onSingleTap?.()}
+                        accessibilityRole="button"
+                        accessibilityLabel="View in full screen"
+                    >
+                        <Icon name="expand-outline" size={18} color="#111111" />
+                        <Text style={styles.twoPlayFullScreenText}>View in full screen</Text>
+                    </Pressable>
+                    <Pressable
+                        style={styles.twoPlayReplay}
+                        onPress={replayFeedClip}
+                        accessibilityRole="button"
+                        accessibilityLabel="Replay"
+                    >
+                        <Icon name="refresh" size={16} color="#FFFFFF" />
+                        <Text style={styles.twoPlayReplayText}>Replay</Text>
+                    </Pressable>
+                </View>
+            ) : null}
             {mode === 'feed' && !immediateVideoSurface ? (
             <LinearGradient
                 style={styles.mediaScrim}
@@ -1732,6 +1824,43 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'transparent',
         zIndex: 6,
+    },
+    twoPlayOverlay: {
+        ...StyleSheet.absoluteFill,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        zIndex: 30,
+        elevation: 12,
+    },
+    twoPlayFullScreen: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        minHeight: 48,
+        paddingHorizontal: 18,
+        borderRadius: 24,
+        backgroundColor: '#FFFFFF',
+    },
+    twoPlayFullScreenText: {
+        color: '#111111',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    twoPlayReplay: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        marginTop: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    twoPlayReplayText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '600',
     },
     playBadge: {
         ...StyleSheet.absoluteFill,

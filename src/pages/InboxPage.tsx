@@ -208,7 +208,9 @@ function ConversationItem({
     const SWIPE_OPEN_THRESHOLD_RATIO = viewportWidth < 360 ? 0.26 : viewportWidth < 430 ? 0.3 : 0.35;
     const rowId = inboxConversationRowId(conv);
     const isGroupRow = conv.kind === 'group';
-    const displayTitle = isGroupRow ? (conv.groupName || 'Group chat') : displayHandle(conv.otherHandle);
+    const displayTitle = isGroupRow
+        ? (conv.groupName || 'Group chat')
+        : (conv.displayName?.trim() || displayHandle(conv.otherHandle));
     const preview = conversationPreviewText(conv, currentUserHandle);
     const timestamp = compactInboxTime(conv.lastMessage?.timestamp);
     const hasStory = !isGroupRow && (conv.hasUnviewedStories || false);
@@ -622,34 +624,33 @@ export default function InboxPage() {
     }, [insights, resolveInsightAvatar, user?.id]);
 
     React.useEffect(() => {
-        const handles = Array.from(
-            new Set(
-                [
-                    ...notifications.map((n) => n.fromHandle),
-                    ...items.filter((c) => c.kind !== 'group').map((c) => c.otherHandle),
-                ].filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
-            )
-        );
-        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !dmAvatarMap[handle]);
-        if (missing.length === 0) return;
-
-        missing.forEach((handle) => {
-            if (insightAvatarFetchInFlightRef.current.has(handle)) return;
-            insightAvatarFetchInFlightRef.current.add(handle);
-            fetchUserProfile(handle, user?.id)
-                .then((profile: any) => {
-                    const avatarUrl = extractAvatarUrl(profile);
-                    if (avatarUrl.length > 0) {
-                        setAvatarForHandle(handle, avatarUrl);
-                        setDmAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
-                    }
-                })
-                .catch(() => {})
-                .finally(() => {
-                    insightAvatarFetchInFlightRef.current.delete(handle);
-                });
+        const known: Record<string, string> = {};
+        const remember = (handle: string, avatar?: string | null) => {
+            const url = typeof avatar === 'string' ? avatar.trim() : '';
+            if (!handle.trim() || !url) return;
+            setAvatarForHandle(handle, url);
+            known[handle] = url;
+        };
+        items.forEach((conv) => {
+            if (conv.kind === 'group') return;
+            remember(conv.otherHandle, conv.avatarUrl);
         });
-    }, [notifications, items, dmAvatarMap, user?.id]);
+        notifications.forEach((note) => {
+            remember(note.fromHandle, note.fromAvatarUrl);
+        });
+        if (Object.keys(known).length === 0) return;
+        setDmAvatarMap((prev) => {
+            let dirty = false;
+            const merged = { ...prev };
+            Object.entries(known).forEach(([handle, url]) => {
+                if (merged[handle] !== url) {
+                    merged[handle] = url;
+                    dirty = true;
+                }
+            });
+            return dirty ? merged : prev;
+        });
+    }, [notifications, items]);
 
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
@@ -2171,7 +2172,7 @@ export default function InboxPage() {
                 const c = inboxChatInfo;
                 if (!c) return null;
                 const isGroupRow = c.kind === 'group' && !!c.chatGroupId;
-                const title = isGroupRow ? (c.groupName || 'Group') : c.otherHandle;
+                const title = isGroupRow ? (c.groupName || 'Group') : (c.displayName?.trim() || c.otherHandle);
                 const closeSheet = () => setInboxChatInfo(null);
                 const goOpenChat = () => {
                     closeSheet();

@@ -23,6 +23,69 @@ function formatTimer(totalSeconds: number) {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+const WEB_BUTTON = 84;
+const WEB_RING = 96;
+const WEB_STROKE = 3;
+const WEB_RADIUS = (WEB_RING - WEB_STROKE) / 2;
+const WEB_CIRCUMFERENCE = 2 * Math.PI * WEB_RADIUS;
+
+function WebShutterRing({
+    busy,
+    recording,
+    maxVideoSeconds,
+}: {
+    busy: boolean;
+    recording: boolean;
+    maxVideoSeconds: number;
+}) {
+    const circleRef = React.useRef<SVGCircleElement>(null);
+    const spinning = busy && !recording;
+
+    React.useEffect(() => {
+        const circle = circleRef.current;
+        if (!circle) return;
+        if (!recording) {
+            circle.style.strokeDashoffset = '0';
+            return;
+        }
+        const started = performance.now();
+        let frame = 0;
+        const tick = (now: number) => {
+            const progress = Math.min(1, (now - started) / (maxVideoSeconds * 1000));
+            circle.style.strokeDashoffset = String(WEB_CIRCUMFERENCE * (1 - progress));
+            if (progress < 1) frame = requestAnimationFrame(tick);
+        };
+        frame = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frame);
+    }, [recording, maxVideoSeconds]);
+
+    if (!busy && !recording) return null;
+
+    return (
+        <svg
+            aria-hidden
+            width={WEB_RING}
+            height={WEB_RING}
+            viewBox={`0 0 ${WEB_RING} ${WEB_RING}`}
+            className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${spinning ? 'animate-spin' : ''}`}
+        >
+            <circle
+                ref={circleRef}
+                cx={WEB_RING / 2}
+                cy={WEB_RING / 2}
+                r={WEB_RADIUS}
+                fill="none"
+                stroke="#FFFFFF"
+                strokeWidth={WEB_STROKE}
+                strokeLinecap="round"
+                strokeDasharray={spinning ? `${WEB_CIRCUMFERENCE * 0.22} ${WEB_CIRCUMFERENCE}` : WEB_CIRCUMFERENCE}
+                strokeDashoffset={recording ? WEB_CIRCUMFERENCE : 0}
+                transform={`rotate(-90 ${WEB_RING / 2} ${WEB_RING / 2})`}
+            />
+        </svg>
+    );
+}
+
 function preferredRecorderType() {
     const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
     return candidates.find((type) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) ?? '';
@@ -275,31 +338,38 @@ export default function CreateCameraSheet({
                     >
                         ×
                     </button>
-                    {mode === 'video' ? (
-                        <button
-                            type="button"
-                            onClick={toggleRecording}
-                            disabled={!ready}
-                            aria-label={recording ? 'Stop recording' : 'Start recording'}
-                            className="flex h-[84px] w-[84px] items-center justify-center rounded-full border-4 border-white disabled:opacity-60"
-                        >
-                            {recording ? (
-                                <span className="h-8 w-8 rounded-lg bg-[#FF3B30]" />
-                            ) : (
-                                <span className="h-[66px] w-[66px] rounded-full bg-[#FF3B30]" />
-                            )}
-                        </button>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={takePhoto}
-                            disabled={!ready || busy}
-                            aria-label="Take photo"
-                            className="flex h-[84px] w-[84px] items-center justify-center rounded-full border-4 border-white disabled:opacity-60"
-                        >
-                            <span className="h-[66px] w-[66px] rounded-full bg-white" />
-                        </button>
-                    )}
+                    <div className="relative" style={{ width: WEB_BUTTON, height: WEB_BUTTON }}>
+                        {mode === 'video' ? (
+                            <button
+                                type="button"
+                                onClick={toggleRecording}
+                                disabled={!ready}
+                                aria-label={recording ? 'Stop recording' : 'Start recording'}
+                                className="flex h-[84px] w-[84px] items-center justify-center rounded-full border-4 border-white disabled:opacity-60"
+                            >
+                                {recording ? (
+                                    <span className="h-8 w-8 rounded-lg bg-[#FF3B30]" />
+                                ) : (
+                                    <span className="h-[66px] w-[66px] rounded-full bg-[#FF3B30]" />
+                                )}
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onPointerDown={(event) => {
+                                    if (!ready || busy) return;
+                                    event.preventDefault();
+                                    takePhoto();
+                                }}
+                                disabled={!ready || busy}
+                                aria-label="Take photo"
+                                className="flex h-[84px] w-[84px] items-center justify-center rounded-full border-4 border-white disabled:opacity-60"
+                            >
+                                <span className="h-[66px] w-[66px] rounded-full bg-white" />
+                            </button>
+                        )}
+                        <WebShutterRing busy={busy} recording={recording} maxVideoSeconds={maxVideoSeconds} />
+                    </div>
                     <button
                         type="button"
                         onClick={() => {

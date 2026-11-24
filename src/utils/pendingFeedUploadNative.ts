@@ -55,6 +55,8 @@ export type PendingFeedUploadJob = {
     };
     templateId?: string;
     cardStyle?: import('../utils/textCardStyles').TextCardStyleId;
+    /** UTC ISO. When set, the upload is scheduled instead of published into the feed. */
+    scheduledAt?: string;
 };
 
 const pendingById = new Map<string, PendingFeedUploadJob>();

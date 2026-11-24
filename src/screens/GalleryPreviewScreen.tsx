@@ -34,6 +34,7 @@ import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { ensureCameraPermission } from '../utils/galleryMediaPermissionsNative';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
+import SchedulePostSheet, { formatScheduleWhen } from '../components/SchedulePostSheet.native';
 import { ox } from '../constants/nativeOpticalScale';
 import {
     failedToSaveSheet,
@@ -137,6 +138,8 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     const [selectedStickerOverlay, setSelectedStickerOverlay] = useState<string | null>(null);
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
     const [isMuted, setIsMuted] = useState(true);
+    const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
+    const [scheduleSheetOpen, setScheduleSheetOpen] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
@@ -430,14 +433,17 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
             venue: venue.trim() || undefined,
             landmark: landmark.trim() || undefined,
+            scheduledAt: scheduledAt ? scheduledAt.toISOString() : undefined,
         });
         showUploadOverlayNative({
             jobId: tempId,
             thumbUri: first.uri,
             thumbType: first.type === 'video' ? 'video' : 'image',
-            initialMessage: 'Posting to Gazetteer…',
-            uploadingTitle: 'Posting…',
-            successTitle: 'Posted!',
+            initialMessage: scheduledAt
+                ? 'It will appear on the feed at the time you chose.'
+                : 'Posting to Gazetteer…',
+            uploadingTitle: scheduledAt ? 'Scheduling your post…' : 'Posting…',
+            successTitle: scheduledAt ? 'Scheduled' : 'Posted!',
         });
         hapticLight();
         setIsUploading(false);
@@ -446,8 +452,17 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 console.warn('Could not remove posted draft', err);
             });
         }
-        resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
         startBackgroundFeedUpload(tempId);
+        if (scheduledAt) {
+            const when = formatScheduleWhen(scheduledAt);
+            gazetteerAlert(
+                'Scheduled',
+                `It will not appear on the newsfeed until ${when}.`,
+                [{ text: 'OK', onPress: () => resetToHomeFeed(navigation, { forceRefreshAt: Date.now() }) }],
+            );
+            return;
+        }
+        resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
     };
 
     const onCaptionChange = (text: string) => {
@@ -588,14 +603,22 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                                 />
                             </TouchableOpacity>
                         ) : null}
-                        <View style={styles.postRing}>
+                        <View style={[styles.postRing, scheduledAt && !story24 && styles.scheduleRing]}>
                             <TouchableOpacity
-                                style={styles.postBtn}
+                                style={[styles.postBtn, scheduledAt && !story24 && styles.scheduleBtn]}
                                 onPress={() => void handlePost()}
+                                onLongPress={() => {
+                                    if (story24 || isUploading) return;
+                                    setScheduleSheetOpen(true);
+                                }}
+                                delayLongPress={350}
                                 disabled={isUploading || carouselItems.length === 0}
+                                accessibilityLabel={scheduledAt && !story24 ? 'Schedule' : 'Post'}
                             >
                                 {isUploading ? (
                                     <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : scheduledAt && !story24 ? (
+                                    <Text style={styles.scheduleBtnText}>Schedule</Text>
                                 ) : (
                                     <Icon name="send" size={ox(22)} color="#FFFFFF" />
                                 )}
@@ -631,6 +654,28 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 isSavingDraft={isSavingDraft}
                 onSaveDraft={() => void handleSaveDraft()}
                 canSave={carouselItems.length > 0}
+                onSchedule={story24 ? undefined : () => setScheduleSheetOpen(true)}
+                scheduleLabel={
+                    !story24 && scheduledAt
+                        ? scheduledAt.toLocaleString(undefined, {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                          })
+                        : null
+                }
+                onClearSchedule={() => setScheduledAt(null)}
+            />
+            <SchedulePostSheet
+                visible={scheduleSheetOpen && !story24}
+                initial={scheduledAt}
+                onClose={() => setScheduleSheetOpen(false)}
+                onConfirm={(when) => {
+                    setScheduledAt(when);
+                    setScheduleSheetOpen(false);
+                }}
             />
 
             <UserTaggingModalNative
@@ -746,5 +791,18 @@ const styles = StyleSheet.create({
         padding: ox(10),
         borderRadius: ox(999),
         backgroundColor: '#000000',
+    },
+    scheduleRing: {
+        borderRadius: ox(20),
+    },
+    scheduleBtn: {
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(8),
+        borderRadius: ox(18),
+    },
+    scheduleBtnText: {
+        color: '#FFFFFF',
+        fontSize: ox(15),
+        fontWeight: '700',
     },
 });
