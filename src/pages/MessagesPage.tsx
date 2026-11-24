@@ -4,6 +4,7 @@ import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEd
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane } from 'react-icons/fa';
 import Avatar from '../components/Avatar';
+import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet';
 import { IMessageDmBubbleShell } from '../components/IMessageDmBubbleShell';
 import { useAuth } from '../context/Auth';
 import {
@@ -800,7 +801,10 @@ export default function MessagesPage() {
     const [vanishMode, setVanishMode] = useState(false);
     
     // Image compose: after picking an image, user can add caption before sending
-    const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string; file: File } | null>(null);
+    const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string; file: File; previewUrl?: string } | null>(null);
+    const [imageComposeSending, setImageComposeSending] = useState(false);
+    const imageComposeSendingRef = React.useRef(false);
+    const [dmCameraMode, setDmCameraMode] = useState<CameraCaptureMode | null>(null);
     // Scenes modal: tap shared post in DM to open fullscreen, close returns to DM
     const [scenesOpen, setScenesOpen] = useState(false);
     const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
@@ -2248,6 +2252,40 @@ export default function MessagesPage() {
         await appendToThread({ text: sticker });
     };
 
+    const captureVideoPoster = (file: File) =>
+        new Promise<string>((resolve) => {
+            const url = URL.createObjectURL(file);
+            const video = document.createElement('video');
+            video.preload = 'auto';
+            video.muted = true;
+            video.playsInline = true;
+            const finish = (poster: string) => {
+                URL.revokeObjectURL(url);
+                resolve(poster);
+            };
+            video.onloadeddata = () => {
+                try {
+                    video.currentTime = Math.min(0.1, Number.isFinite(video.duration) ? video.duration / 2 : 0.1);
+                } catch {
+                    finish('');
+                }
+            };
+            video.onseeked = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth || 320;
+                canvas.height = video.videoHeight || 320;
+                const context = canvas.getContext('2d');
+                if (!context) {
+                    finish('');
+                    return;
+                }
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                finish(canvas.toDataURL('image/jpeg', 0.8));
+            };
+            video.onerror = () => finish('');
+            video.src = url;
+        });
+
     const readVideoDuration = (file: File) =>
         new Promise<number>((resolve) => {
             const url = URL.createObjectURL(file);
@@ -2305,7 +2343,18 @@ export default function MessagesPage() {
             return;
         }
         if (!user?.handle || (!handle && !groupId)) return;
-        setImageCompose({ imageUrl: URL.createObjectURL(file), caption: '', file });
+        const previewUrl = isVideo ? await captureVideoPoster(file) : undefined;
+        setImageCompose({ imageUrl: URL.createObjectURL(file), caption: '', file, previewUrl: previewUrl || undefined });
+    };
+
+    const openDmCamera = () => {
+        setAttachSheetOpen(false);
+        setDmCameraMode('photo');
+    };
+
+    const acceptDmCameraCapture = (file: File) => {
+        setDmCameraMode(null);
+        void stageDmFile(file, true);
     };
 
     const handlePickedDmFile = (e: React.ChangeEvent<HTMLInputElement>, fromCamera: boolean) => {
@@ -2316,34 +2365,18 @@ export default function MessagesPage() {
     };
 
     const handleCancelImageCompose = () => {
+        if (imageComposeSendingRef.current) return;
         setImageCompose(null);
     };
 
     const handleSendImageWithCaption = async () => {
-        if (!imageCompose || !user?.handle || (!handle && !groupId)) return;
+        if (!imageCompose || !user?.handle || (!handle && !groupId) || imageComposeSendingRef.current) return;
         const { imageUrl, caption, file } = imageCompose;
-        setImageCompose(null);
+        const sendingVideo = file.type.startsWith('video/');
+        imageComposeSendingRef.current = true;
+        setImageComposeSending(true);
 
-        const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const tempMessage: MessageUI = {
-            id: tempId,
-            senderHandle: user.handle,
-            imageUrl,
-            text: caption.trim() || undefined,
-            timestamp: Date.now(),
-            isFromMe: true,
-            senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
-            isSystemMessage: false
-        };
-
-        setMessages(prev => {
-            const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
-            return sorted;
-        });
-        setTimeout(() => scrollToBottom(), 100);
-        isSendingMessageRef.current = true;
-
-        const sendHostedPhoto = async () => {
+        try {
             let hostedUrl = imageUrl;
             if (isLaravelApiEnabled()) {
                 const upload = await uploadFile(file);
@@ -2352,39 +2385,31 @@ export default function MessagesPage() {
                     throw new Error('Upload did not return a public image URL.');
                 }
             }
-            return appendToThread({ imageUrl: hostedUrl, text: caption.trim() || undefined });
-        };
-
-        sendHostedPhoto().then((realMessage) => {
-            setMessages(prev => {
-                const filtered = prev.filter(m => m.id !== tempId);
-                const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
-                if (existingIndex >= 0) {
-                    const updated = [...filtered];
-                    updated[existingIndex] = {
-                        ...realMessage,
-                        isFromMe: true,
-                        senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
-                        imageUrl: realMessage.imageUrl || updated[existingIndex].imageUrl
-                    };
-                    setTimeout(() => { isSendingMessageRef.current = false; }, 200);
-                    return updated;
-                }
-                const newMessage: MessageUI = {
+            const realMessage = await appendToThread({ imageUrl: hostedUrl, text: caption.trim() || undefined });
+            setImageCompose(null);
+            setMessages((prev) => {
+                const existingIndex = prev.findIndex((message) => message.id === realMessage.id);
+                const nextMessage: MessageUI = {
                     ...realMessage,
                     isFromMe: true,
-                    senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle)
+                    senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                    imageUrl: realMessage.imageUrl || hostedUrl,
                 };
-                const sorted = [...filtered, newMessage].sort((a, b) => a.timestamp - b.timestamp);
-                setTimeout(() => { isSendingMessageRef.current = false; }, 200);
-                return sorted;
+                if (existingIndex >= 0) {
+                    const updated = [...prev];
+                    updated[existingIndex] = nextMessage;
+                    return updated;
+                }
+                return [...prev, nextMessage].sort((a, b) => a.timestamp - b.timestamp);
             });
-        }).catch(error => {
+            setTimeout(() => scrollToBottom(), 100);
+        } catch (error) {
             console.error('Error sending image:', error);
-            setMessages(prev => prev.filter(m => m.id !== tempId));
-            isSendingMessageRef.current = false;
-            showToast?.('Could not send this photo. Try again.');
-        });
+            showToast?.(sendingVideo ? 'Could not upload this video. Try again.' : 'Could not send this photo. Try again.');
+        } finally {
+            imageComposeSendingRef.current = false;
+            setImageComposeSending(false);
+        }
     };
 
     const formatTimestamp = (ts: number) => {
@@ -3993,11 +4018,11 @@ export default function MessagesPage() {
                     <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
                         <div className="flex items-center gap-3">
                             <div className="flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-950">
-                                {imageCompose.file.type.startsWith('video/') ? (
-                                    <video src={imageCompose.imageUrl} className="w-full h-full object-cover" muted playsInline />
-                                ) : (
-                                    <img src={imageCompose.imageUrl} alt="Preview" className="w-full h-full object-cover" />
-                                )}
+                                <img
+                                    src={imageCompose.previewUrl || imageCompose.imageUrl}
+                                    alt="Preview"
+                                    className="w-full h-full object-cover"
+                                />
                             </div>
                             <div className="flex-1 min-w-0 flex flex-col gap-2">
                                 <input
@@ -4005,22 +4030,38 @@ export default function MessagesPage() {
                                     value={imageCompose.caption}
                                     onChange={(e) => setImageCompose(prev => prev ? { ...prev, caption: e.target.value } : null)}
                                     placeholder="Add a caption..."
-                                    className={`w-full ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 px-3 py-2.5 rounded-2xl text-sm border border-white/10 shadow-inner shadow-black/40 focus:outline-none focus:ring-1 focus:ring-white/25 focus:border-white/20`}
+                                    disabled={imageComposeSending}
+                                    className={`w-full ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 px-3 py-2.5 rounded-2xl text-sm border border-white/10 shadow-inner shadow-black/40 focus:outline-none focus:ring-1 focus:ring-white/25 focus:border-white/20 disabled:opacity-60`}
                                     autoFocus
                                 />
+                                {imageComposeSending ? (
+                                    <p className="text-center text-[13px] font-semibold text-white">
+                                        {imageCompose.file.type.startsWith('video/')
+                                            ? 'Sending your video. This can take a moment.'
+                                            : 'Sending…'}
+                                    </p>
+                                ) : null}
                                 <div className="flex items-center gap-2">
                                     <button
                                         type="button"
                                         onClick={handleSendImageWithCaption}
-                                        className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-black text-sm font-medium hover:bg-neutral-200 transition-colors"
+                                        disabled={imageComposeSending}
+                                        className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-black text-sm font-medium hover:bg-neutral-200 transition-colors disabled:opacity-80"
                                     >
-                                        <FiSend className="w-4 h-4" />
-                                        Send
+                                        {imageComposeSending ? (
+                                            <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" />
+                                        ) : (
+                                            <FiSend className="w-4 h-4" />
+                                        )}
+                                        {imageComposeSending
+                                            ? (imageCompose.file.type.startsWith('video/') ? 'Uploading video…' : 'Uploading…')
+                                            : 'Send'}
                                     </button>
                                     <button
                                         type="button"
                                         onClick={handleCancelImageCompose}
-                                        className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
+                                        disabled={imageComposeSending}
+                                        className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors disabled:opacity-40"
                                         aria-label="Cancel"
                                     >
                                         <FiX className="w-4 h-4" />
@@ -4126,7 +4167,7 @@ export default function MessagesPage() {
                             <>
                                 <button
                                     type="button"
-                                    onClick={() => cameraInputRef.current?.click()}
+                                    onClick={openDmCamera}
                                     className="flex h-11 w-11 shrink-0 items-center justify-center"
                                     aria-label="Open camera"
                                 >
@@ -4258,8 +4299,7 @@ export default function MessagesPage() {
                                 type="button"
                                 className="flex w-24 flex-col items-center gap-2 text-[12px] font-medium text-[#E9EDEF]"
                                 onClick={() => {
-                                    setAttachSheetOpen(false);
-                                    cameraInputRef.current?.click();
+                                    openDmCamera();
                                 }}
                             >
                                 <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#1F2C34] text-[#FF4D9A]">
@@ -5176,6 +5216,16 @@ export default function MessagesPage() {
                     action?.();
                 }}
                 onDismiss={() => setChatInfoAlert(null)}
+            />
+            <CreateCameraSheet
+                visible={dmCameraMode != null}
+                mode={dmCameraMode ?? 'photo'}
+                canSwitchMode
+                maxVideoSeconds={15}
+                countdown
+                onModeChange={setDmCameraMode}
+                onClose={() => setDmCameraMode(null)}
+                onCapture={acceptDmCameraCapture}
             />
         </div>
     );

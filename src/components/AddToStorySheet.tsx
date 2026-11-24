@@ -219,6 +219,8 @@ export default function AddToStorySheet({ visible, onDismiss }: Props) {
             <CreateCameraSheet
                 visible={cameraMode != null}
                 mode={cameraMode ?? 'photo'}
+                maxVideoSeconds={15}
+                countdown={cameraMode === 'video'}
                 onClose={() => setCameraMode(null)}
                 onCapture={(file) => {
                     setCameraMode(null);

@@ -9,6 +9,12 @@ type Props = {
     mode: CameraCaptureMode;
     onClose: () => void;
     onCapture: (file: File) => void;
+    /** Chat can flip between a photo and a short video without leaving the sheet. */
+    canSwitchMode?: boolean;
+    onModeChange?: (mode: CameraCaptureMode) => void;
+    maxVideoSeconds?: number;
+    /** Show time left (90, 89, …) instead of time elapsed. */
+    countdown?: boolean;
 };
 
 function formatTimer(totalSeconds: number) {
@@ -22,7 +28,16 @@ function preferredRecorderType() {
     return candidates.find((type) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) ?? '';
 }
 
-export default function CreateCameraSheet({ visible, mode, onClose, onCapture }: Props) {
+export default function CreateCameraSheet({
+    visible,
+    mode,
+    onClose,
+    onCapture,
+    canSwitchMode = false,
+    onModeChange,
+    maxVideoSeconds = MAX_VIDEO_SECONDS,
+    countdown = false,
+}: Props) {
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
     const streamRef = React.useRef<MediaStream | null>(null);
     const recorderRef = React.useRef<MediaRecorder | null>(null);
@@ -37,6 +52,8 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
     const [elapsed, setElapsed] = React.useState(0);
 
     onCaptureRef.current = onCapture;
+    const modeRef = React.useRef(mode);
+    modeRef.current = mode;
 
     const stopStream = React.useCallback(() => {
         streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -51,7 +68,7 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
         setElapsed(0);
         setRecording(false);
         setBusy(false);
-    }, [visible, mode]);
+    }, [visible]);
 
     React.useEffect(() => {
         if (!visible) {
@@ -72,7 +89,7 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
             stopStream();
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: mode === 'video',
+                    audio: modeRef.current === 'video' || canSwitchMode,
                     video: { facingMode: { ideal: facing } },
                 });
                 if (cancelled) {
@@ -88,7 +105,7 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
             } catch {
                 if (!cancelled) {
                     setError(
-                        mode === 'video'
+                        modeRef.current === 'video' || canSwitchMode
                             ? 'Allow the camera and microphone in the browser so you can record here.'
                             : 'Allow the camera in the browser so you can take a photo here.',
                     );
@@ -100,20 +117,20 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
             cancelled = true;
             stopStream();
         };
-    }, [visible, facing, mode, stopStream]);
+    }, [visible, facing, canSwitchMode, stopStream]);
 
     React.useEffect(() => {
         if (!recording) return;
         const started = Date.now();
         const timer = window.setInterval(() => {
-            const seconds = Math.min(MAX_VIDEO_SECONDS, Math.floor((Date.now() - started) / 1000));
+            const seconds = Math.min(maxVideoSeconds, Math.floor((Date.now() - started) / 1000));
             setElapsed(seconds);
-            if (seconds >= MAX_VIDEO_SECONDS && recorderRef.current?.state === 'recording') {
+            if (seconds >= maxVideoSeconds && recorderRef.current?.state === 'recording') {
                 recorderRef.current.stop();
             }
         }, 250);
         return () => window.clearInterval(timer);
-    }, [recording]);
+    }, [recording, maxVideoSeconds]);
 
     const takePhoto = () => {
         const video = videoRef.current;
@@ -221,14 +238,35 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
                     <div className="pointer-events-none absolute left-0 right-0 top-6 flex justify-center">
                         <span className="flex items-center gap-2 rounded-full bg-black/45 px-3 py-1.5 text-sm font-bold tabular-nums text-white">
                             <span className="h-2 w-2 rounded-full bg-[#FF3B30]" />
-                            {formatTimer(elapsed)}
+                            {countdown
+                                ? String(Math.max(0, maxVideoSeconds - (recording ? elapsed : 0)))
+                                : formatTimer(elapsed)}
                         </span>
                     </div>
                 ) : null}
                 {error ? (
                     <p className="absolute left-4 right-4 top-16 text-center text-sm font-semibold text-red-100">{error}</p>
                 ) : null}
-                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-7 pb-[max(18px,env(safe-area-inset-bottom))]">
+                <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center pb-[max(18px,env(safe-area-inset-bottom))]">
+                    {canSwitchMode ? (
+                        <div className={`mb-[18px] flex gap-7 ${recording ? 'invisible' : ''}`}>
+                            <button
+                                type="button"
+                                onClick={() => onModeChange?.('photo')}
+                                className={`text-[13px] font-bold tracking-wide ${mode === 'photo' ? 'text-white' : 'text-white/55'}`}
+                            >
+                                Photo
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onModeChange?.('video')}
+                                className={`text-[13px] font-bold tracking-wide ${mode === 'video' ? 'text-white' : 'text-white/55'}`}
+                            >
+                                Video
+                            </button>
+                        </div>
+                    ) : null}
+                    <div className="flex w-full items-center justify-between px-7">
                     <button
                         type="button"
                         onClick={close}
@@ -278,6 +316,7 @@ export default function CreateCameraSheet({ visible, mode, onClose, onCapture }:
                             <path d="M15 9.5V12h-2.5" />
                         </svg>
                     </button>
+                    </div>
                 </div>
             </div>
         </div>

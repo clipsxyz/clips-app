@@ -13,6 +13,7 @@ import CreateGroupModal from '../components/CreateGroupModal';
 import CommunityGroupOnboardingSheet from '../components/CommunityGroupOnboardingSheet';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet';
 import GazetteerMenuSheet from '../components/GazetteerMenuSheet';
+import CreateCameraSheet from '../components/CreateCameraSheet';
 import CreateSourceAppsCarousel from '../components/CreateSourceAppsCarousel';
 import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 import { useAuth } from '../context/Auth';
@@ -70,6 +71,10 @@ export default function InstantCreatePage() {
     const storyPhotoInputRef = React.useRef<HTMLInputElement | null>(null);
     const storyVideoInputRef = React.useRef<HTMLInputElement | null>(null);
     const [postMediaMenuOpen, setPostMediaMenuOpen] = React.useState(false);
+    const [cameraSheet, setCameraSheet] = React.useState<null | {
+        target: 'post' | 'story';
+        mode: 'photo' | 'video';
+    }>(null);
     const [storyMediaMenuOpen, setStoryMediaMenuOpen] = React.useState(false);
     const [uploadExplainerOpen, setUploadExplainerOpen] = React.useState(false);
 
@@ -147,7 +152,7 @@ export default function InstantCreatePage() {
         'https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1200'
     ]);
     const presetIdxRef = React.useRef(0);
-    const MAX_VIDEO_SECONDS = 60;
+    const MAX_VIDEO_SECONDS = 90;
 
     type CreateModeAction = 'community' | 'text' | 'gallery' | 'story';
     type StoryAudience = 'public' | 'close_friends' | 'only_me';
@@ -1952,12 +1957,12 @@ export default function InstantCreatePage() {
                                 {
                                     label: 'Take photo',
                                     icon: <IoCameraOutline size={20} color="#FFFFFF" />,
-                                    onPress: () => openDeviceFileInput(photoCaptureInputRef.current),
+                                    onPress: () => setCameraSheet({ target: 'post', mode: 'photo' }),
                                 },
                                 {
                                     label: 'Record video',
                                     icon: <IoVideocamOutline size={20} color="#FFFFFF" />,
-                                    onPress: () => openDeviceFileInput(videoCaptureInputRef.current),
+                                    onPress: () => setCameraSheet({ target: 'post', mode: 'video' }),
                                 },
                             ]}
                             onDismiss={() => setPostMediaMenuOpen(false)}
@@ -1975,12 +1980,12 @@ export default function InstantCreatePage() {
                                 {
                                     label: 'Take photo',
                                     icon: <IoCameraOutline size={20} color="#FFFFFF" />,
-                                    onPress: () => openDeviceFileInput(storyPhotoInputRef.current),
+                                    onPress: () => setCameraSheet({ target: 'story', mode: 'photo' }),
                                 },
                                 {
                                     label: 'Record video',
                                     icon: <IoVideocamOutline size={20} color="#FFFFFF" />,
-                                    onPress: () => openDeviceFileInput(storyVideoInputRef.current),
+                                    onPress: () => setCameraSheet({ target: 'story', mode: 'video' }),
                                 },
                                 {
                                     label: 'Paste a link',
@@ -1989,6 +1994,21 @@ export default function InstantCreatePage() {
                                 },
                             ]}
                             onDismiss={() => setStoryMediaMenuOpen(false)}
+                        />
+                        <CreateCameraSheet
+                            visible={cameraSheet != null}
+                            mode={cameraSheet?.mode ?? 'photo'}
+                            maxVideoSeconds={cameraSheet?.target === 'story' ? 15 : 90}
+                            countdown={cameraSheet?.mode === 'video'}
+                            onClose={() => setCameraSheet(null)}
+                            onCapture={(file) => {
+                                const target = cameraSheet?.target;
+                                setCameraSheet(null);
+                                const transfer = new DataTransfer();
+                                transfer.items.add(file);
+                                if (target === 'story') void ingestStoryFiles(transfer.files);
+                                else void ingestGalleryFiles(transfer.files);
+                            }}
                         />
                         <CommunityGroupOnboardingSheet
                             visible={communityOnboardingOpen}
