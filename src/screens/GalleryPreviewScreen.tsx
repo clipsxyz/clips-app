@@ -33,6 +33,7 @@ import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNati
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { ensureCameraPermission } from '../utils/galleryMediaPermissionsNative';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
+import { trackPickerCallback } from '../utils/discoverReentryGuard';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import SchedulePostSheet, { formatScheduleWhen } from '../components/SchedulePostSheet.native';
 import { ox } from '../constants/nativeOpticalScale';
@@ -286,7 +287,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 const mediaType = autoStart.mediaType === 'video' ? 'video' : 'photo';
                 ImagePicker.launchCamera(
                     { mediaType, quality: mediaType === 'video' ? 0.8 : 0.9, videoQuality: 'high', saveToPhotos: true },
-                    (response) => {
+                    trackPickerCallback((response) => {
                         if (response.didCancel) {
                             navigation.goBack();
                             return;
@@ -298,7 +299,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                         }
                         const ok = applyAssets(response.assets || []);
                         if (!ok) navigation.goBack();
-                    },
+                    }),
                 );
             })();
         }

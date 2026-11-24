@@ -9,6 +9,7 @@ import {
     View,
 } from 'react-native';
 import * as ImagePicker from 'react-native-image-picker';
+import { trackPickerCallback } from '../utils/discoverReentryGuard';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerAlertSheet from './GazetteerAlertSheet.native';
 import { useAuth } from '../context/Auth';
@@ -77,7 +78,7 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
                 includeBase64: true,
                 selectionLimit: 1,
             },
-            (response) => {
+            trackPickerCallback((response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
                     setAlertConfig({
@@ -97,7 +98,7 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
                     return;
                 }
                 void applyAvatar(asset.uri, asset.type || 'image/jpeg', asset.fileName, asset.base64);
-            },
+            }),
         );
     };
 

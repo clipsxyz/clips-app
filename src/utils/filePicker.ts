@@ -85,10 +85,17 @@ export async function pickFilesNative(platform: PlatformType): Promise<any[]> {
         const ImagePicker = require('react-native-image-crop-picker');
         
         // Open picker for videos
-        const videos = await ImagePicker.openPicker({
-            mediaType: 'video',
-            multiple: true,
-        });
+        const { beginExternalHandoff, endExternalHandoff } = require('./discoverReentryGuard') as typeof import('./discoverReentryGuard');
+        beginExternalHandoff();
+        let videos;
+        try {
+            videos = await ImagePicker.openPicker({
+                mediaType: 'video',
+                multiple: true,
+            });
+        } finally {
+            endExternalHandoff();
+        }
 
         // Filter by filename patterns (more lenient - allows all if no matches)
         const patterns = getFilenamePatterns(platform);

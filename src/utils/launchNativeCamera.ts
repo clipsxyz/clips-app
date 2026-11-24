@@ -1,4 +1,5 @@
 import { launchCamera, type CameraOptions, type ImagePickerResponse, type PhotoQuality } from 'react-native-image-picker';
+import { beginExternalHandoff, endExternalHandoff } from './discoverReentryGuard';
 
 const VIDEO_DURATION_LIMIT_SEC = 60;
 
@@ -51,5 +52,20 @@ export function launchNativeCamera(
     input: LaunchNativeCameraInput,
     callback: (response: ImagePickerResponse) => void,
 ): Promise<ImagePickerResponse> {
-    return launchCamera(buildNativeCameraOptions(input), callback);
+    beginExternalHandoff();
+    let ended = false;
+    const finish = () => {
+        if (ended) return;
+        ended = true;
+        endExternalHandoff();
+    };
+    try {
+        return launchCamera(buildNativeCameraOptions(input), (response) => {
+            finish();
+            callback(response);
+        }).finally(finish);
+    } catch (err) {
+        finish();
+        throw err;
+    }
 }

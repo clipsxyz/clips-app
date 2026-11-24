@@ -25,6 +25,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import * as ImagePicker from 'react-native-image-picker';
 import { launchNativeCamera } from '../utils/launchNativeCamera';
+import { trackPickerCallback } from '../utils/discoverReentryGuard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/Auth';
 import { loginUser, registerUser, checkSignupAvailability, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode } from '../api/client';
@@ -1069,7 +1070,7 @@ export default function LoginScreen({ navigation, route }: any) {
                 selectionLimit: 1,
                 includeBase64: false,
             },
-            (response) => applyProfileAsset(response, 'Photo library'),
+            trackPickerCallback((response) => applyProfileAsset(response, 'Photo library')),
         );
     };
 

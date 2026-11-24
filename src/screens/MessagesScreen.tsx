@@ -26,6 +26,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { launchImageLibrary } from 'react-native-image-picker';
+import { trackPickerCallback } from '../utils/discoverReentryGuard';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import CreateCameraSheet, { type CameraCaptureMode } from '../components/CreateCameraSheet.native';
 import { ensureGalleryMediaPermission, requestInAppCameraAccess } from '../utils/galleryMediaPermissionsNative';
@@ -2719,7 +2720,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 includeBase64: true,
                 quality: 0.8,
             },
-            (response) => {
+            trackPickerCallback((response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
                     showAlert({
@@ -2735,7 +2736,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 const uri = asset.uri;
                 if (!uri) return;
                 setNewGroupAvatarDataUrl(uri);
-            },
+            }),
         );
     };
 

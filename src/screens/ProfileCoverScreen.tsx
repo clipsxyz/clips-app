@@ -7,6 +7,7 @@ import {
     View,
 } from 'react-native';
 import * as ImagePicker from 'react-native-image-picker';
+import { trackPickerCallback } from '../utils/discoverReentryGuard';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -75,7 +76,7 @@ export default function ProfileCoverScreen({ navigation }: any) {
                 includeBase64: true,
                 selectionLimit: 1,
             },
-            (response) => {
+            trackPickerCallback((response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
                     showCoverAlert({
@@ -103,7 +104,7 @@ export default function ProfileCoverScreen({ navigation }: any) {
                     return;
                 }
                 void uploadCover(asset.uri, asset.type || 'image/jpeg', asset.fileName, asset.base64);
-            },
+            }),
         );
     };
 

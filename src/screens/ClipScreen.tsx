@@ -11,6 +11,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import * as ImagePicker from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigateMainTab } from '../navigation/mainTabs';
+import { trackPickerCallback } from '../utils/discoverReentryGuard';
 import { ox } from '../constants/nativeOpticalScale';
 
 function assetIsVideo(asset: { type?: string; uri?: string }) {
@@ -37,7 +38,7 @@ export default function ClipScreen({ navigation }: any) {
     const handleSelectMedia = () => {
         ImagePicker.launchImageLibrary(
             { mediaType: 'mixed', quality: 0.9, selectionLimit: 1 },
-            (response) => {
+            trackPickerCallback((response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
                     gazetteerAlert('Could not open library', response.errorMessage || 'Try again.');
@@ -52,7 +53,7 @@ export default function ClipScreen({ navigation }: any) {
                     isVideo ? 'video' : 'image',
                     isVideo && Number.isFinite(duration) && duration > 0 ? duration : undefined,
                 );
-            },
+            }),
         );
     };
 

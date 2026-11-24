@@ -2,6 +2,7 @@ import { NativeModules, Platform } from 'react-native';
 import ImageCropPicker, { type Image as CropImage } from 'react-native-image-crop-picker';
 import type { Asset } from 'react-native-image-picker';
 import { ensureGalleryMediaPermission } from './galleryMediaPermissionsNative';
+import { beginExternalHandoff, endExternalHandoff } from './discoverReentryGuard';
 import { CAROUSEL_MAX_ITEMS } from '../constants';
 
 type GalleryRollItem = { uri?: string; type?: string; fileName?: string; fileSize?: number; duration?: number };
@@ -68,6 +69,19 @@ export async function pickFromFullGallery(
 ): Promise<Asset[] | 'denied' | 'cancel'> {
     const allowed = await ensureGalleryMediaPermission();
     if (!allowed) return 'denied';
+
+    beginExternalHandoff();
+    try {
+        return await pickFromFullGalleryOpen(selectionLimit, options);
+    } finally {
+        endExternalHandoff();
+    }
+}
+
+async function pickFromFullGalleryOpen(
+    selectionLimit = CAROUSEL_MAX_ITEMS,
+    options: PickFromFullGalleryOptions = {},
+): Promise<Asset[] | 'cancel'> {
 
     const photosOnly = options.mediaType === 'photo';
     const nativeMediaType = photosOnly ? 'image' : 'any';

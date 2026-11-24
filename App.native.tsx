@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, Linking, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
+import { AppState, Linking, NativeModules, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { CommonActions, DarkTheme, NavigationContainer, StackActions } from '@react-navigation/native';
@@ -38,6 +38,7 @@ import CreateScreen from './src/screens/CreateScreen';
 import InstantCreateScreen from './src/screens/InstantCreateScreen';
 import ReportPostSheetHost from './src/components/ReportPostSheet.native';
 import { GAZETTEER_ABYSS } from './src/theme/gazetteerAmbientNative';
+import { DISCOVER_REENTRY_FLOW_ROUTES, externalHandoffActive } from './src/utils/discoverReentryGuard';
 import GalleryPreviewScreen from './src/screens/GalleryPreviewScreen';
 import InstantFiltersScreen from './src/screens/InstantFiltersScreen';
 import TextOnlyCreateScreen from './src/screens/TextOnlyCreateScreen';
@@ -324,7 +325,22 @@ const DISCOVER_REENTRY_HOLD = new Set([
   'PaymentSuccess',
 ]);
 
-/** After a real background (not a permission sheet), signed-in users land on Discover. */
+async function userChoseToLeaveApp(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const consume = NativeModules.UserLeaveHint?.consume as undefined | (() => Promise<boolean>);
+  if (typeof consume !== 'function') return true;
+  try {
+    return !!(await consume());
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Signed-in users land on Discover after they really leave the app.
+ * System sheets (gallery, camera, screen recording) and create/composer
+ * screens stay where they are.
+ */
 function DiscoverReentry() {
   const { user } = useAuth();
   const userRef = useRef(user);
@@ -332,17 +348,29 @@ function DiscoverReentry() {
 
   useEffect(() => {
     let backgrounded = false;
+    let leftAt = 0;
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background') {
         backgrounded = true;
+        leftAt = Date.now();
         return;
       }
       if (state !== 'active' || !backgrounded) return;
       backgrounded = false;
-      if (!userRef.current || !navigationRef.isReady()) return;
-      const name = navigationRef.getCurrentRoute()?.name;
-      if (!name || DISCOVER_REENTRY_HOLD.has(name)) return;
-      navigationRef.navigate('Discover' as never);
+      const awayFor = Date.now() - leftAt;
+      void (async () => {
+        const userLeft = await userChoseToLeaveApp();
+        if (!userRef.current || !navigationRef.isReady()) return;
+        if (externalHandoffActive()) return;
+        // Until the native leave hint is in the installed app, ignore a brief
+        // system sheet (screen recorder, permission) that only flashes the activity.
+        const moduleReady = typeof NativeModules.UserLeaveHint?.consume === 'function';
+        if (!moduleReady && awayFor < 2500) return;
+        const name = navigationRef.getCurrentRoute()?.name;
+        if (!name || DISCOVER_REENTRY_HOLD.has(name) || DISCOVER_REENTRY_FLOW_ROUTES.has(name)) return;
+        if (!userLeft) return;
+        navigationRef.navigate('Discover' as never);
+      })();
     });
     return () => sub.remove();
   }, []);

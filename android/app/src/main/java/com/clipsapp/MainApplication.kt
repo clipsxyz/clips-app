@@ -8,6 +8,7 @@ import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.clipsapp.billing.GazetteerStoreBillingPackage
 import com.clipsapp.dm.DmDeviceFilesPackage
+import com.clipsapp.leave.UserLeaveHintPackage
 import com.reactnativecompressor.CompressorPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -27,6 +28,9 @@ class MainApplication : Application(), ReactApplication {
           }
           if (none { it is DmDeviceFilesPackage }) {
             add(DmDeviceFilesPackage())
+          }
+          if (none { it is UserLeaveHintPackage }) {
+            add(UserLeaveHintPackage())
           }
         },
     )

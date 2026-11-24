@@ -17,6 +17,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { launchImageLibrary } from 'react-native-image-picker';
+import { beginExternalHandoff, endExternalHandoff } from '../utils/discoverReentryGuard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
 import { createChatGroup } from '../api/chatGroups';
@@ -70,9 +71,14 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
     }, [visible]);
 
     const pickPhoto = async () => {
-        const result = await launchImageLibrary({ mediaType: 'photo', quality: 0.8 });
-        const uri = result.assets?.[0]?.uri;
-        if (uri) setAvatarUri(uri);
+        beginExternalHandoff();
+        try {
+            const result = await launchImageLibrary({ mediaType: 'photo', quality: 0.8 });
+            const uri = result.assets?.[0]?.uri;
+            if (uri) setAvatarUri(uri);
+        } finally {
+            endExternalHandoff();
+        }
     };
 
     const submit = async () => {
