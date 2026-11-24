@@ -670,7 +670,7 @@ function PillTabs(props: {
   React.useEffect(() => {
     setPassportPhotoFailed(false);
   }, [passportPhoto]);
-  const activeLabel = props.customLocationLabel || props.customLocation || (props.active === local ? 'Nearby' : props.active);
+  const activeLabel = props.customLocationLabel || props.customLocation || props.active;
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
 
   React.useEffect(() => {
@@ -7262,6 +7262,35 @@ function FeedPageWrapper() {
       return;
     }
 
+    const home = params.get('home');
+    if (home === 'local' || home === 'regional' || home === 'national') {
+      const tab =
+        home === 'local'
+          ? (user?.local || 'Finglas')
+          : home === 'regional'
+            ? (user?.regional || 'Dublin')
+            : (user?.national || defaultNational);
+      setShowFollowingFeed(false);
+      setActive(tab);
+      setCustomLocation(null);
+      setCustomLocationLabel(null);
+      setCustomLocationPlaceId(null);
+      setCustomFilterType(null);
+      setPages([]);
+      setCursor(0);
+      setEnd(false);
+      setError(null);
+      params.delete('home');
+      params.delete('location');
+      params.delete('label');
+      params.delete('scope');
+      params.delete('type');
+      params.delete('place_id');
+      const next = params.toString();
+      navigate(next ? `/feed?${next}` : '/feed', { replace: true });
+      return;
+    }
+
     if (q) {
       const placeIdParam = params.get('place_id');
       console.log('URL provided location:', q, 'setting customLocation...');
@@ -7292,7 +7321,7 @@ function FeedPageWrapper() {
       setEnd(false);
       setError(null);
     }
-  }, [routerLocation.search, routerLocation.pathname, user?.national, defaultNational]); // Don't include customLocation to avoid infinite loops
+  }, [routerLocation.search, routerLocation.pathname, user?.local, user?.regional, user?.national, defaultNational, navigate]); // Don't include customLocation to avoid infinite loops
 
   // Reset feed only when tab/location (currentFilter) changes
   React.useEffect(() => {

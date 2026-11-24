@@ -51,7 +51,7 @@ export default function PublicStoryScreen({ navigation, route }: any) {
     const leave = () => {
         if (user) {
             if (navigation.canGoBack()) navigation.goBack();
-            else resetRootToScreen('MainTabs');
+            else resetRootToScreen('Discover');
             return;
         }
         resetRootToScreen('Landing');
@@ -105,7 +105,7 @@ export default function PublicStoryScreen({ navigation, route }: any) {
                 {user ? (
                     <TouchableOpacity
                         style={styles.primaryBtn}
-                        onPress={() => resetRootToScreen('MainTabs')}
+                        onPress={() => resetRootToScreen('Discover')}
                     >
                         <Text style={styles.primaryBtnText}>Open Gazetteer</Text>
                     </TouchableOpacity>

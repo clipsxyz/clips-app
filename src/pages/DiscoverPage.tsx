@@ -4,7 +4,6 @@ import {
     IoAdd,
     IoArrowForward,
     IoClose,
-    IoHomeOutline,
     IoLocationOutline,
     IoReturnDownForwardOutline,
     IoSparklesOutline,
@@ -26,6 +25,66 @@ const ROTATING_CITIES = [
     'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam',
 ];
 const PLACEHOLDER_ROTATE_MS = 2800;
+const AVATAR_RING = 84;
+const AVATAR_STROKE = 3;
+const AVATAR_RADIUS = (AVATAR_RING - AVATAR_STROKE) / 2;
+const AVATAR_CIRCUMFERENCE = 2 * Math.PI * AVATAR_RADIUS;
+
+/** Border grows from the top of the profile photo until the ring is complete. */
+function DiscoverAvatarRing({
+    settled,
+    onSettle,
+}: {
+    settled: boolean;
+    onSettle: () => void;
+}) {
+    const circleRef = React.useRef<SVGCircleElement>(null);
+
+    React.useEffect(() => {
+        const circle = circleRef.current;
+        if (!circle) return;
+        if (settled) {
+            circle.style.strokeDashoffset = '0';
+            return;
+        }
+        const started = performance.now();
+        let frame = 0;
+        const tick = (now: number) => {
+            const t = Math.min(1, (now - started) / 2200);
+            const eased = 1 - Math.pow(1 - t, 3);
+            circle.style.strokeDashoffset = String(AVATAR_CIRCUMFERENCE * (1 - eased));
+            if (t < 1) frame = requestAnimationFrame(tick);
+            else onSettle();
+        };
+        frame = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frame);
+    }, [settled, onSettle]);
+
+    return (
+        <svg
+            aria-hidden
+            width={AVATAR_RING}
+            height={AVATAR_RING}
+            viewBox={`0 0 ${AVATAR_RING} ${AVATAR_RING}`}
+            className="pointer-events-none absolute left-1/2 top-1/2"
+            style={{ transform: 'translate(-50%, -50%)' }}
+        >
+            <circle
+                ref={circleRef}
+                cx={AVATAR_RING / 2}
+                cy={AVATAR_RING / 2}
+                r={AVATAR_RADIUS}
+                fill="none"
+                stroke="#FFFFFF"
+                strokeWidth={AVATAR_STROKE}
+                strokeLinecap="round"
+                strokeDasharray={AVATAR_CIRCUMFERENCE}
+                strokeDashoffset={settled ? 0 : AVATAR_CIRCUMFERENCE}
+                transform={`rotate(-90 ${AVATAR_RING / 2} ${AVATAR_RING / 2})`}
+            />
+        </svg>
+    );
+}
 const KEYBOARD_OPEN_THRESHOLD_PX = 100;
 
 const CANVAS_STYLE: React.CSSProperties = {
@@ -45,6 +104,8 @@ export default function DiscoverPage() {
     const [placeholderCityIndex, setPlaceholderCityIndex] = React.useState(0);
     const [keyboardOpen, setKeyboardOpen] = React.useState(false);
     const [liveDropCount, setLiveDropCount] = React.useState(0);
+    const [avatarRingSettled, setAvatarRingSettled] = React.useState(false);
+    const settleAvatarRing = React.useCallback(() => setAvatarRingSettled(true), []);
     const [visibleViewport, setVisibleViewport] = React.useState(() => ({
         top: 0,
         height: typeof window !== 'undefined' ? window.innerHeight : 800,
@@ -58,7 +119,7 @@ export default function DiscoverPage() {
 
     const hasSearchQuery = query.trim().length > 0;
     const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
-    const placeholderLabel = `Discover · ${ROTATING_CITIES[placeholderCityIndex]}`;
+    const placeholderCity = ROTATING_CITIES[placeholderCityIndex];
 
     const promptSuggestions = React.useMemo(() => {
         const local = (user?.local || '').trim();
@@ -203,7 +264,10 @@ export default function DiscoverPage() {
         navigate(`/feed?${params.toString()}`);
     }
 
-    function clearPendingHome() {
+    function openScopedFeed(scope: 'local' | 'regional' | 'national', place: string) {
+        const name = place.trim();
+        if (!name) return;
+        setLiveDropCount(0);
         try {
             sessionStorage.removeItem('pendingLocation');
             sessionStorage.removeItem('pendingLocationLabel');
@@ -213,24 +277,17 @@ export default function DiscoverPage() {
         } catch {
             /* ignore */
         }
+        navigate(`/feed?home=${scope}`);
     }
 
-    function goHomeFeed() {
-        clearPendingHome();
-        navigate('/feed');
-    }
-
-    function goLocalFeed() {
-        const local = (user?.local || 'Finglas').trim();
-        if (!local) return;
-        applyFeedSelection({
-            filter: local,
-            label: local,
-            scope: 'local',
-            fullName: local,
-            placeId: null,
-        });
-    }
+    const nearbyPlace = (user?.local || 'Finglas').trim();
+    const regionalPlace = (user?.regional || '').trim();
+    const nationalPlace = (user?.national || '').trim();
+    const scopePills = [
+        { key: 'nearby', label: 'Nearby', place: nearbyPlace, scope: 'local' as const },
+        { key: 'regional', label: regionalPlace || 'Regional', place: regionalPlace, scope: 'regional' as const },
+        { key: 'national', label: nationalPlace || 'National', place: nationalPlace, scope: 'national' as const },
+    ];
 
     function dismissSuggestionList() {
         setHideSuggestions(true);
@@ -290,23 +347,19 @@ export default function DiscoverPage() {
                 className={`flex min-h-0 flex-1 flex-col px-5 ${keyboardOpen ? 'justify-start' : 'justify-between'}`}
                 style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}
             >
-                <div className="flex min-h-11 items-center justify-between pt-2">
-                    <button
-                        type="button"
-                        onClick={goHomeFeed}
-                        className="-ml-1 p-2 text-white"
-                        aria-label="Back to Feed"
-                    >
-                        <IoHomeOutline size={22} />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={goLocalFeed}
-                        className="max-w-[140px] rounded-lg border border-white/55 bg-black/35 px-3 py-1.5 text-xs font-semibold text-white"
-                        aria-label="View nearby feed"
-                    >
-                        <span className="block truncate">Nearby</span>
-                    </button>
+                <div className="flex min-h-11 shrink-0 items-center gap-2 pt-10">
+                    {scopePills.map((pill) => (
+                        <button
+                            key={pill.key}
+                            type="button"
+                            onClick={() => openScopedFeed(pill.scope, pill.place)}
+                            className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                            aria-label={`Open ${pill.label} feed`}
+                        >
+                            <IoReturnDownForwardOutline size={16} className="shrink-0 text-white" />
+                            <span className="truncate text-[15px] leading-5 text-[#D1E4FF]">{pill.label}</span>
+                        </button>
+                    ))}
                 </div>
 
                 {keyboardOpen ? (
@@ -316,9 +369,10 @@ export default function DiscoverPage() {
                         <button
                             type="button"
                             onClick={() => navigate('/profile')}
-                            className="mb-[18px]"
+                            className="relative mb-[18px] flex h-[84px] w-[84px] items-center justify-center"
                             aria-label="Open Passport"
                         >
+                            <DiscoverAvatarRing settled={avatarRingSettled} onSettle={settleAvatarRing} />
                             <Avatar src={avatarSrc} name={avatarName} handle={user?.handle} size={72} />
                         </button>
                         <p className="text-center text-[28px] font-semibold leading-9 text-white">
@@ -402,7 +456,7 @@ export default function DiscoverPage() {
                             type="button"
                             onClick={() => {
                                 setLiveDropCount(0);
-                                goLocalFeed();
+                                openScopedFeed('local', nearbyPlace);
                             }}
                             className="mx-auto mb-3 flex items-center gap-1.5 rounded-full bg-[#3D9B8F] px-3.5 py-2 text-[13px] font-bold text-[#04110f]"
                             aria-label={`${liveDropCount} new drops nearby`}
@@ -412,8 +466,9 @@ export default function DiscoverPage() {
                         </button>
                     ) : null}
 
-                    <div className="flex min-h-[54px] items-center rounded-full bg-[#1c1c1e] pl-3.5 pr-1.5">
-                        <IoAdd size={22} className="mr-3 shrink-0 text-white" aria-hidden />
+                    <div className="flex min-h-[54px] items-center rounded-full border border-white/15 bg-[#2A2A2E] pl-4 pr-2">
+                        <IoAdd size={22} className="mr-3.5 shrink-0 text-white" aria-hidden />
+                        <span className="mr-2 shrink-0 text-base font-normal text-[#94A3B8]">Discover ·</span>
                         <input
                             ref={searchInputRef}
                             value={query}
@@ -435,11 +490,11 @@ export default function DiscoverPage() {
                                     chooseFromQuery();
                                 }
                             }}
-                            placeholder={hasSearchQuery ? '' : placeholderLabel}
+                            placeholder={hasSearchQuery ? '' : placeholderCity}
                             aria-label="Discover locations"
                             autoCorrect="off"
                             autoCapitalize="none"
-                            className="min-w-0 flex-1 bg-transparent py-3 text-base text-white placeholder:text-[#94A3B8] focus:outline-none"
+                            className="mr-1.5 min-w-0 flex-1 bg-transparent py-3 text-base font-semibold text-white placeholder:font-normal placeholder:text-[#94A3B8] focus:outline-none"
                         />
                         {hasSearchQuery ? (
                             <button
@@ -457,7 +512,7 @@ export default function DiscoverPage() {
                         <button
                             type="button"
                             onClick={chooseFromQuery}
-                            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#3d9b8f] text-[#04110f]"
+                            className="ml-1.5 flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#04110f]"
                             aria-label="Search places"
                         >
                             <IoArrowForward size={18} />

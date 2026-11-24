@@ -4,7 +4,7 @@ import { createNavigationContainerRef } from '@react-navigation/native';
 export const rootNavigationRef = createNavigationContainerRef();
 
 export function resetRootToScreen(
-    name: 'Login' | 'Landing' | 'MainTabs',
+    name: 'Login' | 'Landing' | 'MainTabs' | 'Discover',
     params?: Record<string, unknown>,
 ): void {
     if (!rootNavigationRef.isReady()) return;

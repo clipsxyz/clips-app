@@ -107,7 +107,7 @@ export default function PublicPostScreen({ navigation, route }: any) {
 
     const goFurther = () => {
         if (user) {
-            navigation.replace('MainTabs', { screen: 'Home' });
+            navigation.replace('Discover');
             return;
         }
         navigation.replace('Landing');

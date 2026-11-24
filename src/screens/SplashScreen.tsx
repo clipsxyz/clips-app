@@ -65,7 +65,7 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
         return;
       }
       if (userRef.current) {
-        navigation.replace('MainTabs');
+        navigation.replace('Discover');
       } else {
         navigation.replace('Landing');
       }

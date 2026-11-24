@@ -645,7 +645,7 @@ function PillTabs({
         () => ['Eiffel Tower', 'Colosseum', 'Big Ben', 'Statue of Liberty', 'Christ the Redeemer'],
         []
     );
-    const activeLabel = customLocationLabel || customLocation || (active === userLocal ? 'Nearby' : active);
+    const activeLabel = customLocationLabel || customLocation || active;
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
     const activeFeedKey =
         feedScope === 'following'
@@ -3559,8 +3559,55 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, [isFeedFocused, route?.params?.resetHomeFeedAt, navigation]);
 
     useEffect(() => {
+        const scope = route?.params?.nativeHomeScope;
+        if (scope !== 'local' && scope !== 'regional' && scope !== 'national') return;
+        const tab =
+            scope === 'local'
+                ? (user?.local || 'Finglas')
+                : scope === 'regional'
+                    ? (user?.regional || 'Dublin')
+                    : (user?.national || defaultNational);
+        const name = tab.trim();
+        if (!name) return;
+        setShowFollowingFeed(false);
+        setCustomLocation(null);
+        setCustomLocationLabel(null);
+        setCustomLocationPlaceId(null);
+        setCustomFilterType(null);
+        setCustomFeedScope(null);
+        setActive(name);
+        setError(null);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setReloadTick((t) => t + 1);
+        try {
+            navigation?.setParams?.({
+                nativeHomeScope: null,
+                location: null,
+                locationLabel: null,
+                locationScope: null,
+                filterType: null,
+                placeId: null,
+            });
+        } catch {
+            // ignore
+        }
+    }, [
+        route?.params?.nativeHomeScope,
+        user?.local,
+        user?.regional,
+        user?.national,
+        defaultNational,
+        navigation,
+    ]);
+
+    useEffect(() => {
         // A live Home-tab reset token must win; null/undefined means apply location.
+        // A Discover home-scope pill uses the native tab, not a searched place.
         if (route?.params?.resetHomeFeedAt != null) return;
+        const nativeHomeScope = route?.params?.nativeHomeScope;
+        if (nativeHomeScope === 'local' || nativeHomeScope === 'regional' || nativeHomeScope === 'national') return;
         const requestedLocation = route?.params?.location;
         const requestedLabel = route?.params?.locationLabel;
         const requestedPlaceId = route?.params?.placeId;
@@ -3613,6 +3660,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         route?.params?.locationScope,
         route?.params?.placeId,
         route?.params?.resetHomeFeedAt,
+        route?.params?.nativeHomeScope,
     ]);
 
     const pendingLivePostsRef = useRef<Post[]>([]);

@@ -315,6 +315,41 @@ function MainTabs() {
   );
 }
 
+const DISCOVER_REENTRY_HOLD = new Set([
+  'Discover',
+  'Splash',
+  'Landing',
+  'Login',
+  'Payment',
+  'PaymentSuccess',
+]);
+
+/** After a real background (not a permission sheet), signed-in users land on Discover. */
+function DiscoverReentry() {
+  const { user } = useAuth();
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  useEffect(() => {
+    let backgrounded = false;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') {
+        backgrounded = true;
+        return;
+      }
+      if (state !== 'active' || !backgrounded) return;
+      backgrounded = false;
+      if (!userRef.current || !navigationRef.isReady()) return;
+      const name = navigationRef.getCurrentRoute()?.name;
+      if (!name || DISCOVER_REENTRY_HOLD.has(name)) return;
+      navigationRef.navigate('Discover' as never);
+    });
+    return () => sub.remove();
+  }, []);
+
+  return null;
+}
+
 function App(): React.JSX.Element {
   const lastProcessedUrlRef = useRef<string | null>(null);
 
@@ -377,6 +412,7 @@ function App(): React.JSX.Element {
     <AuthProvider>
       <BottomSheetModalProvider>
       <SafeAreaProvider>
+        <DiscoverReentry />
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
         <UploadProgressToast />
         <ForegroundPushBanner />

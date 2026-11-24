@@ -11,8 +11,12 @@ import {
     Platform,
     KeyboardAvoidingView,
     DeviceEventEmitter,
+    Animated,
+    Easing,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
@@ -20,7 +24,6 @@ import { searchLocations, searchLocalGazetteer, type LocationSuggestion } from '
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import Avatar from '../components/Avatar.native';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import {
     UCL_CANVAS_NAVY,
     UCL_SHEET_GRADIENT,
@@ -31,10 +34,7 @@ import {
     UCL_TEXT_SECONDARY,
 } from '../theme/gazetteerAmbientNative';
 import { navigateMainTab, navigatePassport } from '../navigation/mainTabs';
-import {
-    clearPendingLocationFeed,
-    writePendingLocationFeed,
-} from '../utils/pendingLocationNative';
+import { clearPendingLocationFeed, writePendingLocationFeed } from '../utils/pendingLocationNative';
 import { ox } from '../constants/nativeOpticalScale';
 import { connectSocket, joinLocationFeed, leaveLocationFeed } from '../services/socketio';
 
@@ -47,6 +47,12 @@ const ROTATING_CITIES = [
     'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam',
 ];
 const PLACEHOLDER_ROTATE_MS = 2800;
+const AVATAR = ox(72);
+const AVATAR_RING = AVATAR + 12;
+const AVATAR_STROKE = 3;
+const AVATAR_RADIUS = (AVATAR_RING - AVATAR_STROKE) / 2;
+const AVATAR_CIRCUMFERENCE = 2 * Math.PI * AVATAR_RADIUS;
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export default function DiscoverScreen({ navigation }: any) {
     const { user } = useAuth();
@@ -61,6 +67,11 @@ export default function DiscoverScreen({ navigation }: any) {
     const [keyboardOpen, setKeyboardOpen] = useState(false);
     const [liveDropCount, setLiveDropCount] = useState(0);
     const inputRef = useRef<TextInput>(null);
+    const avatarDraw = useRef(new Animated.Value(0)).current;
+    const avatarDashOffset = avatarDraw.interpolate({
+        inputRange: [0, 1],
+        outputRange: [AVATAR_CIRCUMFERENCE, 0],
+    });
 
     const popularResults = useMemo(
         () => POPULAR.filter((name) => name.toLowerCase().includes(query.toLowerCase())),
@@ -70,7 +81,21 @@ export default function DiscoverScreen({ navigation }: any) {
     const hasSearchQuery = query.trim().length > 0;
     const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
     const keyboardLayout = keyboardOpen;
-    const placeholderLabel = `Discover · ${ROTATING_CITIES[placeholderCityIndex]}`;
+    const placeholderCity = ROTATING_CITIES[placeholderCityIndex];
+
+    useFocusEffect(
+        React.useCallback(() => {
+            avatarDraw.setValue(0);
+            const draw = Animated.timing(avatarDraw, {
+                toValue: 1,
+                duration: 2200,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: false,
+            });
+            draw.start();
+            return () => draw.stop();
+        }, [avatarDraw]),
+    );
 
     useEffect(() => {
         if (hasSearchQuery) return;
@@ -233,35 +258,35 @@ export default function DiscoverScreen({ navigation }: any) {
         selectPopularCity(trimmed);
     };
 
-    const goHomeFeed = () => {
-        void clearPendingLocationFeed();
-        navigateMainTab(navigation, 'Home', {
-            screen: 'Feed',
-            params: {
-                resetHomeFeedAt: Date.now(),
-                location: null,
-                locationLabel: null,
-                locationScope: null,
-                filterType: null,
-                placeId: null,
-            },
-        });
+    const openScopedFeed = (scope: 'local' | 'regional' | 'national', place: string) => {
+        const name = place.trim();
+        if (!name) return;
+        setLiveDropCount(0);
+        void (async () => {
+            await clearPendingLocationFeed();
+            navigateMainTab(navigation, 'Home', {
+                screen: 'Feed',
+                params: {
+                    nativeHomeScope: scope,
+                    location: null,
+                    locationLabel: null,
+                    locationScope: null,
+                    filterType: null,
+                    placeId: null,
+                    resetHomeFeedAt: null,
+                },
+            });
+        })();
     };
 
-    const goLocalFeed = () => {
-        // Web TopBar: pendingLocation = user.local, navigate /feed?location=local
-        // Do not run resolvePlaceFeedSelection — with local+regional+national set it
-        // often defaults to national and looks like "just Home".
-        const local = (user?.local || 'Finglas').trim();
-        if (!local) return;
-        void openFeedSelection({
-            filter: local,
-            label: local,
-            scope: 'local',
-            fullName: local,
-            placeId: null,
-        });
-    };
+    const nearbyPlace = (user?.local || 'Finglas').trim();
+    const regionalPlace = (user?.regional || '').trim();
+    const nationalPlace = (user?.national || '').trim();
+    const scopePills = [
+        { key: 'nearby', label: 'Nearby', place: nearbyPlace, scope: 'local' as const },
+        { key: 'regional', label: regionalPlace || 'Regional', place: regionalPlace, scope: 'regional' as const },
+        { key: 'national', label: nationalPlace || 'National', place: nationalPlace, scope: 'national' as const },
+    ];
 
     const rawName = user?.name || 'Friend';
     const firstName = rawName.split('@')[0].trim().split(/\s+/)[0];
@@ -294,40 +319,37 @@ export default function DiscoverScreen({ navigation }: any) {
             ]}
             collapsable={false}
         >
-            <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 8) }]}>
-                <TouchableOpacity
-                    onPress={() => goHomeFeed()}
-                    style={styles.topBarBtn}
-                    accessibilityLabel="Back to Feed"
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                    <Icon name="home-outline" size={ox(22)} color={UCL_TEXT_PRIMARY} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                    onPress={goLocalFeed}
-                    style={styles.localChip}
-                    accessibilityLabel="View nearby feed"
-                >
-                    <Text style={styles.localChipText} numberOfLines={1}>
-                        Nearby
-                    </Text>
-                </TouchableOpacity>
-            </View>
-
             {!keyboardLayout ? (
                 <View style={styles.hero}>
-                    <TouchableOpacity
-                        onPress={() => navigatePassport(navigation, 'Home')}
-                        accessibilityLabel="Open Passport"
-                        style={styles.heroAvatar}
-                    >
-                        <Avatar
-                            src={user?.avatarUrl}
-                            name={avatarName}
-                            handle={user?.handle}
-                            size={ox(72)}
-                        />
-                    </TouchableOpacity>
+                    <View style={styles.heroAvatarWrap}>
+                        <View pointerEvents="none" style={[styles.avatarRing, styles.avatarRingStart]}>
+                            <Svg width={AVATAR_RING} height={AVATAR_RING}>
+                                <AnimatedCircle
+                                    cx={AVATAR_RING / 2}
+                                    cy={AVATAR_RING / 2}
+                                    r={AVATAR_RADIUS}
+                                    stroke="#FFFFFF"
+                                    strokeWidth={AVATAR_STROKE}
+                                    fill="none"
+                                    strokeLinecap="round"
+                                    strokeDasharray={AVATAR_CIRCUMFERENCE}
+                                    strokeDashoffset={avatarDashOffset}
+                                />
+                            </Svg>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => navigatePassport(navigation, 'Home')}
+                            accessibilityLabel="Open Passport"
+                            style={styles.heroAvatar}
+                        >
+                            <Avatar
+                                src={user?.avatarUrl}
+                                name={avatarName}
+                                handle={user?.handle}
+                                size={AVATAR}
+                            />
+                        </TouchableOpacity>
+                    </View>
                     <Text style={styles.greetingText}>Let's go social traveling,</Text>
                     <Text style={styles.greetingText}>{username}</Text>
                 </View>
@@ -405,7 +427,7 @@ export default function DiscoverScreen({ navigation }: any) {
                         style={styles.liveDropBadge}
                         onPress={() => {
                             setLiveDropCount(0);
-                            goLocalFeed();
+                            openScopedFeed('local', nearbyPlace);
                         }}
                         activeOpacity={0.88}
                         accessibilityLabel={`${liveDropCount} new drops nearby`}
@@ -420,6 +442,7 @@ export default function DiscoverScreen({ navigation }: any) {
                 ) : null}
                 <View style={styles.searchPill}>
                     <Icon name="add" size={ox(22)} color={UCL_TEXT_PRIMARY} style={styles.searchIcon} />
+                    <Text style={styles.searchPrefix}>Discover ·</Text>
                     <TextInput
                         ref={inputRef}
                         value={query}
@@ -428,7 +451,7 @@ export default function DiscoverScreen({ navigation }: any) {
                             setActiveIndex(-1);
                             setHideSuggestions(false);
                         }}
-                        placeholder={hasSearchQuery ? '' : placeholderLabel}
+                        placeholder={hasSearchQuery ? '' : placeholderCity}
                         placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                         style={styles.searchInput}
                         selectionColor={UCL_TEXT_ACTIVE}
@@ -458,7 +481,7 @@ export default function DiscoverScreen({ navigation }: any) {
 
     return (
         <>
-            {/* Page canvas only — UCL navy / purple wash. Search chrome is unchanged. */}
+            {/* Page canvas only — UCL navy / purple wash. */}
             <LinearGradient
                 colors={[...UCL_SHEET_GRADIENT]}
                 locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
@@ -466,6 +489,21 @@ export default function DiscoverScreen({ navigation }: any) {
                 end={{ x: 0.88, y: 1 }}
                 style={styles.root}
             >
+                <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 8) + 32 }]}>
+                    {scopePills.map((pill) => (
+                        <TouchableOpacity
+                            key={pill.key}
+                            onPress={() => openScopedFeed(pill.scope, pill.place)}
+                            style={styles.scopePill}
+                            accessibilityLabel={`Open ${pill.label} feed`}
+                        >
+                            <Icon name="return-down-forward-outline" size={ox(16)} color={UCL_TEXT_PRIMARY} />
+                            <Text style={styles.scopePillText} numberOfLines={1}>
+                                {pill.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
                 <KeyboardAvoidingView
                     style={styles.flex}
                     behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -508,26 +546,25 @@ const styles = StyleSheet.create({
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        gap: ox(8),
         minHeight: ox(44),
+        paddingHorizontal: ox(20),
+        flexShrink: 0,
     },
-    topBarBtn: {
-        padding: ox(8),
-        marginLeft: -4,
+    scopePill: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(4),
     },
-    localChip: {
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(6),
-        borderRadius: ox(8),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.55)',
-        backgroundColor: 'rgba(0, 0, 0, 0.35)',
-        maxWidth: 140,
-    },
-    localChipText: {
-        color: UCL_TEXT_PRIMARY,
-        fontSize: ox(12),
-        fontWeight: '600',
+    scopePillText: {
+        flex: 1,
+        minWidth: 0,
+        color: UCL_TEXT_SECONDARY,
+        fontSize: ox(15),
+        lineHeight: ox(20),
+        fontWeight: '400',
     },
     hero: {
         flex: 1,
@@ -538,8 +575,28 @@ const styles = StyleSheet.create({
     heroSpacer: {
         height: ox(8),
     },
-    heroAvatar: {
+    heroAvatarWrap: {
+        width: AVATAR_RING,
+        height: AVATAR_RING,
         marginBottom: ox(18),
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    heroAvatar: {
+        width: AVATAR,
+        height: AVATAR,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    avatarRing: {
+        position: 'absolute',
+        width: AVATAR_RING,
+        height: AVATAR_RING,
+        left: 0,
+        top: 0,
+    },
+    avatarRingStart: {
+        transform: [{ rotate: '-90deg' }],
     },
     greetingText: {
         color: UCL_TEXT_PRIMARY,
@@ -623,18 +680,30 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         borderRadius: ox(999),
-        backgroundColor: '#1c1c1e',
-        paddingLeft: ox(14),
-        paddingRight: ox(6),
+        backgroundColor: '#2A2A2E',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.16)',
+        paddingLeft: ox(16),
+        paddingRight: ox(8),
         minHeight: ox(54),
     },
-    searchIcon: { marginRight: 12 },
+    searchIcon: { marginRight: ox(14) },
+    searchPrefix: {
+        color: UCL_TEXT_PLACEHOLDER,
+        fontSize: ox(16),
+        lineHeight: ox(22),
+        fontWeight: '400',
+        marginRight: ox(8),
+        includeFontPadding: false,
+    },
     searchInput: {
         flex: 1,
-        color: UCL_TEXT_PRIMARY,
+        minWidth: 0,
+        color: '#FFFFFF',
         fontSize: ox(16),
-        fontWeight: '400',
+        fontWeight: '600',
         paddingVertical: ox(12),
+        marginRight: ox(6),
         backgroundColor: 'transparent',
         includeFontPadding: false,
         ...(Platform.OS === 'android' ? { textAlignVertical: 'center' as const } : null),
@@ -654,6 +723,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(20),
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        marginLeft: ox(6),
+        backgroundColor: '#FFFFFF',
     },
 });

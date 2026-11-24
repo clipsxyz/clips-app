@@ -1,7 +1,31 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const { withNativeWind } = require('nativewind/metro');
+const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
+
+/**
+ * NativeWind's virtual CSS refresh emits haste "change" as `{ eventsQueue }`.
+ * Metro's DeltaCalculator expects `{ changes: { addedFiles, ... } }` and crashes
+ * the dev server on the old shape. Drop only that payload.
+ */
+if (!EventEmitter.prototype.__gazetteerNativeWindChangeGuard) {
+  const originalEmit = EventEmitter.prototype.emit;
+  EventEmitter.prototype.emit = function (type, ...args) {
+    const payload = args[0];
+    if (
+      type === 'change' &&
+      payload &&
+      typeof payload === 'object' &&
+      Array.isArray(payload.eventsQueue) &&
+      !payload.changes
+    ) {
+      return true;
+    }
+    return originalEmit.call(this, type, ...args);
+  };
+  EventEmitter.prototype.__gazetteerNativeWindChangeGuard = true;
+}
 
 /** Load repo `.env` into process.env so Metro/babel see EXPO_PUBLIC_* / VITE_* at bundle time. */
 function loadRootEnvIntoProcess() {

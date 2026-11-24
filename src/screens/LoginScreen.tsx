@@ -207,10 +207,10 @@ export default function LoginScreen({ navigation, route }: any) {
         // Prefer a root reset so Login is not left under MainTabs (back → blank auth).
         // Fall back if the helper is missing/unready so login never throws "undefined is not a function".
         if (typeof resetRootToScreen === 'function' && rootNavigationRef.isReady()) {
-            resetRootToScreen('MainTabs');
+            resetRootToScreen('Discover');
             return;
         }
-        navigation.replace('MainTabs', { screen: 'Home' });
+        navigation.replace('Discover');
     };
 
     const enterLiveSession = async (nextUser: any) => {
