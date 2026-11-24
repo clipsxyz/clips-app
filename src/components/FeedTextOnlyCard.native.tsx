@@ -5,6 +5,7 @@ import type { Post } from '../types';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import { hasFinitePoint, safeLayoutNumber } from '../utils/safeLayoutNative';
+import { getPostBodyText } from '../utils/effectiveTextPostStyleNative';
 import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
 
 const DOUBLE_TAP_MS = 300;
@@ -23,7 +24,7 @@ export default function FeedTextOnlyCard({ post, onDoubleLike }: Props) {
     const lastTapRef = useRef(0);
     const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const text = post.text?.trim() || '';
+    const text = getPostBodyText(post);
     const stickers = post.stickers;
 
     const resolveLocalTap = (e: GestureResponderEvent): { x: number; y: number } => {

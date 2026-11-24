@@ -33,6 +33,7 @@ import {
 } from '../utils/feedEngagementPrefsMobile';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import { applyEditedPostFields } from '../utils/feedPostMeta';
 import { ox } from '../constants/nativeOpticalScale';
 import { GAZETTEER_ABYSS, glassSurface } from '../theme/gazetteerAmbientNative';
 
@@ -359,17 +360,10 @@ function MyFeedModal({
                         await apiUpdatePost(editPost.id, {
                             text,
                             location,
-                            venue: venue || undefined,
-                            landmark: landmark || undefined,
-                        });
-                        applyLocalPost({
-                            ...editPost,
-                            text,
-                            caption: text,
-                            locationLabel: location,
                             venue,
                             landmark,
                         });
+                        applyLocalPost(applyEditedPostFields(editPost, { text, location, venue, landmark }));
                     }}
                 />
             ) : null}

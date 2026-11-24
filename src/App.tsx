@@ -8125,7 +8125,7 @@ function FeedPageWrapper() {
     };
   }, [user?.id, homeBusinessScope]);
 
-  /** Insert â€œSuggested for your placesâ€ strips between posts (skipped on custom venue/location feeds). */
+  /** Insert suggested-place strips between posts (skipped on custom venue/location feeds). */
   const flatWithSuggested = React.useMemo(() => {
     if (!suggestedCardsV2Enabled) return flat;
     if (customLocation) return flat;

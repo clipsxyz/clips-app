@@ -221,6 +221,7 @@ import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import DeletePostConfirmSheet from '../components/DeletePostConfirmSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
+import ActiveBoostStatusCard from '../components/ActiveBoostStatusCard.native';
 import BoostSelectionModal from '../components/BoostSelectionModal.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
@@ -1851,6 +1852,9 @@ const FeedCard = React.memo(function FeedCard({
                 </Pressable>
             ) : null}
 
+            {showBoostMetrics ? (
+                <ActiveBoostStatusCard post={post} />
+            ) : null}
             {showBoostMetrics ? (
                 <BoostMetricsPanel post={post} isOpen={isMetricsOpen} />
             ) : null}

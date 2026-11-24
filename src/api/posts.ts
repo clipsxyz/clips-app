@@ -1630,7 +1630,10 @@ export function transformLaravelPost(response: any): Post {
     locationLocal: response.location_local || response.locationLocal || existing?.locationLocal,
     locationRegional: response.location_regional || response.locationRegional || existing?.locationRegional,
     locationNational: response.location_national || response.locationNational || existing?.locationNational,
-    venue: existing?.venue || response.venue || undefined,
+    venue:
+      response.venue != null
+        ? String(response.venue).trim() || undefined
+        : existing?.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,
     placeId: response.place_id || response.placeId || existing?.placeId || null,
     latitude:
