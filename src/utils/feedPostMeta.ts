@@ -70,10 +70,39 @@ export function getPostDisplayCaption(post: Post): string {
         return '';
     };
     return pick(
-        (post as { captionText?: string }).captionText,
+        post.captionText,
         post.caption,
         post.text,
         post.imageText,
-        (post as { text_content?: string }).text_content,
+        post.text_content,
     );
+}
+
+/** Fields written by the edit sheet. Every surface that paints copy or the ticker reads these. */
+export function applyEditedPostFields(
+    post: Post,
+    fields: { text: string; location: string; venue: string; landmark: string },
+): Post {
+    const text = fields.text;
+    const hasMedia =
+        Boolean((post.mediaUrl || '').trim()) ||
+        (Array.isArray(post.mediaItems) &&
+            post.mediaItems.some(
+                (item) =>
+                    !!item &&
+                    (item.type === 'image' || item.type === 'video') &&
+                    typeof item.url === 'string' &&
+                    item.url.trim().length > 0,
+            ));
+    return {
+        ...post,
+        text,
+        text_content: text,
+        caption: text,
+        captionText: text,
+        imageText: hasMedia ? post.imageText : text,
+        locationLabel: fields.location.trim() ? fields.location : undefined,
+        venue: fields.venue.trim() ? fields.venue : undefined,
+        landmark: fields.landmark.trim() ? fields.landmark : undefined,
+    };
 }

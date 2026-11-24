@@ -45,13 +45,14 @@ import FeedCaptionText from '../components/FeedCaptionText.native';
 import FeedEngagementRow from '../components/FeedEngagementRow';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import {
+    blockFeedAuthorMobile,
     hideFeedPostMobile,
     markNotInterestedFeedPostMobile,
     muteFeedAuthorMobile,
 } from '../utils/feedContentPrefsMobile';
 import type { Post } from '../types';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
-import { getPostDisplayCaption } from '../utils/feedPostMeta';
+import { applyEditedPostFields, getPostDisplayCaption } from '../utils/feedPostMeta';
 import { feedMediaHeight, RATIO_PORTRAIT_9_16 } from '../utils/mediaAspectRatio';
 import FeedShareModal from '../components/FeedShareModal';
 import {
@@ -704,8 +705,27 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 }}
                 onReport={async () => {
                     if (!post) return;
-                    const { promptReportPostNative } = await import('../utils/promptReportPostNative');
-                    promptReportPostNative(post.id, () => setOverflowVisible(false));
+                    const reported = post;
+                    const { openReportPost } = await import('../utils/reportPostSession');
+                    openReportPost({
+                        postId: reported.id,
+                        authorHandle: reported.userHandle,
+                        onHide: async () => {
+                            await hideFeedPostMobile(userId, reported.id);
+                            navigation.goBack();
+                        },
+                        onMute: async () => {
+                            await muteFeedAuthorMobile(userId, reported.userHandle);
+                            navigation.goBack();
+                        },
+                        onBlock: async () => {
+                            if (user?.handle) {
+                                await blockUser(user.handle, reported.userHandle);
+                                await blockFeedAuthorMobile(userId, reported.userHandle);
+                            }
+                            navigation.goBack();
+                        },
+                    });
                 }}
                 onBlock={() =>
                     new Promise<void>((resolve) => {
@@ -802,8 +822,8 @@ export default function PostDetailScreen({ route, navigation }: any) {
                             await apiUpdatePost(post.id, {
                                 text,
                                 location,
-                                venue: venue || undefined,
-                                landmark: landmark || undefined,
+                                venue,
+                                landmark,
                             });
                         } catch (err: unknown) {
                             const msg = err instanceof Error ? err.message : '';
@@ -814,16 +834,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                             if (!offline) throw err;
                         }
                         setPost((p) =>
-                            p
-                                ? {
-                                      ...p,
-                                      text,
-                                      caption: text,
-                                      locationLabel: location || p.locationLabel || '',
-                                      venue: venue || undefined,
-                                      landmark: landmark || undefined,
-                                  }
-                                : null
+                            p ? applyEditedPostFields(p, { text, location, venue, landmark }) : null
                         );
                     }}
                 />

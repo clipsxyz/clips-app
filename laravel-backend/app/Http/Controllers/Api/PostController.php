@@ -981,9 +981,15 @@ class PostController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        // Update only text, location, venue, and landmark
+        // Update only text, location, venue, and landmark.
+        // The feed paints `caption` ahead of `text_content`, so a caption edit has to
+        // write both or the card keeps the old line after the next refresh.
         if ($request->has('text')) {
             $post->text_content = $request->text;
+            $post->caption = $request->text;
+            if (! $post->media_url) {
+                $post->image_text = $request->text;
+            }
         }
         if ($request->has('location') || $request->has('placeId') || $request->has('place_id')
             || $request->has('latitude') || $request->has('longitude')) {

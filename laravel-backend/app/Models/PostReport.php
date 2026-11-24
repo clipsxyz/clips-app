@@ -12,6 +12,12 @@ class PostReport extends Model
         'post_id',
         'reason',
         'details',
+        'answers',
+        'status',
+    ];
+
+    protected $casts = [
+        'answers' => 'array',
     ];
 
     public function reporter(): BelongsTo

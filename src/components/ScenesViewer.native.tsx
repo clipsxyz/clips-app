@@ -28,7 +28,7 @@ import { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { getScenesMediaSlides } from '../utils/scenesMediaNative';
-import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
+import { applyEditedPostFields, getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { resolveCommentComposerAccess } from '../utils/commentModeration';
 import { buildPostMetadataItems } from '../utils/feedPostMeta';
 import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
@@ -52,6 +52,7 @@ import PickGroupToInviteFeedUserModal from './PickGroupToInviteFeedUserModal.nat
 import ScenesMediaPlayer, { ScenesMediaProgressBar } from './ScenesMediaPlayer.native';
 import { fitContainBox, intrinsicRatio } from '../utils/mediaAspectRatio';
 import { getCollectionsForPost } from '../api/collections';
+import { updatePost as apiUpdatePost } from '../api/client';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import {
     getGlobalVideoMutedNative,
@@ -1203,8 +1204,34 @@ export default function ScenesViewer({
                     setOverflowVisible(false);
                 }}
                 onReport={async () => {
-                    const { promptReportPostNative } = await import('../utils/promptReportPostNative');
-                    promptReportPostNative(activePost.id, () => setOverflowVisible(false));
+                    const reported = activePost;
+                    const { openReportPost } = await import('../utils/reportPostSession');
+                    openReportPost({
+                        postId: reported.id,
+                        authorHandle: reported.userHandle,
+                        onHide: async () => {
+                            await hideFeedPostMobile(viewerUserId, reported.id);
+                            const next = posts.filter((p) => p.id !== reported.id);
+                            onPostsChange?.(next);
+                            if (next.length === 0) onClose();
+                            else setActiveIndex((i) => Math.min(i, next.length - 1));
+                        },
+                        onMute: async () => {
+                            await muteFeedAuthorMobile(viewerUserId, reported.userHandle);
+                            const next = posts.filter((p) => p.userHandle !== reported.userHandle);
+                            onPostsChange?.(next);
+                            if (next.length === 0) onClose();
+                        },
+                        onBlock: async () => {
+                            if (viewerHandle) {
+                                await blockUser(viewerHandle, reported.userHandle);
+                                await blockFeedAuthorMobile(viewerUserId, reported.userHandle);
+                            }
+                            const next = posts.filter((p) => p.userHandle !== reported.userHandle);
+                            onPostsChange?.(next);
+                            if (next.length === 0) onClose();
+                        },
+                    });
                 }}
             />
 
@@ -1262,12 +1289,10 @@ export default function ScenesViewer({
                     visible={!!editPost}
                     onClose={() => setEditPost(null)}
                     onSave={async (text, location, venue, landmark) => {
-                        patchPost(editPost.id, {
-                            text,
-                            locationLabel: location,
-                            venue: venue || undefined,
-                            landmark: landmark || undefined,
-                        });
+                        await apiUpdatePost(editPost.id, { text, location, venue, landmark });
+                        patchPost(editPost.id, (p) =>
+                            applyEditedPostFields(p, { text, location, venue, landmark }),
+                        );
                         setEditPost(null);
                     }}
                 />

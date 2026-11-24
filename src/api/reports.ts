@@ -27,10 +27,21 @@ export function getReportReasonOptions(): Array<{ id: ReportPostReason; label: s
     }));
 }
 
+export function reportReasonLabel(reason: ReportPostReason): string {
+    return REASON_LABELS[reason];
+}
+
+export type ReportPostAnswer = {
+    question: string;
+    answer: string;
+    choiceId: string;
+};
+
 export async function reportPost(
     postId: string,
     reason: ReportPostReason = 'other',
     details?: string,
+    answers?: ReportPostAnswer[],
 ): Promise<void> {
     if (!isLaravelApiEnabled()) {
         return;
@@ -40,6 +51,7 @@ export async function reportPost(
         body: JSON.stringify({
             reason,
             details: details?.trim() || undefined,
+            answers: answers && answers.length > 0 ? answers : undefined,
         }),
     });
 }

@@ -36,6 +36,7 @@ import StoriesScreen from './src/screens/StoriesScreen';
 import ViewProfileScreen from './src/screens/ViewProfileScreen';
 import CreateScreen from './src/screens/CreateScreen';
 import InstantCreateScreen from './src/screens/InstantCreateScreen';
+import ReportPostSheetHost from './src/components/ReportPostSheet.native';
 import { GAZETTEER_ABYSS } from './src/theme/gazetteerAmbientNative';
 import GalleryPreviewScreen from './src/screens/GalleryPreviewScreen';
 import InstantFiltersScreen from './src/screens/InstantFiltersScreen';
@@ -381,6 +382,7 @@ function App(): React.JSX.Element {
         <NotificationPermissionModal />
         <BoostActivatedModal />
         <GazetteerAlertHost />
+        <ReportPostSheetHost />
         <View style={styles.appRoot}>
         <NavigationContainer
           ref={navigationRef}

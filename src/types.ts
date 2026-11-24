@@ -148,6 +148,8 @@ export type Post = {
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
   caption?: string; // Caption/description for image/video posts
+  /** Copy the feed actually paints. Kept in sync with caption/text when a post is edited. */
+  captionText?: string;
   /** Link card resolved from the first URL in the text (server-persisted or composer-supplied). */
   linkPreview?: LinkPreview;
   createdAt: number; // Epoch timestamp in milliseconds (like Date.now())

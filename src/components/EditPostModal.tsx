@@ -24,7 +24,7 @@ export default function EditPostModal({
 
     useEffect(() => {
         if (isOpen) {
-            setText(post.text || post.text_content || '');
+            setText(post.captionText || post.caption || post.text || post.text_content || '');
             setLocation(post.locationLabel || '');
             setVenue(post.venue || '');
             setLandmark(post.landmark || '');

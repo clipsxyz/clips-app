@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     StyleSheet,
@@ -10,7 +10,6 @@ import {
     BottomSheetFooter,
     BottomSheetScrollView,
     BottomSheetTextInput,
-    BottomSheetView,
     type BottomSheetFooterProps,
 } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -22,6 +21,8 @@ import {
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
+import { getPostBodyText, isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
+import { getPostDisplayCaption } from '../utils/feedPostMeta';
 
 const TEXT_MAX = 500;
 
@@ -40,30 +41,42 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
     const [landmark, setLandmark] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const draftRef = useRef({ text, location, venue, landmark });
+    draftRef.current = { text, location, venue, landmark };
+    const savingRef = useRef(false);
+    const postRef = useRef(post);
+    postRef.current = post;
+    const textOnly = isTextOnlyPost(post);
 
     useEffect(() => {
         if (!visible) return;
-        setText(post.text || post.caption || '');
-        setLocation(post.locationLabel || '');
-        setVenue(post.venue || '');
-        setLandmark(post.landmark || '');
+        const current = postRef.current;
+        setText(isTextOnlyPost(current) ? getPostBodyText(current) : getPostDisplayCaption(current));
+        setLocation(current.locationLabel || '');
+        setVenue(current.venue || '');
+        setLandmark(current.landmark || '');
         setError(null);
-    }, [visible, post]);
+    }, [visible, post.id]);
 
     const handleSave = async () => {
-        if (isSaving) return;
+        if (savingRef.current) return;
+        const draft = draftRef.current;
+        savingRef.current = true;
         setError(null);
         setIsSaving(true);
         try {
-            await onSave(text.trim(), location.trim(), venue.trim(), landmark.trim());
+            await onSave(draft.text.trim(), draft.location.trim(), draft.venue.trim(), draft.landmark.trim());
             onClose();
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Failed to update post';
             setError(message);
         } finally {
+            savingRef.current = false;
             setIsSaving(false);
         }
     };
+    const saveRef = useRef(handleSave);
+    saveRef.current = handleSave;
 
     const renderFooter = useCallback(
         (props: BottomSheetFooterProps) => (
@@ -78,7 +91,7 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]}
-                        onPress={() => void handleSave()}
+                        onPress={() => void saveRef.current()}
                         disabled={isSaving}
                     >
                         {isSaving ? (
@@ -90,7 +103,7 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
                 </View>
             </BottomSheetFooter>
         ),
-        [insets.bottom, isSaving, onClose, text, location, venue, landmark],
+        [insets.bottom, isSaving, onClose],
     );
 
     return (
@@ -107,24 +120,33 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
             keyboardBlurBehavior="restore"
             android_keyboardInputMode="adjustResize"
         >
-            <BottomSheetView style={styles.header}>
-                <Text style={styles.title}>Edit Post</Text>
-                <TouchableOpacity onPress={onClose} disabled={isSaving} hitSlop={12}>
-                    <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
-                </TouchableOpacity>
-            </BottomSheetView>
-
             <BottomSheetScrollView
                 contentContainerStyle={styles.scroll}
                 keyboardShouldPersistTaps="handled"
             >
+                <View style={styles.header}>
+                    <Text style={styles.title} numberOfLines={1}>
+                        Edit Post
+                    </Text>
+                    <TouchableOpacity
+                        style={styles.closeBtn}
+                        onPress={onClose}
+                        disabled={isSaving}
+                        hitSlop={12}
+                        accessibilityRole="button"
+                        accessibilityLabel="Close"
+                    >
+                        <Icon name="close" size={22} color={UCL_TEXT_PRIMARY} />
+                    </TouchableOpacity>
+                </View>
+
                 {error ? (
                     <View style={styles.errorBox}>
                         <Text style={styles.errorText}>{error}</Text>
                     </View>
                 ) : null}
 
-                <Text style={styles.label}>Text</Text>
+                <Text style={styles.label}>{textOnly ? 'Text' : 'Caption'}</Text>
                 <BottomSheetTextInput
                     style={[styles.input, styles.textArea]}
                     value={text}
@@ -188,14 +210,21 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
+        gap: 12,
+        paddingTop: 4,
         paddingBottom: 12,
     },
     title: {
+        flex: 1,
         color: UCL_TEXT_PRIMARY,
         fontSize: 18,
         fontWeight: '600',
+    },
+    closeBtn: {
+        width: 36,
+        height: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     scroll: {
         paddingHorizontal: 16,

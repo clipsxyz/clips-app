@@ -215,7 +215,7 @@ import {
 import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
 import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native';
-import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
+import { applyEditedPostFields, getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import FeedOverlayHost from '../components/FeedOverlayHost.native';
 import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
@@ -1918,6 +1918,12 @@ onBlock={onBlockUser}
         a.videoPosterUrl === b.videoPosterUrl &&
         a.templateId === b.templateId &&
         a.text === b.text &&
+        a.caption === b.caption &&
+        a.captionText === b.captionText &&
+        a.imageText === b.imageText &&
+        a.locationLabel === b.locationLabel &&
+        a.venue === b.venue &&
+        a.landmark === b.landmark &&
         textStylesEqual(a.textStyle, b.textStyle) &&
         a.isBoosted === b.isBoosted &&
         a.originalUserHandle === b.originalUserHandle &&
@@ -3287,14 +3293,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const applyPostEditToFeed = React.useCallback(
         (postId: string, fields: { text: string; location: string; venue: string; landmark: string }) => {
-            const patch = (p: Post): Post => ({
-                ...p,
-                text: fields.text,
-                caption: fields.text,
-                locationLabel: fields.location || undefined,
-                venue: fields.venue || undefined,
-                landmark: fields.landmark || undefined,
-            });
+            const patch = (p: Post): Post => applyEditedPostFields(p, fields);
             updatePost(postId, patch);
             setEditPost((prev) => (prev?.id === postId ? patch(prev) : prev));
             setOverflowPost((prev) => (prev?.id === postId ? patch(prev) : prev));
@@ -5655,8 +5654,20 @@ onVisitProfile={() =>
                         ]);
                     }}
                     onReportUser={async () => {
-                        const { promptReportPostNative } = await import('../utils/promptReportPostNative');
-                        promptReportPostNative(mergedPost.id);
+                        const { openReportPost } = await import('../utils/reportPostSession');
+                        openReportPost({
+                            postId: mergedPost.id,
+                            authorHandle: mergedPost.userHandle,
+                            onHide: () => hidePostFromFeed(mergedPost.id),
+                            onMute: () => hideUserFromFeed(mergedPost.userHandle),
+                            onBlock: async () => {
+                                if (user?.handle) {
+                                    await blockUser(user.handle, mergedPost.userHandle);
+                                    await blockFeedAuthorMobile(userId, mergedPost.userHandle);
+                                }
+                                hideUserFromFeed(mergedPost.userHandle);
+                            },
+                        });
                     }}
                     onShareToStories={() => openShareToStoriesForPost(mergedPost)}
                     isCurrentUser={user?.handle === mergedPost.userHandle}
@@ -5682,6 +5693,7 @@ onVisitProfile={() =>
             tryReclipPost,
             toggleCollectionsSaveForPost,
             hideUserFromFeed,
+            hidePostFromFeed,
             isFeedFocused,
             feedVideoMuted,
             scenesViewerActive,
@@ -6339,9 +6351,22 @@ onVisitProfile={() =>
                     setDeleteTarget({ id: overflowPost.id, handle: user.handle });
                 }}
                 onReport={async () => {
-                    if (!overflowPost) return;
-                    const { promptReportPostNative } = await import('../utils/promptReportPostNative');
-                    promptReportPostNative(overflowPost.id, () => setOverflowVisible(false));
+                    const post = overflowPost;
+                    if (!post) return;
+                    const { openReportPost } = await import('../utils/reportPostSession');
+                    openReportPost({
+                        postId: post.id,
+                        authorHandle: post.userHandle,
+                        onHide: () => hidePostFromFeed(post.id),
+                        onMute: () => hideUserFromFeed(post.userHandle),
+                        onBlock: async () => {
+                            if (user?.handle) {
+                                await blockUser(user.handle, post.userHandle);
+                                await blockFeedAuthorMobile(userId, post.userHandle);
+                            }
+                            hideUserFromFeed(post.userHandle);
+                        },
+                    });
                 }}
                 onBlock={() =>
                     new Promise<void>((resolve) => {
@@ -6462,8 +6487,8 @@ onVisitProfile={() =>
                             await apiUpdatePost(target.id, {
                                 text,
                                 location,
-                                venue: venue || undefined,
-                                landmark: landmark || undefined,
+                                venue,
+                                landmark,
                             });
                         } catch (err: unknown) {
                             const msg = err instanceof Error ? err.message : '';

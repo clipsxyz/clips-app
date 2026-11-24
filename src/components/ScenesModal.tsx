@@ -2509,7 +2509,42 @@ export default function ScenesModal({
                     onClose={() => setMenuOpen(false)}
                     onShare={onShare}
                     onReport={() => {
-                        console.log('Report post from Scenes:', post.id);
+                        const viewerId = user ? getStableUserId(user) : '';
+                        void import('../utils/reportPostSession').then(({ openReportPost }) => {
+                            openReportPost({
+                                postId: post.id,
+                                authorHandle: post.userHandle,
+                                onHide: async () => {
+                                    if (viewerId) {
+                                        const { hideFeedPostWeb } = await import('../utils/feedContentPrefsWeb');
+                                        await hideFeedPostWeb(viewerId, post.id);
+                                    }
+                                    onClose();
+                                },
+                                onMute: async () => {
+                                    if (viewerId) {
+                                        const { muteFeedAuthorWeb } = await import('../utils/feedContentPrefsWeb');
+                                        await muteFeedAuthorWeb(viewerId, post.userHandle);
+                                    }
+                                    onClose();
+                                },
+                                onBlock: async () => {
+                                    if (viewerId) {
+                                        const { blockFeedAuthorWeb } = await import('../utils/feedContentPrefsWeb');
+                                        await blockFeedAuthorWeb(viewerId, post.userHandle);
+                                    }
+                                    if (user?.handle) {
+                                        const { blockUser } = await import('../api/messages');
+                                        try {
+                                            await blockUser(user.handle, post.userHandle);
+                                        } catch {
+                                            /* DM block map is best-effort */
+                                        }
+                                    }
+                                    onClose();
+                                },
+                            });
+                        });
                     }}
                     onUnfollow={async () => {
                         await onFollow();

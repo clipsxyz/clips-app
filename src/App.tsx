@@ -1603,8 +1603,31 @@ function PostHeader({
     }
     if (subjectIsViewer) return;
     setProfileMenuOpen(false);
-    const { promptReportPostWeb } = await import('./utils/promptReportPostWeb');
-    await promptReportPostWeb(post.id);
+    const { openReportPost } = await import('./utils/reportPostSession');
+    const viewerId = user ? getStableUserId(user) : '';
+    openReportPost({
+      postId: post.id,
+      authorHandle: post.userHandle,
+      onHide: async () => {
+        if (viewerId) await hideFeedPostWeb(viewerId, post.id);
+        onHidePost?.(post.id);
+      },
+      onMute: async () => {
+        if (viewerId) await muteFeedAuthorWeb(viewerId, post.userHandle);
+        onMuteAuthor?.(post.userHandle);
+      },
+      onBlock: async () => {
+        if (viewerId) await blockFeedAuthorWeb(viewerId, post.userHandle);
+        if (user?.handle) {
+          try {
+            await blockUser(user.handle, post.userHandle);
+          } catch {
+            /* DM block map is best-effort */
+          }
+        }
+        onBlockAuthor?.(post.userHandle);
+      },
+    });
   };
 
   // Re-check active stories when the quick-actions card opens, so visibility stays accurate.
@@ -5594,8 +5617,29 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             onClose={() => setMenuOpen(false)}
             onShare={onShare}
             onReport={async () => {
-              const { promptReportPostWeb } = await import('./utils/promptReportPostWeb');
-              await promptReportPostWeb(post.id);
+              const { openReportPost } = await import('./utils/reportPostSession');
+              const viewerId = user ? getStableUserId(user) : '';
+              openReportPost({
+                postId: post.id,
+                authorHandle: post.userHandle,
+                onHide: async () => {
+                  if (viewerId) await hideFeedPostWeb(viewerId, post.id);
+                  onHidePost?.(post.id);
+                },
+                onMute: async () => {
+                  if (viewerId) await muteFeedAuthorWeb(viewerId, post.userHandle);
+                  onMuteAuthor?.(post.userHandle);
+                },
+                onBlock: async () => {
+                  if (viewerId) await blockFeedAuthorWeb(viewerId, post.userHandle);
+                  try {
+                    await blockUser(user.handle, post.userHandle);
+                  } catch {
+                    /* DM block map is best-effort */
+                  }
+                  onBlockAuthor?.(post.userHandle);
+                },
+              });
               setMenuOpen(false);
             }}
             onUnfollow={onFollow ? async () => { await onFollow(); } : undefined}
@@ -7705,6 +7749,9 @@ function FeedPageWrapper() {
             ...p,
             text: text !== undefined ? text : p.text,
             text_content: text !== undefined ? text : p.text_content,
+            caption: text !== undefined ? text : p.caption,
+            captionText: text !== undefined ? text : p.captionText,
+            imageText: text !== undefined && !p.mediaUrl ? text : p.imageText,
             locationLabel: location !== undefined ? location : p.locationLabel,
             venue: venue !== undefined ? venue : p.venue,
             landmark: landmark !== undefined ? landmark : p.landmark
