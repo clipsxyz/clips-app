@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiUserMinus, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation, FiFlag, FiSlash } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiUserMinus, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation, FiFlag, FiSlash, FiMaximize2, FiRefreshCw } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -2709,6 +2709,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const carouselVideoRefs = React.useRef<Array<HTMLVideoElement | null>>([]);
   const feedVideoInViewRef = React.useRef(false);
+  const feedPlayCountRef = React.useRef(0);
+  const feedTwoPlayHoldRef = React.useRef(false);
+  const [feedTwoPlayHold, setFeedTwoPlayHold] = React.useState(false);
   const imageRef = React.useRef<HTMLImageElement>(null);
   const observerRef = React.useRef<IntersectionObserver | null>(null);
   const mediaContainerRef = React.useRef<HTMLDivElement>(null);
@@ -3073,6 +3076,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     if (active) videoRef.current = active;
     pauseCarouselExcept(activeIndex);
     if (!feedVideoInViewRef.current || items[activeIndex]?.type !== 'video' || !active) return;
+    if (feedTwoPlayHoldRef.current) {
+      active.pause();
+      setIsPlaying(false);
+      return;
+    }
     if (isFeedAudioHeld()) {
       active.pause();
       setIsPlaying(false);
@@ -3166,7 +3174,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   const visibilityGate = true;
                   pauseCarouselExcept(activeIndex);
                   if (v) v.preload = 'auto';
-                  if (allowAutoplay && visibilityGate) {
+                  if (feedTwoPlayHoldRef.current) {
+                    v.pause();
+                    setIsPlaying(false);
+                  } else if (allowAutoplay && visibilityGate) {
                     const now = Date.now();
                     const sinceLast = now - lastFeedAutoplayAtMs;
                     const minGapMs = 320;
@@ -3203,6 +3214,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 }
               } else {
                 feedVideoInViewRef.current = false;
+                feedPlayCountRef.current = 0;
+                feedTwoPlayHoldRef.current = false;
+                setFeedTwoPlayHold(false);
                 pauseCarouselExcept(-1);
                 const v = videoRef.current;
                 if (v) {
@@ -3691,6 +3705,53 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [aspectRatio, carouselFrameAspectRatio, hasMultipleItems, currentItem?.type, currentItem?.url, imageSizeTick]);
 
+  const replayFeedClip = React.useCallback(() => {
+    feedPlayCountRef.current = 0;
+    feedTwoPlayHoldRef.current = false;
+    setFeedTwoPlayHold(false);
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      v.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    v.play().catch(() => {});
+    setIsPlaying(true);
+  }, []);
+
+  const handleFeedVideoEnded = React.useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    const active = videoRef.current;
+    if (active && v !== active) return;
+    if (!feedVideoInViewRef.current || feedTwoPlayHoldRef.current) return;
+    const next = feedPlayCountRef.current + 1;
+    feedPlayCountRef.current = next;
+    if (next < 2) {
+      try {
+        v.currentTime = 0;
+        v.play().catch(() => {});
+      } catch {
+        /* player may already be released */
+      }
+      return;
+    }
+    feedTwoPlayHoldRef.current = true;
+    setFeedTwoPlayHold(true);
+    const endAt = v.duration > 0.2 ? Math.max(0, v.duration - 0.05) : 0;
+    try {
+      if (endAt > 0) v.currentTime = endAt;
+    } catch {
+      /* keep the frame the video already stopped on */
+    }
+    try {
+      v.pause();
+    } catch {
+      /* ignore */
+    }
+    setIsPlaying(false);
+  }, []);
+
   const handleOpenScenesPress = React.useCallback(() => {
     const now = Date.now();
     if (now - openScenesCooldownRef.current < 450) return;
@@ -3795,10 +3856,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   preload={mountVideoSrc ? 'metadata' : 'none'}
                   playsInline
                   muted={isMuted}
-                  loop
                   draggable={false}
                   onContextMenu={(e) => e.preventDefault()}
                   controlsList="nodownload noremoteplayback"
+                  onEnded={handleFeedVideoEnded}
                   onLoadedMetadata={() => {
                     if (slideIndex !== currentIndexRef.current) return;
                     handleVideoLoad();
@@ -3941,7 +4002,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               preload={mountVideoSrc ? 'metadata' : 'none'}
               playsInline
               muted={isMuted}
-              loop
               draggable={false}
               onContextMenu={(e) => e.preventDefault()}
               controlsList="nodownload noremoteplayback"
@@ -3966,6 +4026,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   setProgress(v.currentTime / v.duration);
                 }
               }}
+              onEnded={handleFeedVideoEnded}
             >
               {/* Enable built-in captions if subtitles are enabled */}
               {subtitlesEnabled && (
@@ -4055,6 +4116,35 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             ))}
           </>
         )}
+
+        {feedTwoPlayHold && currentItem?.type === 'video' ? (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/35">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                handleOpenScenesPress();
+              }}
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-white px-5 text-[15px] font-bold text-[#111111]"
+            >
+              <FiMaximize2 size={18} />
+              View in full screen
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                replayFeedClip();
+              }}
+              className="mt-3.5 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[15px] font-semibold text-white"
+            >
+              <FiRefreshCw size={16} />
+              Replay
+            </button>
+          </div>
+        ) : null}
 
         {currentItem?.type === 'video' ? (
           <button
