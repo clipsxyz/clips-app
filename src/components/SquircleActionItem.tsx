@@ -39,7 +39,7 @@ export default function SquircleActionItem({
                     e.stopPropagation();
                     if (!disabled) onPress();
                 }}
-                className={`flex h-11 w-11 items-center justify-center rounded-[13px] shadow-[0_3px_6px_rgba(0,0,0,0.28)] transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] active:scale-[0.86] disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`flex h-11 w-11 items-center justify-center rounded-[13px] transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] active:scale-[0.86] disabled:cursor-not-allowed disabled:opacity-40 ${
                     highlight ? 'bg-[#FFF5B8]' : 'bg-white'
                 }`}
             >
@@ -47,7 +47,6 @@ export default function SquircleActionItem({
             </button>
             <span
                 className="mt-[5px] text-center text-[12px] font-bold leading-none text-white"
-                style={{ textShadow: '0 1px 4px rgba(0, 0, 0, 0.85)' }}
             >
                 {label}
             </span>

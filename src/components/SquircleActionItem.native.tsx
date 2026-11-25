@@ -70,11 +70,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#FFFFFF',
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.28,
-        shadowRadius: 6,
-        elevation: 5,
+        elevation: 0,
     },
     highlight: {
         backgroundColor: '#FFF5B8',
@@ -88,8 +84,5 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '700',
         textAlign: 'center',
-        textShadowColor: 'rgba(0, 0, 0, 0.85)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 4,
     },
 });
