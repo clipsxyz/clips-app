@@ -209,6 +209,32 @@ export default function ScenesMediaPlayer({
         }
     }, [onSlideIndexChange, onSlideProgress, safeIndex, slides]);
 
+    useEffect(() => {
+        const player =
+            videoRef && typeof videoRef === 'object' && 'current' in videoRef
+                ? (videoRef.current as
+                      | (VideoRef & {
+                            setVolume?: (volume: number) => void;
+                            pause?: () => void;
+                            resume?: () => void;
+                        })
+                      | null)
+                : null;
+        if (!player) return;
+        // This phone keeps ExoPlayer audible after a later `paused` or `muted` prop.
+        try {
+            if (paused) {
+                player.setVolume?.(0);
+                player.pause?.();
+            } else {
+                player.setVolume?.(muted ? 0 : 1);
+                player.resume?.();
+            }
+        } catch {
+            /* player already released */
+        }
+    }, [muted, paused, videoRef]);
+
     const onCarouselScrollEnd = useCallback(
         (e: NativeSyntheticEvent<NativeScrollEvent>) => {
             if (!hasCarousel || !width) return;

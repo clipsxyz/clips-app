@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import { gazetteerAlert } from '../utils/gazetteerAlertNative';
 import { isAbortLikeError } from '../utils/abortSafe';
 import {
@@ -148,6 +149,7 @@ export default function ScenesViewer({
     onBoost,
 }: ScenesViewerProps) {
     const insets = useSafeAreaInsets();
+    const isViewerFocused = useIsFocused();
     // Reactive (not Dimensions.get) so the media viewport tracks rotation/resize.
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const mediaHeightSv = useSharedValue(windowHeight);
@@ -844,7 +846,7 @@ export default function ScenesViewer({
                                     key={activePost.id}
                                     post={activePost}
                                     isActive
-                                    paused={paused}
+                                    paused={paused || !isViewerFocused}
                                     muted={muted}
                                     volume={muted ? 0 : 1}
                                     width={windowWidth}
