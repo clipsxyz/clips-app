@@ -2004,6 +2004,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (active) {
                 activeVideoPostIdRef.current = null;
                 setActiveFeedVideoPostId(null);
+                setFeedAudioFocusPostId(null);
+                setFeedPreloadPostIds([]);
             }
         });
     }, []);
@@ -2136,11 +2138,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
      * open, cleared when Feed regains focus.
      */
     const [heldVideoPostId, setHeldVideoPostId] = useState<string | null>(null);
-    /** Feed under Scenes / image fullscreen — kill ExoPlayer so audio cannot leak.
-     *  Comments-sheet suspend is owned by feedOverlayStoreNative (FeedPostMedia subscribes). */
-    const feedNativeVideoSuspended =
-        (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost)) &&
-        !heldVideoPostId;
+    /**
+     * Feed under Scenes / image fullscreen, or the feed tab is not frontmost.
+     * A paused TextureView still outputs audio on this phone, so every card except the
+     * one held for resume is unmounted. The held card stays mounted but is forced silent.
+     * Comments-sheet suspend is owned by feedOverlayStoreNative (FeedPostMedia subscribes).
+     */
+    const feedPlaybackCovered =
+        !isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost);
+    const feedNativeVideoSuspended = feedPlaybackCovered;
     const [shareToStoriesPost, setShareToStoriesPost] = useState<Post | null>(null);
     /** Which confirm card is still waiting. Cleared once the viewer shares or cancels. */
     const shareConfirmPostIdRef = useRef<string | null>(null);
@@ -2593,6 +2599,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         activeVideoPostIdRef.current = null;
         setActiveFeedVideoPostId(null);
+        setFeedAudioFocusPostId(null);
+        setFeedPreloadPostIds([]);
     }, [scenesViewerActive, imageFullscreenPost]);
 
     const scheduleActiveFeedVideo = useCallback((postId: string | null, force = false) => {
@@ -2775,7 +2783,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 if (!token.isViewable || !token.item || token.item.kind !== 'post') continue;
                 recordFeedViewRef.current(String(token.item.post.id));
             }
-            if (!feedAutoplayAllowedRef.current) {
+            if (!feedAutoplayAllowedRef.current || feedAutoplayOverlayBlocks()) {
                 setFeedAudioFocusPostId(null);
                 setFeedPreloadPostIds([]);
                 scheduleActiveFeedVideoRef.current(null);
@@ -5339,8 +5347,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     key={mergedPost.id}
                     post={mergedPost}
                     feedVideoMuted={feedVideoMuted}
-                    suspendNativeVideo={feedNativeVideoSuspended}
+                    suspendNativeVideo={
+                        feedPlaybackCovered &&
+                        !(
+                            heldVideoPostId != null &&
+                            String(mergedPost.id) === heldVideoPostId
+                        )
+                    }
                     holdNativeVideo={
+                        feedPlaybackCovered &&
                         heldVideoPostId != null &&
                         String(mergedPost.id) === heldVideoPostId
                     }
@@ -5551,6 +5566,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         imageFullscreenPostRef.current = opened;
                         activeVideoPostIdRef.current = null;
                         setActiveFeedVideoPostId(null);
+                        setFeedAudioFocusPostId(null);
+                        setFeedPreloadPostIds([]);
                         // Hold this card's player only when it actually has video media (a
                         // mixed carousel can reach a video slide); image-only posts let every
                         // feed surface suspend as before.
@@ -5615,6 +5632,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         setHeldVideoPostId(String(opened.id));
                         activeVideoPostIdRef.current = null;
                         setActiveFeedVideoPostId(null);
+                        setFeedAudioFocusPostId(null);
+                        setFeedPreloadPostIds([]);
                         const handoff = peekFeedVideoHandoff(opened.id);
                         const scenesFeedLabel = showFollowingFeed
                             ? 'Following'
@@ -5761,6 +5780,7 @@ onVisitProfile={() =>
             isFeedFocused,
             feedVideoMuted,
             scenesViewerActive,
+            feedPlaybackCovered,
             feedNativeVideoSuspended,
             heldVideoPostId,
             pendingUploadTick,

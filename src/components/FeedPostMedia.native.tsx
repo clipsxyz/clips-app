@@ -230,6 +230,31 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
         });
     }, [mode, postId]);
 
+    // Prop updates to `muted` / `volume` are ignored by ExoPlayer on this phone once a
+    // clip has started with sound. Push the level through the player ref as well, and
+    // pause when the card is held under full screen so that player cannot keep talking
+    // after the full-screen clip is muted.
+    useEffect(() => {
+        const player =
+            videoRef && typeof videoRef === 'object' && 'current' in videoRef
+                ? (videoRef.current as
+                      | (VideoRef & {
+                            setVolume?: (volume: number) => void;
+                            pause?: () => void;
+                        })
+                      | null)
+                : null;
+        if (!player) return;
+        const silent = muted || !soundOn;
+        const heldPaused = paused || (mode === 'feed' && scrollPaused);
+        try {
+            player.setVolume?.(silent ? 0 : 1);
+            if (silent && heldPaused) player.pause?.();
+        } catch {
+            /* player already released */
+        }
+    }, [mode, muted, paused, scrollPaused, soundOn, videoRef]);
+
     /**
      * The hold is applied in the same tick as the list event — no animation-frame deferral.
      *
@@ -1430,7 +1455,11 @@ const FeedPostMedia = React.memo(
                         ? paused || !propIsActive
                         : !isAudioPrimary || slideDragHeld || feedVideoHeld || feedTwoPlayHold
                 }
-                muted={viewerSurface ? muted || !propIsActive : !soundOn || !videoSurfaceReady}
+                muted={
+                    viewerSurface
+                        ? muted || !propIsActive
+                        : feedVideoHeld || !soundOn || !videoSurfaceReady
+                }
                 soundOn={soundOn}
                 repeat={mode !== 'feed'}
                 mode={mode}
