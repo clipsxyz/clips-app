@@ -22,6 +22,7 @@ import type { Post } from '../types';
 import { incrementViews, toggleLike } from '../api/posts';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import { useGlobalVideoMuted } from '../utils/globalVideoMuteNative';
 
 type Props = {
     visible: boolean;
@@ -55,6 +56,7 @@ export default function ViewProfilePostsSheet({
     const [feedPosts, setFeedPosts] = useState<Post[]>(posts);
     const [commentsPost, setCommentsPost] = useState<Post | null>(null);
     const [sharePost, setSharePost] = useState<Post | null>(null);
+    const [playbackMuted] = useGlobalVideoMuted();
     const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
     const activeVideoPostIdRef = useRef<string | null>(null);
     activeVideoPostIdRef.current = activeVideoPostId;
@@ -187,7 +189,7 @@ export default function ViewProfilePostsSheet({
                     <FlatList
                         ref={listRef}
                         data={feedPosts}
-                        extraData={activeVideoPostId}
+                        extraData={`${activeVideoPostId ?? ''}:${playbackMuted ? 1 : 0}`}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         viewabilityConfig={viewabilityConfig}
@@ -214,6 +216,7 @@ export default function ViewProfilePostsSheet({
                                         String(activeVideoPostId) === String(item.id)
                                     }
                                     suspendNativeVideo={!isScreenFocused}
+                                    feedVideoMuted={playbackMuted}
                                     onLike={() => handleLike(item)}
                                     onView={async () => {
                                         if (!user?.id) return;

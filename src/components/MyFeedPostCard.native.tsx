@@ -24,6 +24,7 @@ import ShareToStoriesModal from './ShareToStoriesModal.native';
 import TaggedUsersBottomSheet from './TaggedUsersBottomSheet.native';
 import BoostMetricsPanel from './BoostMetricsPanel.native';
 import { getPostDisplayCaption } from '../utils/feedPostMeta';
+import { useGlobalVideoMuted } from '../utils/globalVideoMuteNative';
 import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
 import {
     FEED_CARD_BODY,
@@ -58,6 +59,7 @@ export default function MyFeedPostCard({
     const screenWidth = Dimensions.get('window').width;
     const cardWidth = screenWidth - 24;
     const cardMediaWidth = cardWidth - 24;
+    const [playbackMuted] = useGlobalVideoMuted();
     const [carouselIndex, setCarouselIndex] = useState(0);
     const [likesSheetVisible, setLikesSheetVisible] = useState(false);
     const [taggedSheetVisible, setTaggedSheetVisible] = useState(false);
@@ -146,7 +148,7 @@ export default function MyFeedPostCard({
                                 isActive={isActive}
                                 immediateVideoSurface={isActive}
                                 suspendNativeVideo={!isActive}
-                                muted={!isActive}
+                                muted={!isActive || playbackMuted}
                             />
                         </View>
                     ) : null}

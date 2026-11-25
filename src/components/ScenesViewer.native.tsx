@@ -57,6 +57,7 @@ import { updatePost as apiUpdatePost } from '../api/client';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import {
     getGlobalVideoMutedNative,
+    getGlobalVideoMutedNativeSync,
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
@@ -180,7 +181,7 @@ export default function ScenesViewer({
 
     const initialIndex = Math.max(0, posts.findIndex((p) => p.id === initialPostId));
     const [activeIndex, setActiveIndex] = useState(initialIndex);
-    const [muted, setMuted] = useState(initialMuted ?? true);
+    const [muted, setMuted] = useState(() => initialMuted ?? getGlobalVideoMutedNativeSync());
     const [paused, setPaused] = useState(false);
     const [progress, setProgress] = useState(0);
     const [commentsOpen, setCommentsOpen] = useState(false);
@@ -245,16 +246,14 @@ export default function ScenesViewer({
     }, []);
 
     useEffect(() => {
-        if (initialMuted !== undefined) {
-            setMuted(initialMuted);
-            return;
-        }
         let mounted = true;
         void getGlobalVideoMutedNative().then((m) => {
             if (mounted) setMuted(m);
         });
-        return subscribeGlobalVideoMuted((m) => setMuted(m));
-    }, [initialMuted]);
+        return subscribeGlobalVideoMuted((m) => {
+            if (mounted) setMuted(m);
+        });
+    }, []);
 
     useEffect(() => {
         if (initialVideoTime != null && initialVideoTime > 0) {

@@ -41,6 +41,7 @@ import FeedCaptionText from './FeedCaptionText.native';
 import { useAuth } from '../context/Auth';
 import { ox } from '../constants/nativeOpticalScale';
 import { getPostDisplayCaption } from '../utils/feedPostMeta';
+import { useGlobalVideoMuted } from '../utils/globalVideoMuteNative';
 
 /**
  * Fast fade-rise into fullscreen. Short travel so the open does not feel sticky.
@@ -178,9 +179,7 @@ export default function ImageFullscreenModal({
     const displayCaption = post && !isTextOnly ? getPostDisplayCaption(post) : '';
     const hasVideoSlide = slides.some((s) => s.kind === 'video');
 
-    // Autoplay with sound is hostile, and the app already has a global feed mute concept, so
-    // fullscreen video starts muted and the user opts into audio explicitly.
-    const [videoMuted, setVideoMuted] = useState(true);
+    const [videoMuted, toggleVideoMuted] = useGlobalVideoMuted();
     const videoRef = useRef<VideoRef>(null);
 
     // Paused per slide rather than globally: off-screen slides must stop, otherwise every
@@ -436,6 +435,7 @@ export default function ImageFullscreenModal({
                         // Plays immediately on open: paused is false for the focused slide.
                         paused={slidePaused(slideIndex)}
                         muted={videoMuted}
+                        volume={videoMuted ? 0 : 1}
                         poster={slide.posterUrl}
                         posterResizeMode="cover"
                         repeat
@@ -505,7 +505,7 @@ export default function ImageFullscreenModal({
             {hasVideoSlide && !isTextOnly ? (
                 <Pressable
                     style={[styles.muteFab, { bottom: insets.bottom + 18 }]}
-                    onPress={() => setVideoMuted((m) => !m)}
+                    onPress={toggleVideoMuted}
                     hitSlop={10}
                     accessibilityLabel={videoMuted ? 'Unmute video' : 'Mute video'}
                 >

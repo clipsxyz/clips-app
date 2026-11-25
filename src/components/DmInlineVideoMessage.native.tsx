@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Modal,
@@ -20,6 +20,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { useDmTapSuppressed } from './DmMessagePressable.native';
+import { useGlobalVideoMuted } from '../utils/globalVideoMuteNative';
 
 type Props = {
     uri: string;
@@ -56,6 +57,7 @@ export default function DmInlineVideoMessage({
     onOpenFullscreen,
 }: Props) {
     const videoRef = useRef<VideoRef>(null);
+    const fullscreenVideoRef = useRef<VideoRef>(null);
     const suppressTap = useDmTapSuppressed();
     const [started, setStarted] = useState(false);
     const [userPaused, setUserPaused] = useState(false);
@@ -66,6 +68,20 @@ export default function DmInlineVideoMessage({
     const [duration, setDuration] = useState(0);
     const [position, setPosition] = useState(0);
     const [fullscreen, setFullscreen] = useState(false);
+    const [playbackMuted, togglePlaybackMuted] = useGlobalVideoMuted();
+    const audible = started && !playbackMuted;
+
+    useEffect(() => {
+        const level = audible ? 1 : 0;
+        for (const ref of [videoRef, fullscreenVideoRef]) {
+            const player = ref.current as (VideoRef & { setVolume?: (volume: number) => void }) | null;
+            try {
+                player?.setVolume?.(level);
+            } catch {
+                /* player released */
+            }
+        }
+    }, [audible, fullscreen]);
 
     // Off-screen (scrolled away) or unfocused videos pause without losing the user's
     // play intent, so they resume automatically when the bubble returns to view.
@@ -164,7 +180,8 @@ export default function DmInlineVideoMessage({
                     source={{ uri }}
                     style={styles.fill}
                     paused={effectivePaused}
-                    muted={!started}
+                    muted={!audible}
+                    volume={audible ? 1 : 0}
                     repeat
                     resizeMode="cover"
                     controls={false}
@@ -196,6 +213,18 @@ export default function DmInlineVideoMessage({
 
             {started && !loading ? (
                 <View style={styles.controls} pointerEvents="box-none">
+                    <TouchableOpacity
+                        onPress={togglePlaybackMuted}
+                        style={styles.miniButton}
+                        hitSlop={8}
+                        accessibilityLabel={playbackMuted ? 'Unmute video' : 'Mute video'}
+                    >
+                        <Icon
+                            name={playbackMuted ? 'volume-mute' : 'volume-high'}
+                            size={ox(14)}
+                            color="#FFFFFF"
+                        />
+                    </TouchableOpacity>
                     <TouchableOpacity onPress={toggleInline} style={styles.miniButton} hitSlop={8}>
                         <Icon
                             name={effectivePaused ? 'play' : 'pause'}
@@ -235,16 +264,31 @@ export default function DmInlineVideoMessage({
                 <View style={styles.fsRoot}>
                     <StatusBar barStyle="light-content" backgroundColor="#000000" />
                     <Video
+                        ref={fullscreenVideoRef}
                         source={{ uri }}
                         style={styles.fsVideo}
                         paused={false}
-                        muted={false}
+                        muted={playbackMuted}
+                        volume={playbackMuted ? 0 : 1}
                         repeat
                         resizeMode="contain"
                         controls={false}
                         poster={poster}
                         posterResizeMode="contain"
                     />
+                    <TouchableOpacity
+                        style={styles.fsMute}
+                        onPress={togglePlaybackMuted}
+                        hitSlop={12}
+                        accessibilityLabel={playbackMuted ? 'Unmute video' : 'Mute video'}
+                        accessibilityRole="button"
+                    >
+                        <Icon
+                            name={playbackMuted ? 'volume-mute' : 'volume-high'}
+                            size={ox(22)}
+                            color="#FFFFFF"
+                        />
+                    </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.fsClose}
                         onPress={() => setFullscreen(false)}
@@ -364,6 +408,17 @@ const styles = StyleSheet.create({
     fsVideo: {
         width: '100%',
         height: '100%',
+    },
+    fsMute: {
+        position: 'absolute',
+        top: ox(44),
+        left: ox(16),
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     fsClose: {
         position: 'absolute',

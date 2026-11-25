@@ -29,6 +29,7 @@ import {
     siblingJpegFromVideoUrl,
 } from '../utils/postMedia';
 import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
+import { useGlobalVideoMuted } from '../utils/globalVideoMuteNative';
 import {
     getPostBodyText,
     getTextOnlyBackgroundColor,
@@ -274,7 +275,7 @@ export default function ProfileGridPeekSheet({
     const [ready, setReady] = useState(false);
     const [videoFrameReady, setVideoFrameReady] = useState(false);
     const [videoFailed, setVideoFailed] = useState(false);
-    const [cardMuted, setCardMuted] = useState(true);
+    const [cardMuted, toggleCardMuted] = useGlobalVideoMuted();
     const actionRows = actions ?? [
         { label: 'Add to Story', icon: 'sparkles-outline', onPress: () => onAddToStory?.() },
         { label: 'Share', icon: 'paper-plane-outline', onPress: () => onShare?.() },
@@ -291,7 +292,6 @@ export default function ProfileGridPeekSheet({
         setReady(false);
         setVideoFrameReady(false);
         setVideoFailed(false);
-        setCardMuted(true);
         Animated.timing(progress, {
             toValue: 1,
             duration: 420,
@@ -411,6 +411,7 @@ export default function ProfileGridPeekSheet({
                                         }}
                                         resizeMode="cover"
                                         muted={cardMuted}
+                                        volume={cardMuted ? 0 : 1}
                                         repeat
                                         paused={false}
                                         playInBackground={false}
@@ -448,7 +449,7 @@ export default function ProfileGridPeekSheet({
                     {video && playback ? (
                         <Pressable
                             style={styles.muteButton}
-                            onPress={() => setCardMuted((current) => !current)}
+                            onPress={toggleCardMuted}
                             accessibilityLabel={cardMuted ? 'Unmute video' : 'Mute video'}
                         >
                             <Icon

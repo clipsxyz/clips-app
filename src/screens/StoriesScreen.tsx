@@ -962,7 +962,6 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (!originalPost) return;
         setShowSharedPostModal(false);
         setPaused(true);
-        setIsMuted(true);
 
         // Scenes is video-only — still images + text use the fullscreen overlay (wired actions).
         if (postHasVideoMedia(originalPost)) {
@@ -976,12 +975,12 @@ export default function StoriesScreen({ route, navigation }: any) {
                                 initialPostId: post.id,
                                 posts: [post],
                                 feedLabel: 'Stories',
-                                initialMuted: true,
+                                initialMuted: isMuted,
                             });
                             navigation.navigate('Scenes', {
                                 initialPostId: post.id,
                                 feedLabel: 'Stories',
-                                initialMuted: true,
+                                initialMuted: isMuted,
                             });
                         }, 40);
                     });

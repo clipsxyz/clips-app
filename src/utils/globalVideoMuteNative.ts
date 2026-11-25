@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const GLOBAL_VIDEO_MUTED_KEY = 'clips:globalVideoMuted';
@@ -76,4 +77,22 @@ export async function setGlobalVideoMutedNative(muted: boolean): Promise<void> {
 export function subscribeGlobalVideoMuted(listener: Listener): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
+}
+
+/** Shared playback mute. Toggling it updates every video surface in this session. */
+export function useGlobalVideoMuted(): readonly [boolean, () => void] {
+    const [muted, setMuted] = useState(getGlobalVideoMutedNativeSync);
+    useEffect(() => {
+        let mounted = true;
+        void getGlobalVideoMutedNative().then((value) => {
+            if (mounted) setMuted(value);
+        });
+        return subscribeGlobalVideoMuted((value) => {
+            if (mounted) setMuted(value);
+        });
+    }, []);
+    const toggle = useCallback(() => {
+        void setGlobalVideoMutedNative(!getGlobalVideoMutedNativeSync());
+    }, []);
+    return [muted, toggle] as const;
 }
