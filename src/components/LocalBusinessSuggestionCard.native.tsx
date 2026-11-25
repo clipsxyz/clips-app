@@ -74,7 +74,7 @@ function MutedPreviewVideo({ url }: { url: string }) {
     <Video
       ref={videoRef}
       source={mockFeedVideoSource(url)}
-      style={StyleSheet.absoluteFill}
+      style={styles.coverFill}
       resizeMode="cover"
       paused={feedScrolling}
       muted
@@ -112,8 +112,7 @@ function FeaturedCover({
   const needsVideo =
     Boolean(preview?.isVideo) &&
     Boolean(videoUrl) &&
-    (isMockDemoVideoPath(videoUrl) || looksLikeVideoUrl(videoUrl)) &&
-    !stillIsImage;
+    (isMockDemoVideoPath(videoUrl) || looksLikeVideoUrl(videoUrl));
   const stillUri = stillIsImage ? resolvePublicMediaUrl(preview!.thumbnailUrl) || preview!.thumbnailUrl : '';
 
   const badge =
@@ -127,10 +126,10 @@ function FeaturedCover({
   if (needsVideo) {
     const playable = isMockDemoVideoPath(videoUrl) ? videoUrl : resolvePublicMediaUrl(videoUrl) || videoUrl;
     return (
-      <>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <MutedPreviewVideo url={playable} />
         {badge}
-      </>
+      </View>
     );
   }
   if (stillIsImage && !stillFailed && stillUri) {
@@ -219,8 +218,24 @@ export default function LocalBusinessSuggestionCard({
         };
       });
     }
-    return posts
-      .filter((post) => isBusinessAuthor(post))
+    const bestByHandle = new Map<string, Post>();
+    for (const post of posts.filter(isBusinessAuthor)) {
+      const key = normalizeHandle(post.userHandle);
+      if (!key) continue;
+      const current = bestByHandle.get(key);
+      if (!current) {
+        bestByHandle.set(key, post);
+        continue;
+      }
+      const nextHasMedia = Boolean(featuredPreviewFromPost(post));
+      const currentHasMedia = Boolean(featuredPreviewFromPost(current));
+      const nextViews = post.stats?.views ?? 0;
+      const currentViews = current.stats?.views ?? 0;
+      if ((nextHasMedia && !currentHasMedia) || (nextHasMedia === currentHasMedia && nextViews > currentViews)) {
+        bestByHandle.set(key, post);
+      }
+    }
+    return [...bestByHandle.values()]
       .slice(0, 8)
       .map((post) => {
         const own = normalizeHandle(post.userHandle) === normalizeHandle(viewerHandle);
@@ -445,6 +460,10 @@ const styles = StyleSheet.create({
   },
   cover: {
     ...StyleSheet.absoluteFillObject,
+  },
+  coverFill: {
+    width: '100%',
+    height: '100%',
   },
   viewsBadge: {
     position: 'absolute',

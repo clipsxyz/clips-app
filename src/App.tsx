@@ -8353,8 +8353,14 @@ function FeedPageWrapper() {
           suggestedFollowerSuggestion &&
           postCount === 3
         ) {
-          out.push({ type: 'suggested_follower', item: suggestedFollowerSuggestion, createdAt: 0 });
-          followerInserted = true;
+          const followerIsBusiness =
+            suggestedFollowerSuggestion.accountType === 'business' ||
+            suggestedFollowerSuggestion.representativePost.userAccountType === 'business';
+          const businessStripInFeed = flatWithSuggested.some((row) => row.type === 'local_business');
+          if (!(followerIsBusiness && businessStripInFeed)) {
+            out.push({ type: 'suggested_follower', item: suggestedFollowerSuggestion, createdAt: 0 });
+            followerInserted = true;
+          }
         }
       }
     }

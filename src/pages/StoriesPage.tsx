@@ -22,12 +22,13 @@ import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
 import { storyHasRenderableMedia } from '../utils/storyMediaNative';
 import { storyTextFontSize } from '../utils/storyTextStyleNative';
+import { isTextCardStyleId, TEXT_CARD_STYLES, textCardStyleBackground } from '../utils/textCardStyles';
+import { FEED_TEXT_CARD_FONT_WEB, feedTextCardType } from '../utils/textCardFeedType';
 import { StoryLinkStory } from '../components/stories/StoryLinkCard';
 import StoryProfileShareCard from '../components/stories/StoryProfileShareCard';
 import { profileShareHandleFromText } from '../utils/profileShareStory';
 import { extractFirstHttpUrl } from '../utils/linkPreview';
 import { siblingJpegFromVideoUrl } from '../utils/postMedia';
-import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow, fetchFollowing } from '../api/client';
 import { appendMessage } from '../api/messages';
 import { buildStoryDmText } from '../utils/dmStoryShare';
@@ -1949,8 +1950,18 @@ export default function StoriesPage() {
         !isCurrentStoryVisualShare && !(currentStory?.sharedFromPost && hasOriginalPostWithImageOrVideo);
     const sharedStoryAuthor = (currentStory?.sharedFromUser || '').trim();
     const sharedStoryAuthorDisplay = sharedStoryAuthor.startsWith('@') ? sharedStoryAuthor.slice(1) : sharedStoryAuthor;
+    const textShareShowsAuthor = Boolean(
+        currentStory?.sharedFromPost &&
+            originalPost &&
+            !hasOriginalPostWithImageOrVideo &&
+            (originalPost.text || '').trim() &&
+            (originalPost.userHandle || '').trim(),
+    );
     const showSharedStoryCredit =
-        !!sharedStoryAuthor && sharedStoryAuthor !== currentGroup?.userHandle && showExtraSharedFromBar;
+        !!sharedStoryAuthor &&
+        sharedStoryAuthor !== currentGroup?.userHandle &&
+        showExtraSharedFromBar &&
+        !textShareShowsAuthor;
     const isCurrentStoryVideo = Boolean(
         currentStory &&
             (currentStory.mediaType === 'video' ||
@@ -2188,129 +2199,69 @@ export default function StoriesPage() {
                                                 </div>
                                             );
                                         } else if (originalPost.text) {
-                                            const template = originalPost.templateId
-                                                ? TEXT_STORY_TEMPLATES.find((t) => t.id === originalPost.templateId)
-                                                : undefined;
-                                            const bg =
-                                                originalPost.textStyle?.background ??
-                                                template?.background ??
-                                                '#000000';
-                                            const textColor =
-                                                originalPost.textStyle?.color ??
-                                                template?.textColor ??
-                                                '#ffffff';
-                                            const fontFamily =
-                                                originalPost.textStyle?.fontFamily ?? template?.fontFamily ?? undefined;
+                                            const cardId = isTextCardStyleId(originalPost.cardStyle)
+                                                ? originalPost.cardStyle
+                                                : null;
+                                            const type = feedTextCardType(originalPost.text);
+                                            const textColor = cardId ? TEXT_CARD_STYLES[cardId].textColor : '#F1F5F9';
+                                            const authorHandle = (originalPost.userHandle || '').replace(/^@/, '').trim();
                                             return (
                                                 <div
-                                                    className="relative flex h-full w-full flex-col items-center justify-center p-6"
-                                                    style={{ backgroundColor: '#000000' }}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    className="relative flex h-full w-full flex-col items-center justify-center px-7 text-center"
+                                                    style={{
+                                                        background: cardId ? textCardStyleBackground(cardId) : '#121721',
+                                                        paddingTop: 'max(5.5rem, env(safe-area-inset-top))',
+                                                        paddingBottom: 'max(6.5rem, env(safe-area-inset-bottom))',
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setShowSharedPostModal(true);
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter' || e.key === ' ') {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            setShowSharedPostModal(true);
+                                                        }
+                                                    }}
                                                 >
-                                                    <div className="relative z-10 flex flex-col items-center">
-                                                        <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3 py-1 text-xs text-white/90">
-                                                            <span>Shared from</span>
-                                                            <span className="font-semibold">@{originalPost.userHandle}</span>
-                                                        </div>
-                                                        <div
-                                                            className="pointer-events-auto relative w-full max-w-xs cursor-pointer overflow-hidden rounded-2xl border-2 border-white/20 bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                                                    <span
+                                                        className="whitespace-pre-wrap break-words font-semibold"
+                                                        style={{
+                                                            color: textColor,
+                                                            fontFamily: FEED_TEXT_CARD_FONT_WEB,
+                                                            fontSize: type.fontSize,
+                                                            lineHeight: 1.25,
+                                                            letterSpacing: '-0.02em',
+                                                        }}
+                                                    >
+                                                        {originalPost.text}
+                                                    </span>
+                                                    {authorHandle ? (
+                                                        <button
+                                                            type="button"
+                                                            className="mt-6 inline-flex max-w-full items-center gap-2"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                setShowSharedPostModal(true);
-                                                            }}
-                                                            style={{
-                                                                maxHeight: '60vh',
-                                                                boxShadow:
-                                                                    '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+                                                                const handle = originalPost.userHandle;
+                                                                setViewingStories(false);
+                                                                setTimeout(() => {
+                                                                    navigate(`/user/${encodeURIComponent(handle)}`);
+                                                                }, 100);
                                                             }}
                                                         >
-                                                            <div
-                                                                className="flex items-start justify-between border-b border-gray-200 px-4 pb-3 pt-4"
-                                                                style={{ backgroundColor: '#ffffff' }}
-                                                            >
-                                                                <div className="flex flex-1 items-center gap-3">
-                                                                    <Avatar
-                                                                        src={getAvatarForHandle(originalPost.userHandle)}
-                                                                        name={originalPost.userHandle.split('@')[0]}
-                                                                        size="sm"
-                                                                    />
-                                                                    <div className="flex-1">
-                                                                        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
-                                                                            <span>{originalPost.userHandle}</span>
-                                                                            <VerifiedBadge
-                                                                                accountType={originalPost.userAccountType}
-                                                                                size={14}
-                                                                            />
-                                                                        </h3>
-                                                                        <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-600">
-                                                                            {originalPost.locationLabel && (
-                                                                                <>
-                                                                                    <span className="flex items-center gap-1">
-                                                                                        <FiMapPin className="h-3 w-3" />
-                                                                                        {originalPost.locationLabel}
-                                                                                    </span>
-                                                                                    {originalPost.createdAt && (
-                                                                                        <span className="text-gray-400">·</span>
-                                                                                    )}
-                                                                                </>
-                                                                            )}
-                                                                            {originalPost.createdAt && (
-                                                                                <span>{timeAgo(originalPost.createdAt)}</span>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div
-                                                                className="w-full overflow-hidden p-4"
-                                                                style={{
-                                                                    maxWidth: '100%',
-                                                                    boxSizing: 'border-box',
-                                                                    backgroundColor: '#ffffff',
-                                                                }}
-                                                            >
-                                                                <div
-                                                                    className="w-full overflow-hidden rounded-2xl p-4"
-                                                                    style={{
-                                                                        maxWidth: '100%',
-                                                                        boxSizing: 'border-box',
-                                                                        background: bg,
-                                                                    }}
-                                                                >
-                                                                    <div
-                                                                        className="w-full break-words text-base font-normal leading-relaxed whitespace-pre-wrap"
-                                                                        style={{
-                                                                            wordBreak: 'break-word',
-                                                                            overflowWrap: 'anywhere',
-                                                                            maxWidth: '100%',
-                                                                            boxSizing: 'border-box',
-                                                                            color: textColor,
-                                                                            fontFamily: fontFamily || undefined,
-                                                                        }}
-                                                                    >
-                                                                        {originalPost.text || 'Shared post'}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="mt-3 flex items-center justify-center">
-                                                            <div
-                                                                className="flex cursor-pointer items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 backdrop-blur-md transition-colors hover:bg-black/80"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setViewingStories(false);
-                                                                    setTimeout(() => {
-                                                                        navigate(
-                                                                            `/user/${encodeURIComponent(originalPost.userHandle)}`,
-                                                                        );
-                                                                    }, 100);
-                                                                }}
-                                                            >
-                                                                <span className="text-sm font-semibold text-white">
-                                                                    @{originalPost.userHandle}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
+                                                            <img
+                                                                src={originalPost.avatarUrl || getAvatarForHandle(originalPost.userHandle)}
+                                                                alt={authorHandle}
+                                                                className="h-7 w-7 rounded-full object-cover"
+                                                            />
+                                                            <span className="truncate text-[15px] font-bold" style={{ color: textColor }}>
+                                                                {authorHandle}
+                                                            </span>
+                                                        </button>
+                                                    ) : null}
                                                 </div>
                                             );
                                         } else {

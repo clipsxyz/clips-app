@@ -75,8 +75,7 @@ export default function SuggestedFollowerFeedCard({
   const previewCount = suggestion.previews.length;
   const isBusiness =
     suggestion.accountType === 'business' ||
-    suggestion.representativePost.userAccountType === 'business' ||
-    suggestion.representativePost.isBoosted === true;
+    suggestion.representativePost.userAccountType === 'business';
 
   const openProfile = () => navigate(`/user/${suggestion.userHandle}`);
 

@@ -4618,8 +4618,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     out.push({ kind: 'stories_promo', id: `view-stories-after-${postCount}` });
                 }
                 if (!followerInserted && showSuggestedFollowerCard && suggestedFollowerSuggestion && postCount === 3) {
-                    out.push({ kind: 'suggested_follower', suggestion: suggestedFollowerSuggestion });
-                    followerInserted = true;
+                    const followerIsBusiness =
+                        suggestedFollowerSuggestion.accountType === 'business' ||
+                        suggestedFollowerSuggestion.representativePost.userAccountType === 'business';
+                    const businessStripInFeed = flatWithSuggested.some((row) => row.type === 'local_business');
+                    if (!(followerIsBusiness && businessStripInFeed)) {
+                        out.push({ kind: 'suggested_follower', suggestion: suggestedFollowerSuggestion });
+                        followerInserted = true;
+                    }
                 }
                 if (
                     previewSuggestedCards &&
@@ -6655,20 +6661,14 @@ const styles = StyleSheet.create({
         minWidth: 0,
         zIndex: 0,
     },
-    /** Text posts: bounded card so consecutive items don't blend into one block. */
+    /** Text posts share the full-bleed media card shell. The canvas owns the color. */
     textOnlyFloatWrap: {
-        marginHorizontal: 16,
-        marginVertical: 6,
-        marginBottom: 12,
-        paddingTop: 8,
-        paddingBottom: 4,
-        backgroundColor: '#121721',
-        borderWidth: 1,
-        borderColor: '#1E293B',
-        borderRadius: 12,
+        marginHorizontal: 0,
+        marginVertical: 0,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        borderRadius: 0,
         overflow: 'hidden' as const,
-        borderBottomWidth: 1,
-        borderBottomColor: '#21262D',
     },
     textOnlyEngagementRow: {
         flexDirection: 'row',

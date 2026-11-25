@@ -2,6 +2,7 @@ import React from 'react';
 import type { StickerOverlay } from '../types';
 import StickerOverlayComponent from './StickerOverlay';
 import { isTextCardStyleId, TEXT_CARD_STYLES, textCardStyleBackground } from '../utils/textCardStyles';
+import { FEED_TEXT_CARD_FONT_WEB, feedTextCardType } from '../utils/textCardFeedType';
 
 const DOUBLE_TAP_MS = 300;
 const BODY_COLOR = '#F1F5F9';
@@ -60,11 +61,18 @@ export default function FeedTextOnlyCard({
     lastTapRef.current = now;
   }
 
+  const type = feedTextCardType(trimmed);
   const body = (
-    <div ref={bodyRef} className="relative w-full">
+    <div ref={bodyRef} className="relative flex w-full flex-1 items-center justify-center">
       <p
-        className="m-0 whitespace-pre-wrap break-words text-[15px] font-normal leading-[22px]"
-        style={{ color: card?.textColor || BODY_COLOR }}
+        className="m-0 w-full whitespace-pre-wrap break-words text-center font-semibold"
+        style={{
+          color: card?.textColor || BODY_COLOR,
+          fontFamily: FEED_TEXT_CARD_FONT_WEB,
+          fontSize: type.fontSize,
+          lineHeight: 1.25,
+          letterSpacing: '-0.02em',
+        }}
       >
         {trimmed}
       </p>
@@ -106,7 +114,7 @@ export default function FeedTextOnlyCard({
 
   return (
     <div
-      className="w-full bg-transparent px-4 py-2"
+      className="w-full bg-transparent"
       role="button"
       tabIndex={0}
       aria-label="Double tap to like"
@@ -118,19 +126,14 @@ export default function FeedTextOnlyCard({
         }
       }}
     >
-      {card && isTextCardStyleId(cardStyle) ? (
-        <div
-          className="overflow-hidden rounded-2xl px-4 py-[18px]"
-          style={{
-            background: textCardStyleBackground(cardStyle),
-            border: card.bordered ? '1px solid rgba(255,255,255,0.14)' : undefined,
-          }}
-        >
-          {body}
-        </div>
-      ) : (
-        body
-      )}
+      <div
+        className="flex aspect-[4/5] w-full items-center justify-center overflow-hidden px-7 py-7"
+        style={{
+          background: card && isTextCardStyleId(cardStyle) ? textCardStyleBackground(cardStyle) : '#121721',
+        }}
+      >
+        {body}
+      </div>
     </div>
   );
 }

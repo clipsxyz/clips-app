@@ -6,7 +6,6 @@ import {
     TouchableOpacity,
     StyleSheet,
     ActivityIndicator,
-    ScrollView,
     Platform,
     useWindowDimensions,
     type ImageSourcePropType,
@@ -15,7 +14,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
-import VerifiedBadge from '../VerifiedBadge.native';
 import StorySafeVideo from './StorySafeVideo.native';
 import type { Post, Story } from '../../types';
 import {
@@ -27,15 +25,13 @@ import {
     resolveStoryMediaUrl,
     storyVideoSource,
 } from '../../utils/storyMediaNative';
-import { getTextStoryStyle } from '../../utils/storyTextStyleNative';
-import { isTextCardStyleId } from '../../utils/textCardStyles';
+import { isTextCardStyleId, TEXT_CARD_STYLES } from '../../utils/textCardStyles';
+import { FEED_TEXT_CARD_FONT_NATIVE, feedTextCardType } from '../../utils/textCardFeedType';
+import { getPostBodyText } from '../../utils/effectiveTextPostStyleNative';
 import { getAvatarForHandle } from '../../api/users';
-import { timeAgo } from '../../utils/timeAgo';
 import { ox } from '../../constants/nativeOpticalScale';
 
 const SHARED_BACKDROP = ['#0f172a', '#111827', '#1f2937'];
-/** Soft atlas wash behind text-only shares (not IG purple/magenta). */
-const TEXT_SHARE_FALLBACK_BACKDROP = ['#0f2430', '#060d16', '#12263a'];
 
 function resolvePosterSource(
     mediaUrl?: string | null,
@@ -239,65 +235,81 @@ function InsetCardColumn({ children }: { children: React.ReactNode }) {
     );
 }
 
-function FittedTextCard({
-    colors,
-    color,
-    bordered,
+function FeedStyleTextShare({
     text,
-    handle,
+    cardStyle,
+    authorHandle,
+    authorAvatar,
     onPress,
+    onAuthorPress,
 }: {
-    colors: string[];
-    color: string;
-    fontSize: number;
-    bordered: boolean;
     text: string;
-    handle: string;
+    cardStyle?: string | null;
+    authorHandle: string;
+    authorAvatar?: string;
     onPress: () => void;
+    onAuthorPress: () => void;
 }) {
     const insets = useSafeAreaInsets();
-    const { height } = useWindowDimensions();
-    const topGap = insets.top + ox(84);
-    const bottomGap = insets.bottom + ox(96);
-    const maxBodyHeight = Math.max(ox(160), height - topGap - bottomGap - ox(72));
-
+    const { width, height } = useWindowDimensions();
+    const card = isTextCardStyleId(cardStyle) ? TEXT_CARD_STYLES[cardStyle] : null;
+    const type = feedTextCardType(text);
+    const color = card?.textColor || '#F1F5F9';
+    const fill = card?.colors[0] || '#121721';
+    const displayHandle = authorHandle.replace(/^@/, '').trim();
     return (
-        <View
-            style={[styles.fittedHost, { paddingTop: topGap, paddingBottom: bottomGap }]}
-            pointerEvents="box-none"
+        <TouchableOpacity
+            activeOpacity={0.96}
+            onPress={onPress}
+            style={[styles.feedTextCanvas, { width, height, backgroundColor: fill }]}
         >
-            <TouchableOpacity
-                activeOpacity={0.96}
-                onPress={onPress}
-                style={styles.postLikeBlock}
-            >
-                <View style={styles.postLikeHeader}>
-                    <Avatar
-                        src={getAvatarForHandle(handle)}
-                        name={handle.split('@')[0] || handle}
-                        size={ox(40)}
-                    />
-                    <Text style={styles.postLikeHandle} numberOfLines={1}>
-                        {handle.startsWith('@') ? handle : `@${handle}`}
-                    </Text>
-                </View>
+            {card && card.colors.length >= 2 ? (
                 <LinearGradient
-                    colors={colors}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={[styles.postLikeCard, bordered ? styles.fittedCardBorder : null]}
+                    colors={card.colors}
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                />
+            ) : null}
+            <View
+                style={[
+                    styles.feedTextBody,
+                    { paddingTop: insets.top + ox(72), paddingBottom: insets.bottom + ox(88) },
+                ]}
+            >
+                <Text
+                    style={[
+                        styles.feedText,
+                        {
+                            color,
+                            fontSize: type.fontSize,
+                            lineHeight: Math.round(type.fontSize * 1.25),
+                            fontFamily: Platform.select(FEED_TEXT_CARD_FONT_NATIVE),
+                        },
+                    ]}
                 >
-                    <ScrollView
-                        style={{ maxHeight: maxBodyHeight }}
-                        contentContainerStyle={styles.postLikeBody}
-                        showsVerticalScrollIndicator={false}
-                        nestedScrollEnabled
+                    {text}
+                </Text>
+                {displayHandle ? (
+                    <TouchableOpacity
+                        style={styles.feedTextCredit}
+                        onPress={onAuthorPress}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`View ${displayHandle}`}
                     >
-                        <Text style={[styles.postLikeText, { color }]}>{text}</Text>
-                    </ScrollView>
-                </LinearGradient>
-            </TouchableOpacity>
-        </View>
+                        <Avatar
+                            src={authorAvatar || getAvatarForHandle(authorHandle)}
+                            name={displayHandle.split('@')[0] || displayHandle}
+                            size={ox(28)}
+                        />
+                        <Text style={[styles.feedTextCreditHandle, { color }]} numberOfLines={1}>
+                            {displayHandle}
+                        </Text>
+                    </TouchableOpacity>
+                ) : null}
+            </View>
+        </TouchableOpacity>
     );
 }
 
@@ -308,7 +320,7 @@ export default function StorySharedPostViewer({
     isMuted,
     paused,
     onOpenModal,
-    onOpenProfile: _onOpenProfile,
+    onOpenProfile,
 }: Props) {
     if (story.sharedFromPost && !originalPost && !sharedPostFetchFailed) {
         return (
@@ -399,116 +411,20 @@ export default function StorySharedPostViewer({
         );
     }
 
-    if (post.text) {
-        const { gradientColors, color, fontSize, bordered } = getTextStoryStyle(story, post);
-        const hasCardStyle = isTextCardStyleId(post.cardStyle);
-        const cleanHandle = (handle || post.userHandle || '').replace(/^@/, '');
-        const bodySize = Math.max(fontSize, hasCardStyle ? ox(22) : ox(18));
-        const backdropColors = hasCardStyle
-            ? gradientColors.length >= 2
-                ? gradientColors
-                : [gradientColors[0], gradientColors[0]]
-            : gradientColors.length >= 2
-              ? [gradientColors[0], '#060d16', gradientColors[gradientColors.length - 1]]
-              : TEXT_SHARE_FALLBACK_BACKDROP;
-
-        if (hasCardStyle) {
-            return (
-                <FittedTextCard
-                    colors={backdropColors}
-                    color={color}
-                    fontSize={bodySize}
-                    bordered={bordered}
-                    text={post.text}
-                    handle={cleanHandle}
-                    onPress={onOpenModal}
-                />
-            );
-        }
-
+    const sharedText = (getPostBodyText(post) || post.text || '').trim();
+    if (!hasRealMedia && sharedText) {
+        const authorHandle = post.userHandle || story.sharedFromUser || '';
         return (
-            <LinearGradient
-                colors={backdropColors}
-                style={styles.textSharedRoot}
-                pointerEvents="box-none"
-            >
-                <View style={styles.textSharedVeil} pointerEvents="none" />
-                <View style={styles.textSharedColumn} pointerEvents="box-none">
-                    <View style={styles.sharedFromPill}>
-                        <Icon name="return-up-forward-outline" size={ox(12)} color="#9fd4cb" />
-                        <Text style={styles.sharedFromPillText}>
-                            Shared from{' '}
-                            <Text style={styles.sharedFromBold}>@{cleanHandle}</Text>
-                        </Text>
-                    </View>
-                    <TouchableOpacity
-                        style={styles.textCard}
-                        onPress={onOpenModal}
-                        activeOpacity={0.94}
-                    >
-                        <View style={styles.textCardHeader}>
-                            <Avatar
-                                src={getAvatarForHandle(post.userHandle)}
-                                name={post.userHandle.split('@')[0]}
-                                size={ox(36)}
-                            />
-                            <View style={styles.textCardMeta}>
-                                <View style={styles.textCardHandleRow}>
-                                    <Text style={styles.textCardHandle} numberOfLines={1}>
-                                        {post.userHandle}
-                                    </Text>
-                                    <VerifiedBadge accountType={post.userAccountType} size={ox(12)} />
-                                </View>
-                                <View style={styles.textCardSubRow}>
-                                    {post.locationLabel ? (
-                                        <>
-                                            <Icon
-                                                name="location-outline"
-                                                size={ox(11)}
-                                                color="#6B7280"
-                                            />
-                                            <Text style={styles.textCardTime} numberOfLines={1}>
-                                                {post.locationLabel}
-                                            </Text>
-                                            {post.createdAt ? (
-                                                <Text style={styles.textCardDot}>·</Text>
-                                            ) : null}
-                                        </>
-                                    ) : null}
-                                    {post.createdAt ? (
-                                        <Text style={styles.textCardTime}>
-                                            {timeAgo(post.createdAt)}
-                                        </Text>
-                                    ) : null}
-                                </View>
-                            </View>
-                        </View>
-
-                        <View style={styles.textCardBodyPad}>
-                            <LinearGradient
-                                colors={
-                                    gradientColors.length >= 2
-                                        ? gradientColors
-                                        : ['#0f2430', '#1a3f3c', '#12263a']
-                                }
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.textCardBody}
-                            >
-                                <View style={styles.textCardAccent} />
-                                <Text
-                                    style={[
-                                        styles.textCardBodyText,
-                                        { color, fontSize: bodySize, lineHeight: bodySize * 1.35 },
-                                    ]}
-                                >
-                                    {post.text}
-                                </Text>
-                            </LinearGradient>
-                        </View>
-                    </TouchableOpacity>
-                </View>
-            </LinearGradient>
+            <FeedStyleTextShare
+                text={sharedText}
+                cardStyle={post.cardStyle}
+                authorHandle={authorHandle}
+                authorAvatar={post.avatarUrl}
+                onPress={onOpenModal}
+                onAuthorPress={() => {
+                    if (authorHandle) onOpenProfile(authorHandle);
+                }}
+            />
         );
     }
 
@@ -526,6 +442,35 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     fallbackText: { color: '#fff', fontSize: 14 },
+    feedTextCanvas: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+    },
+    feedTextBody: {
+        flex: 1,
+        width: '100%',
+        justifyContent: 'center',
+        paddingHorizontal: 28,
+    },
+    feedText: {
+        fontWeight: '600',
+        textAlign: 'center',
+        letterSpacing: -0.3,
+    },
+    feedTextCredit: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        alignSelf: 'center',
+        gap: 8,
+        marginTop: 22,
+        maxWidth: '100%',
+    },
+    feedTextCreditHandle: {
+        fontSize: 15,
+        fontWeight: '700',
+        flexShrink: 1,
+    },
     backdropMedia: { opacity: 0.58 },
     backdropDim: {
         ...StyleSheet.absoluteFill,

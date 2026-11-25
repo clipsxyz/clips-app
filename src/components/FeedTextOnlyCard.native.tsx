@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import type { Post } from '../types';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
@@ -7,6 +7,7 @@ import FeedStickerOverlays from './FeedStickerOverlays.native';
 import { hasFinitePoint, safeLayoutNumber } from '../utils/safeLayoutNative';
 import { getPostBodyText } from '../utils/effectiveTextPostStyleNative';
 import { isTextCardStyleId, TEXT_CARD_STYLES } from '../utils/textCardStyles';
+import { FEED_TEXT_CARD_FONT_NATIVE, feedTextCardType } from '../utils/textCardFeedType';
 
 const DOUBLE_TAP_MS = 300;
 const BODY_COLOR = '#F1F5F9';
@@ -69,6 +70,7 @@ export default function FeedTextOnlyCard({ post, onDoubleLike }: Props) {
     if (!text) return null;
 
     const card = isTextCardStyleId(post.cardStyle) ? TEXT_CARD_STYLES[post.cardStyle] : null;
+    const type = feedTextCardType(text);
     const body = (
         <View
             style={styles.bodyMeasure}
@@ -77,7 +79,21 @@ export default function FeedTextOnlyCard({ post, onDoubleLike }: Props) {
                 if (w > 0 && h > 0) setBodySize({ width: w, height: h });
             }}
         >
-            <Text style={[styles.body, card ? { color: card.textColor } : null]}>{text}</Text>
+            <Text
+                style={[
+                    styles.body,
+                    {
+                        fontSize: type.fontSize,
+                        color: card?.textColor || BODY_COLOR,
+                        fontFamily: Platform.select(FEED_TEXT_CARD_FONT_NATIVE),
+                    },
+                ]}
+                adjustsFontSizeToFit
+                minimumFontScale={0.62}
+                numberOfLines={type.maxLines}
+            >
+                {text}
+            </Text>
             {stickers && stickers.length > 0 && bodySize.width > 0 ? (
                 <FeedStickerOverlays
                     stickers={stickers}
@@ -105,12 +121,10 @@ export default function FeedTextOnlyCard({ post, onDoubleLike }: Props) {
                 <LinearGradient colors={card.colors} style={styles.card}>
                     {body}
                 </LinearGradient>
-            ) : card ? (
-                <View style={[styles.card, styles.charcoalCard, { backgroundColor: card.colors[0] }]}>
+            ) : (
+                <View style={[styles.card, { backgroundColor: card?.colors[0] || '#121721' }]}>
                     {body}
                 </View>
-            ) : (
-                body
             )}
         </Pressable>
     );
@@ -120,27 +134,25 @@ const styles = StyleSheet.create({
     wrap: {
         width: '100%',
         backgroundColor: 'transparent',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
     },
     bodyMeasure: {
         position: 'relative',
         width: '100%',
+        flex: 1,
+        justifyContent: 'center',
     },
     card: {
-        borderRadius: 16,
-        paddingHorizontal: 16,
-        paddingVertical: 18,
+        width: '100%',
+        aspectRatio: 4 / 5,
+        paddingHorizontal: 28,
+        paddingVertical: 28,
         overflow: 'hidden',
-    },
-    charcoalCard: {
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.14)',
+        justifyContent: 'center',
     },
     body: {
         color: BODY_COLOR,
-        fontSize: 15,
-        lineHeight: 22,
-        fontWeight: '400',
+        fontWeight: '600',
+        textAlign: 'center',
+        letterSpacing: -0.3,
     },
 });

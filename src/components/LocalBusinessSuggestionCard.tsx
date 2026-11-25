@@ -156,7 +156,24 @@ export default function LocalBusinessSuggestionCard({
         };
       });
     }
-    return posts.filter((post) => isBusinessAuthor(post)).slice(0, 8).map((post) => {
+    const bestByHandle = new Map<string, Post>();
+    for (const post of posts.filter(isBusinessAuthor)) {
+      const key = normalizeHandle(post.userHandle);
+      if (!key) continue;
+      const current = bestByHandle.get(key);
+      if (!current) {
+        bestByHandle.set(key, post);
+        continue;
+      }
+      const nextHasMedia = Boolean(featuredPreviewFromPost(post));
+      const currentHasMedia = Boolean(featuredPreviewFromPost(current));
+      const nextViews = post.stats?.views ?? 0;
+      const currentViews = current.stats?.views ?? 0;
+      if ((nextHasMedia && !currentHasMedia) || (nextHasMedia === currentHasMedia && nextViews > currentViews)) {
+        bestByHandle.set(key, post);
+      }
+    }
+    return [...bestByHandle.values()].slice(0, 8).map((post) => {
       const own = normalizeHandle(post.userHandle) === normalizeHandle(viewerHandle);
       return {
       id: String(post.id),
