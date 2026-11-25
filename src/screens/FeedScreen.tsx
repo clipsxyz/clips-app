@@ -203,6 +203,7 @@ import FeedCaptionText from '../components/FeedCaptionText.native';
 import FeedPostTagRow from '../components/FeedPostTagRow.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedNewsTicker from '../components/FeedNewsTicker.native';
+import FeedPagingPin from '../components/FeedPagingPin.native';
 import FeedPostNewsTicker from '../components/FeedPostNewsTicker.native';
 import { fullscreenSlideIndexForCarousel } from '../utils/feedImageFullscreen';
 import {
@@ -6025,7 +6026,7 @@ onVisitProfile={() =>
                             A 0→N footer while scrolling is what snaps Android back to y=0. */}
                         <View style={styles.loadingContainer}>
                             {loadingMore ? (
-                                <ActivityIndicator size="small" color="#8B5CF6" />
+                                <FeedPagingPin />
                             ) : (
                                 <View style={styles.loadingSpacer} />
                             )}
