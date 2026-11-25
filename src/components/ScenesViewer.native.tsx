@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { gazetteerAlert } from '../utils/gazetteerAlertNative';
+import { isAbortLikeError } from '../utils/abortSafe';
 import {
     View,
     Text,
@@ -595,6 +596,9 @@ export default function ScenesViewer({
         if (activePost.userReclipped) return;
         const prevReclips = activePost.stats.reclips;
         const nextReclips = prevReclips + 1;
+        const wasPaused = paused;
+        // Stop the MP4 from holding the API connection while the reclip POST runs.
+        setPaused(true);
         setReclipState(viewerUserId, activePost.id, true);
         patchPost(activePost.id, {
             userReclipped: true,
@@ -620,13 +624,16 @@ export default function ScenesViewer({
                 userReclipped: false,
                 stats: { ...activePost.stats, reclips: prevReclips },
             });
-            const message =
-                err instanceof Error && err.message
-                    ? err.message
-                    : 'Could not reclip this post. Try again.';
+            const message = isAbortLikeError(err)
+                ? 'The reclip did not finish. Check your connection and try again.'
+                : err instanceof Error && err.message
+                  ? err.message
+                  : 'Could not reclip this post. Try again.';
             gazetteerAlert('Reclip failed', message);
+        } finally {
+            setPaused(wasPaused);
         }
-    }, [activePost, patchPost, viewerHandle, viewerUserId]);
+    }, [activePost, patchPost, paused, viewerHandle, viewerUserId]);
 
     const isTextOnlyPost = useMemo(() => {
         if (!activePost) return false;

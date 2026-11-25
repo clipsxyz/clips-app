@@ -1103,8 +1103,11 @@ export async function regeneratePostShareToken(postId: string) {
 }
 
 export async function reclipPost(postId: string) {
+    // Default API timeout is 8s and aborts with the message "Aborted".
+    // Full-screen playback is downloading the same host at the same time.
     return apiRequest(`/posts/${postId}/reclip`, {
         method: 'POST',
+        timeoutMs: 20000,
     });
 }
 

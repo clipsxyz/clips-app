@@ -1585,15 +1585,23 @@ class PostController extends Controller
         $originalPost->refresh();
         $reclippedPost->load(['user', 'originalPost']);
 
-        if ($created && $originalPost->user_id && $originalPost->user_id !== $user->id) {
-            $owner = User::find($originalPost->user_id);
-            if ($owner) {
-                app(InteractionPushService::class)->notifyReclip($user, $owner, (string) $originalPost->id);
-            }
-        }
-
         $payload = self::toApiArray($reclippedPost, $user);
         $payload['original_post'] = self::toApiArray($originalPost, $user);
+
+        // Answer the phone before FCM. A push can take as long as the client's
+        // abort timer, and full-screen playback is already using the same connection.
+        if ($created && $originalPost->user_id && $originalPost->user_id !== $user->id) {
+            $actorId = (string) $user->id;
+            $ownerId = (string) $originalPost->user_id;
+            $sourceId = (string) $originalPost->id;
+            app()->terminating(function () use ($actorId, $ownerId, $sourceId) {
+                $actor = User::find($actorId);
+                $owner = User::find($ownerId);
+                if ($actor && $owner) {
+                    app(InteractionPushService::class)->notifyReclip($actor, $owner, $sourceId);
+                }
+            });
+        }
 
         return response()->json($payload, $created ? 201 : 200);
     }

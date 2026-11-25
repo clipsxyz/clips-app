@@ -3472,7 +3472,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }));
             setFeedGazetteerAlert({
                 title: 'Could not reclip',
-                message: err?.message || 'Please try again.',
+                message: isAbortLikeError(err)
+                    ? 'The reclip did not finish. Check your connection and try again.'
+                    : err?.message || 'Please try again.',
                 icon: 'alert',
             });
         }
