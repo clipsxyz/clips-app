@@ -72,6 +72,24 @@ function postThumbVisual(p: Post): { url: string; isVideo: boolean; posterUrl?: 
   return { url, isVideo, posterUrl: p.videoPosterUrl || undefined };
 }
 
+/** Featured still or muted clip for a business card. Same choice as the suggested-follower preview. */
+export function featuredPreviewFromPost(post: Post): SuggestedFollowerPreview | null {
+  const vis = postThumbVisual(post);
+  if (!vis) return null;
+  const isVideo = vis.isVideo;
+  const poster =
+    (vis.posterUrl && !isFakeMockVideoPosterUrl(vis.posterUrl) ? vis.posterUrl : undefined) ||
+    (isVideo ? resolveDemoVideoPosterUri(vis.url) : undefined);
+  return {
+    postId: String(post.id),
+    thumbnailUrl: poster || vis.url,
+    mediaUrl: isVideo ? vis.url : undefined,
+    isVideo,
+    views: post.stats?.views ?? 0,
+    gazetteerMusic: isVideo && postHasGazetteerMusic(post),
+  };
+}
+
 function normalizeHandle(h: string): string {
   return String(h || '').trim().toLowerCase();
 }
@@ -103,7 +121,11 @@ function sameCity(viewerCity: string, authorCity: string): boolean {
   return left.some((token) => right.some((other) => cityTokenMatches(token, other)));
 }
 
-function contextLabelFor(user: User | null | undefined, post: Post): string {
+/** Same line the suggested-follower card shows, e.g. "Active near Cabra · Dublin". */
+export function activityContextLabel(
+  user: { local?: string; regional?: string } | null | undefined,
+  post: Post,
+): string {
   const viewerLocal = (user?.local || '').trim();
   const authorLocal = (post.userLocal || '').trim();
   const regional = (user?.regional || post.userRegional || '').trim();
@@ -167,29 +189,16 @@ export function buildSuggestedFollowerFromPosts(
 
   bestPosts.sort((a, b) => (b.stats?.views ?? 0) - (a.stats?.views ?? 0));
   const rep = bestPosts[0];
-  const previews: SuggestedFollowerPreview[] = bestPosts.slice(0, 3).map((p) => {
-    const vis = postThumbVisual(p)!;
-    const isVideo = vis.isVideo;
-    const poster =
-      (vis.posterUrl && !isFakeMockVideoPosterUrl(vis.posterUrl) ? vis.posterUrl : undefined) ||
-      (isVideo ? resolveDemoVideoPosterUri(vis.url) : undefined);
-    // Prefer a still for thumbs — RN Image / web <img> cannot play MP4 as a poster.
-    const thumbnailUrl = poster || vis.url;
-    return {
-      postId: String(p.id),
-      thumbnailUrl,
-      mediaUrl: isVideo ? vis.url : undefined,
-      isVideo,
-      views: p.stats?.views ?? 0,
-      gazetteerMusic: isVideo && postHasGazetteerMusic(p),
-    };
-  });
+  const previews = bestPosts
+    .slice(0, 3)
+    .map((p) => featuredPreviewFromPost(p))
+    .filter((preview): preview is SuggestedFollowerPreview => preview != null);
 
   return {
     userHandle: rep.userHandle,
     displayName: rep.userHandle,
     avatarUrl: undefined,
-    contextLabel: contextLabelFor(viewer, rep),
+    contextLabel: activityContextLabel(viewer, rep),
     accountType: rep.userAccountType,
     previews,
     musicPreviewUrl: '',

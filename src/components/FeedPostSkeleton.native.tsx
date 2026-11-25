@@ -82,8 +82,9 @@ const styles = StyleSheet.create({
   },
   card: {
     ...FEED_CARD_FLOAT_WRAP,
-    padding: 12,
-    gap: 10,
+    padding: 0,
+    gap: 0,
+    marginBottom: 12,
   },
   headerRow: {
     flexDirection: 'row',
@@ -118,7 +119,7 @@ const styles = StyleSheet.create({
     // dimensions adopts). If these two drift, the feed visibly jumps when the real card
     // replaces the skeleton on first paint.
     aspectRatio: RATIO_FEED_UNKNOWN,
-    borderRadius: 14,
+    borderRadius: 0,
     backgroundColor: BLOCK,
   },
   captionLineWide: {

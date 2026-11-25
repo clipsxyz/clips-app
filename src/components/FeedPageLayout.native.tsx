@@ -153,12 +153,12 @@ export const FEED_GRID_TILE_BORDER_COLOR = 'rgba(255, 255, 255, 0.1)';
  * media corners clip via overflow + radius.
  */
 export const FEED_CARD_FLOAT_WRAP = {
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: FEED_CARD_RADIUS,
+    marginHorizontal: 0,
+    marginVertical: 0,
+    borderRadius: 0,
     overflow: 'hidden' as const,
-    borderWidth: FEED_CARD_SHELL_BORDER_WIDTH,
-    borderColor: FEED_CARD_SHELL_BORDER_COLOR,
+    borderWidth: 0,
+    borderColor: 'transparent',
     backgroundColor: 'transparent',
     position: 'relative' as const,
 } as const;
@@ -239,8 +239,7 @@ export const FEED_CARD_MEDIA_WRAP = {
     backgroundColor: '#000000',
     position: 'relative' as const,
     overflow: 'hidden' as const,
-    // Radius + overflow clips Android TextureView so recycled / stacked surfaces cannot bleed.
-    borderRadius: FEED_CARD_RADIUS,
+    borderRadius: 0,
 } as const;
 
 /** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */
@@ -257,12 +256,10 @@ export const FEED_CARD_MEDIA_FX_LAYER = {
 /** Transparent tap layer above media (header/footer overlays sit outside this inset). */
 export const FEED_CARD_MEDIA_TAP_LAYER = {
     position: 'absolute' as const,
-    // Clear overlaid header chrome; engagement now lives below the media frame.
-    top: 56,
+    top: 0,
     left: 0,
     right: 0,
-    // Leave only the mute control corner clear (engagement is a sibling under media).
-    bottom: 52,
+    bottom: 0,
     zIndex: 20,
     // Android skips fully transparent views for hit-testing.
     backgroundColor: 'rgba(0,0,0,0.01)',

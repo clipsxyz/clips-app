@@ -150,9 +150,7 @@ import FeedPageLayout, {
     FEED_CARD_CAPTION_PADDING,
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
     FEED_CARD_ENGAGEMENT_LEFT,
-    FEED_CARD_HEADER_OVERLAY,
     FEED_CARD_MEDIA_WRAP,
-    FEED_CARD_OVERLAY_HEADER_GRADIENT,
     FEED_CARD_SPONSORED_ROW,
     FEED_CARD_UPLOAD_OVERLAY,
     FEED_CARD_UPLOAD_SUBTITLE,
@@ -1301,7 +1299,7 @@ const FeedCard = React.memo(function FeedCard({
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
     const postViewRecordedRef = React.useRef(false);
-    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+    const { width: windowWidth } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
 
     /**
@@ -1409,11 +1407,8 @@ const FeedCard = React.memo(function FeedCard({
             // takes the neutral 16:9 box (RATIO_FEED_UNKNOWN).
             { fitLandscape: true },
         );
-        const viewportCap =
-            safePositiveLayoutNumber(windowHeight, 720) * FEED_UI.media.maxViewportFraction;
-
-        return Math.round(Math.min(contentHeight, viewportCap));
-    }, [cardMediaWidth, intrinsicMedia?.width, intrinsicMedia?.height, windowHeight]);
+        return Math.round(contentHeight);
+    }, [cardMediaWidth, intrinsicMedia?.width, intrinsicMedia?.height]);
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
     const isClientUploadFailed = post.clientUploadStatus === 'failed';
@@ -1664,6 +1659,28 @@ const FeedCard = React.memo(function FeedCard({
                 </View>
                 </>
             ) : (
+                <>
+                {hasFeedMedia ? (
+                    <FeedPostHeader
+                        post={post}
+                        viewerHandle={viewerHandle}
+                        isCurrentUser={isCurrentUser}
+                        onFollow={onFollow}
+                        onOpenDM={onOpenDM}
+                        onProfileMenuPress={openProfileMenu}
+                        onAvatarPress={(hasStory) => {
+                            if (hasStory && onViewStories) {
+                                onViewStories();
+                                return;
+                            }
+                            if (onVisitHandle) onVisitHandle(profileHandle);
+                            else onVisitProfile?.();
+                        }}
+                        onHasStoryChange={setHeaderHasStory}
+                        onOverflowPress={onOverflowPress}
+                        menuAnchorRef={profileMenuAnchorRef}
+                    />
+                ) : null}
                 <View style={FEED_CARD_BODY}>
                     {hasFeedMedia ? (
                         <View
@@ -1713,34 +1730,6 @@ const FeedCard = React.memo(function FeedCard({
                                     </Text>
                                 </View>
                             ) : null}
-
-                            <View style={FEED_CARD_HEADER_OVERLAY} pointerEvents="box-none">
-                                <LinearGradient
-                                    colors={[...FEED_CARD_OVERLAY_HEADER_GRADIENT]}
-                                    style={StyleSheet.absoluteFill}
-                                    pointerEvents="none"
-                                />
-                                <FeedPostHeader
-                                    post={post}
-                                    viewerHandle={viewerHandle}
-                                    isCurrentUser={isCurrentUser}
-                                    isOverlaid
-                                    onFollow={onFollow}
-                                    onOpenDM={onOpenDM}
-                                    onProfileMenuPress={openProfileMenu}
-                                    onAvatarPress={(hasStory) => {
-                                        if (hasStory && onViewStories) {
-                                            onViewStories();
-                                            return;
-                                        }
-                                        if (onVisitHandle) onVisitHandle(profileHandle);
-                                        else onVisitProfile?.();
-                                    }}
-                                    onHasStoryChange={setHeaderHasStory}
-                                    onOverflowPress={onOverflowPress}
-                                    menuAnchorRef={profileMenuAnchorRef}
-                                />
-                            </View>
 
                             {hasTaggedUsers ? (
                                 <FeedTaggedMediaBadge
@@ -1832,6 +1821,7 @@ const FeedCard = React.memo(function FeedCard({
                         />
                     ) : null}
                 </View>
+                </>
             )}
 
             {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
@@ -5275,6 +5265,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     <LocalBusinessSuggestionCard
                         posts={item.posts}
                         userLocal={user?.local}
+                        viewerRegional={user?.regional}
                         pinnedPaidPostId={item.pinnedPaidPostId}
                         viewerHandle={user?.handle ?? null}
                         onFollowPost={handleSuggestedCardFollow}
@@ -6766,10 +6757,7 @@ const styles = StyleSheet.create({
     feedListRow: {
         position: 'relative',
         overflow: 'hidden',
-        marginBottom: 16,
-        // Transparent so the ambient canvas shows in the gap beside each floating card.
-        // This wrapper spans the FULL row width, so leaving it opaque painted over the
-        // 16px margins and hid the canvas completely.
+        marginBottom: 8,
         backgroundColor: 'transparent',
     },
     /** Stories rail — keep wrap spacing tight; divider row owns the rule + gap. */

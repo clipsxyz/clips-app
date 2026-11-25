@@ -3635,7 +3635,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       return {
         width: '100%',
         aspectRatio: String(ratio),
-        maxHeight: `${FEED_UI.media.maxViewportFraction * 100}vh`,
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -3654,8 +3653,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       const feedAspect = isLandscape ? FEED_VIDEO_LANDSCAPE_ASPECT : FEED_TARGET_ASPECT;
       return {
         width: '100%',
-        height: window.innerWidth * feedAspect,
-        maxHeight: '58vh',
+        aspectRatio: String(1 / feedAspect),
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -3672,8 +3670,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       const feedAspect = Math.min(Math.max(activeAspectRatio, FEED_MIN_ASPECT), FEED_TARGET_ASPECT);
       return {
         width: '100%',
-        height: window.innerWidth * feedAspect,
-        maxHeight: '58vh',
+        aspectRatio: String(1 / feedAspect),
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -3682,10 +3679,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Default while loading: Instagram-like 4:5 frame, capped to one screen.
+    // Default while loading: Instagram-like 4:5 frame.
     return {
       aspectRatio: '4/5',
-      maxHeight: '58vh',
       width: '100%',
       position: 'relative',
       display: 'flex',
@@ -5350,7 +5346,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           ? `mx-0 w-full overflow-hidden aspect-[9/16] rounded-[20px] mb-0 border-2 ${
               isBoosted || knownBoosted ? 'border-white' : 'border-transparent'
             }`
-          : 'mx-4 my-2 overflow-visible rounded-[20px] border border-white/15'
+          : 'mx-0 my-0 w-full overflow-hidden rounded-none border-x-0 border-t-0 border-b border-white/10'
       }`}
       style={{ backgroundColor: '#000000' }}
     >
@@ -5366,7 +5362,15 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           )}
         </div>
       )}
-      {/* overflow-visible: menu from overlaid PostHeader extends below header; Media clips itself */}
+      {hasMedia && !isTileBoostMode && !isTextOnly && (
+        <PostHeader
+          post={post}
+          onFollow={onFollow}
+          onOpenDM={onOpenDM}
+          isOverlaid={false}
+          onMenuClick={() => setMenuOpen(true)}
+        />
+      )}
       <div
         className={isTileBoostMode ? 'relative w-full h-full overflow-hidden' : 'relative w-full overflow-visible'}
         style={{ maxWidth: '100%', boxSizing: 'border-box' }}
@@ -5416,16 +5420,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             >
               {isBoosted || knownBoosted ? 'Boosting' : 'Tap to boost'}
             </span>
-          </div>
-        )}
-        {/* PostHeader overlaid on media for posts with media */}
-        {hasMedia && (
-          <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
-            {!isTileBoostMode && (
-              <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-                <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={true} onMenuClick={() => setMenuOpen(true)} />
-              </div>
-            )}
           </div>
         )}
         {isTextOnly ? (
@@ -9260,6 +9254,7 @@ function FeedPageWrapper() {
                 key={`local-business-${index}`}
                 posts={localPosts}
                 userLocal={user?.local}
+                viewerRegional={user?.regional}
                 pinnedPaidPostId={pinnedPaidPostId}
                 viewerHandle={user?.handle ?? null}
                 onFollowPost={handleMainFeedFollow}
@@ -9507,6 +9502,7 @@ function FeedPageWrapper() {
                   key={`preview-local-business-after-${p.id}`}
                   posts={previewLocalBusinessPosts}
                   userLocal={user?.local}
+                  viewerRegional={user?.regional}
                   useMockBusinesses
                   viewerHandle={user?.handle ?? null}
                   onFollowPost={handleMainFeedFollow}
@@ -9531,9 +9527,9 @@ function FeedPageWrapper() {
       })()}
 
       {(loading || (pages.length === 0 && !end)) && (
-        <div className="space-y-4 px-4 py-4">
+        <div className="space-y-4 py-4">
           {[1, 2].map((i) => (
-            <div key={i} className="animate-pulse overflow-hidden rounded-[20px] border border-white/15 bg-black">
+            <div key={i} className="animate-pulse overflow-hidden bg-black">
               <div className="h-4 w-40 rounded bg-white/10 m-3" />
               <div className="aspect-[4/5] bg-white/5" />
             </div>

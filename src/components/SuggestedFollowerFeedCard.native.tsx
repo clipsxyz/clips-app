@@ -75,8 +75,10 @@ function SuggestedThumbPreviewVideo({ url }: { url: string }) {
 
 function BusinessPreview({
   preview,
+  badgeBottom = 6,
 }: {
   preview: SuggestedFollowerSuggestion['previews'][number];
+  badgeBottom?: number;
 }) {
   const videoUrl = preview.mediaUrl || preview.thumbnailUrl;
   const stillIsImage =
@@ -99,7 +101,7 @@ function BusinessPreview({
       ) : (
         <View style={[styles.thumbImage, styles.thumbPlaceholder]} />
       )}
-      <View style={styles.viewsOverlay}>
+      <View style={[styles.viewsOverlay, { bottom: badgeBottom }]}>
         <Icon name="play" size={10} color="#fff" />
         <Text style={styles.viewsText}>{formatViews(preview.views)}</Text>
       </View>
@@ -141,27 +143,48 @@ export default function SuggestedFollowerFeedCard({
 
   if (isBusiness) {
     const hero = suggestion.previews[0];
+    const openProfile = () => onOpenProfile(suggestion.userHandle);
     return (
-      <View style={styles.bizCard}>
-        <View style={styles.bizHeader}>
-          <Text style={styles.bizHeading}>Local businesses you might like</Text>
+      <View style={styles.bizSection}>
+        <Text style={styles.bizSectionTitle}>Local businesses you might like</Text>
+        <View style={styles.bizCard}>
+          <View style={styles.bizCover}>
+            <TouchableOpacity
+              activeOpacity={0.92}
+              onPress={openProfile}
+              style={StyleSheet.absoluteFill}
+            >
+              {hero ? (
+                <BusinessPreview preview={hero} badgeBottom={58} />
+              ) : (
+                <View style={styles.bizCoverFallback}>
+                  <Avatar src={avatar} name={suggestion.displayName} size={72} />
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={onNotInterested}
+              style={styles.bizDismiss}
+              accessibilityLabel="Not interested"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon name="close" size={14} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.viewPill}
+              onPress={openProfile}
+              accessibilityLabel="View profile"
+            >
+              <Text style={styles.viewPillText}>View profile</Text>
+              <Icon name="chevron-forward" size={18} color="#111111" />
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
-            onPress={onNotInterested}
-            style={styles.bizClose}
-            accessibilityLabel="Not interested"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.85}
+            onPress={openProfile}
+            style={styles.bizIdentity}
           >
-            <Icon name="close" size={16} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity
-          activeOpacity={0.92}
-          onPress={() => onOpenProfile(suggestion.userHandle)}
-        >
-          {hero ? <BusinessPreview preview={hero} /> : <View style={styles.bizHero} />}
-          <View style={styles.bizIdentity}>
-            <Avatar src={avatar} name={suggestion.displayName} size={44} />
+            <Avatar src={avatar} name={suggestion.displayName} size={40} hideBorder />
             <View style={styles.bizIdentityText}>
               <Text style={styles.bizName} numberOfLines={1}>
                 {suggestion.userHandle}
@@ -170,15 +193,8 @@ export default function SuggestedFollowerFeedCard({
                 {suggestion.contextLabel}
               </Text>
             </View>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.viewBanner}
-          onPress={() => onOpenProfile(suggestion.userHandle)}
-        >
-          <Text style={styles.viewBannerText}>View profile</Text>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -304,46 +320,51 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     minHeight: 300,
   },
-  bizCard: {
+  bizSection: {
+    marginBottom: 8,
+  },
+  bizSectionTitle: {
     marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  bizHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingLeft: 16,
-    paddingRight: 10,
-    paddingTop: 12,
-    paddingBottom: 10,
-    gap: 8,
-  },
-  bizHeading: {
-    flex: 1,
-    fontSize: 15,
-    lineHeight: 20,
+    marginBottom: 10,
+    fontSize: 16,
+    lineHeight: 21,
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  bizClose: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  bizCard: {
+    marginHorizontal: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  bizCover: {
+    height: 320,
+    backgroundColor: '#1a1a1a',
+  },
+  bizCoverFallback: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  bizDismiss: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 3,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   bizHero: {
-    marginHorizontal: 12,
-    height: 220,
-    borderRadius: 14,
+    ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: '#1a1a1a',
   },
   bizIdentity: {
     flexDirection: 'row',
@@ -372,15 +393,24 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     minHeight: 300,
   },
-  viewBanner: {
+  viewPill: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 10,
+    zIndex: 2,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#FFFFFF',
-    minHeight: 48,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 14,
+    paddingRight: 10,
   },
-  viewBannerText: {
-    fontSize: 16,
-    fontWeight: '700',
+  viewPillText: {
+    fontSize: 14,
+    fontWeight: '600',
     color: '#111111',
   },
   iconBtn: {

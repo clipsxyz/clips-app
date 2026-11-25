@@ -1309,7 +1309,7 @@ const FeedPostMedia = React.memo(
         height: frameHeight,
         backgroundColor: viewerSurface ? '#000000' : placeholderColor,
         overflow: (viewerSurface ? 'visible' : 'hidden') as 'visible' | 'hidden',
-        borderRadius: viewerSurface ? 0 : 20,
+        borderRadius: 0,
     };
 
     const renderSlide = (
@@ -1773,7 +1773,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         backgroundColor: POSTER_FALLBACK_COLOR,
         position: 'relative',
-        borderRadius: 20,
+        borderRadius: 0,
     },
     /** Post viewer: no overflow clip / radius — those blank TextureView on Android. */
     viewerFrame: {
@@ -1785,7 +1785,7 @@ const styles = StyleSheet.create({
     videoClip: {
         ...StyleSheet.absoluteFill,
         overflow: 'hidden',
-        borderRadius: 20,
+        borderRadius: 0,
     },
     viewerVideoClip: {
         ...StyleSheet.absoluteFill,

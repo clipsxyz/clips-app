@@ -1,10 +1,13 @@
 import React from 'react';
-import { FiMapPin } from 'react-icons/fi';
+import { IoChevronForward, IoClose, IoPlay } from 'react-icons/io5';
 import { useNavigate } from 'react-router-dom';
 import Avatar from './Avatar';
 import { getAvatarForHandle } from '../api/users';
+import { resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
+import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import type { Post } from '../types';
 import { emitSuggestedPlacesAnalytics } from '../utils/suggestedPlaces';
+import { activityContextLabel, featuredPreviewFromPost } from '../utils/suggestedFollowerFeed';
 
 type LocalBusinessSuggestionCardProps = {
   posts: Post[];
@@ -12,11 +15,45 @@ type LocalBusinessSuggestionCardProps = {
   useMockBusinesses?: boolean;
   pinnedPaidPostId?: string;
   viewerHandle?: string | null;
+  viewerRegional?: string | null;
   onFollowPost?: (post: Post) => void | Promise<void>;
   onHideBusiness?: (businessKey: string) => void;
   onUnhideBusiness?: (businessKey: string) => void;
   onLikeBusiness?: (businessKey: string) => void;
 };
+
+const VIDEO_SRC_RE = /\.(mp4|webm|mov|m4v|ogg)(\?|#|$)/i;
+
+function formatViews(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function PreviewVideo({ src, poster }: { src: string; poster?: string }) {
+  const ref = React.useRef<HTMLVideoElement>(null);
+  const onTimeUpdate = React.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const limit = el.duration > 0 && Number.isFinite(el.duration) ? Math.min(1, el.duration) : 1;
+    if (el.currentTime >= limit - 0.05) el.currentTime = 0;
+  }, []);
+  return (
+    <video
+      ref={ref}
+      src={src}
+      poster={poster}
+      className="h-full w-full object-cover"
+      muted
+      playsInline
+      autoPlay
+      preload="metadata"
+      onTimeUpdate={onTimeUpdate}
+      onLoadedData={(e) => {
+        void e.currentTarget.play().catch(() => {});
+      }}
+    />
+  );
+}
 
 function jumpToPost(postId: string) {
   const id = String(postId);
@@ -60,10 +97,11 @@ export default function LocalBusinessSuggestionCard({
   useMockBusinesses = false,
   pinnedPaidPostId,
   viewerHandle = null,
+  viewerRegional = null,
   onFollowPost: _onFollowPost,
   onHideBusiness,
   onUnhideBusiness,
-  onLikeBusiness,
+  onLikeBusiness: _onLikeBusiness,
 }: LocalBusinessSuggestionCardProps) {
   const navigate = useNavigate();
   const [locallyHiddenBusinesses, setLocallyHiddenBusinesses] = React.useState<Set<string>>(new Set());
@@ -123,7 +161,7 @@ export default function LocalBusinessSuggestionCard({
       return {
       id: String(post.id),
       name: post.venue || post.landmark || post.userHandle,
-      subtitle: post.locationLabel || userLocal || 'Local match',
+      subtitle: activityContextLabel({ local: userLocal, regional: viewerRegional || undefined }, post),
       avatarSrc: getAvatarForHandle(post.userHandle),
       handle: post.userHandle,
       postId: String(post.id),
@@ -133,7 +171,7 @@ export default function LocalBusinessSuggestionCard({
       canViewProfile: Boolean(post.userHandle) && !own,
     };
     });
-  }, [useMockBusinesses, mockBusinesses, posts, userLocal, viewerHandle]);
+  }, [useMockBusinesses, mockBusinesses, posts, userLocal, viewerHandle, viewerRegional]);
   const visibleBusinessCards = React.useMemo(
     () =>
       businessCards.filter((card) => {
@@ -179,20 +217,43 @@ export default function LocalBusinessSuggestionCard({
     return () => observer.disconnect();
   }, [visibleBusinessCards, pinnedPaidPostId]);
 
+  const openCard = (card: BusinessCardModel) => {
+    if (!card.canViewProfile) return;
+    emitSuggestedPlacesAnalytics({
+      action: 'business_card_profile_open',
+      businessKey: card.id,
+      postId: card.postId,
+    });
+    if (card.handle) navigate(`/user/${card.handle}`);
+    else if (card.postId) jumpToPost(card.postId);
+  };
+
   return (
-    <section className="mx-3 mb-4 rounded-3xl border border-white/20 bg-black/30 p-3">
-      <div className="mb-3">
-        <h3 className="text-[15px] font-semibold leading-5 text-white tracking-tight">Local businesses you might like</h3>
-      </div>
+    <section className="mb-2">
+      <h3 className="mx-4 mb-2.5 text-[16px] font-bold leading-[21px] tracking-tight text-white">
+        Local businesses you might like
+      </h3>
 
       {visibleBusinessCards.length === 0 ? (
-        <div className="rounded-2xl border border-[#30363d] bg-[#0d1318] px-3 py-4 text-center">
+        <div className="mx-4 rounded-2xl border border-[#30363d] bg-[#0d1318] px-3 py-4 text-center">
           <p className="text-[12px] text-[#bdbdbd]">No business profiles available right now.</p>
         </div>
       ) : (
-      <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-hide">
+      <div className="flex gap-2.5 overflow-x-auto px-4 pb-1 scrollbar-hide">
         {visibleBusinessCards.map((card, idx) => {
           const isSponsored = Boolean(pinnedPaidPostId && card.postId && card.postId === pinnedPaidPostId);
+          const preview = card.post ? featuredPreviewFromPost(card.post) : null;
+          const videoSrc =
+            preview?.isVideo && preview.mediaUrl
+              ? resolveMockFeedVideoUrl(preview.mediaUrl)
+              : preview?.isVideo && preview.thumbnailUrl && VIDEO_SRC_RE.test(preview.thumbnailUrl)
+                ? resolveMockFeedVideoUrl(preview.thumbnailUrl)
+                : undefined;
+          const stillRaw =
+            preview?.thumbnailUrl && !VIDEO_SRC_RE.test(preview.thumbnailUrl) && !preview.thumbnailUrl.startsWith('#')
+              ? preview.thumbnailUrl
+              : undefined;
+          const stillSrc = stillRaw ? rewriteMediaUrlForClient(stillRaw) || stillRaw : undefined;
           return (
             <article
               key={card.id}
@@ -202,61 +263,32 @@ export default function LocalBusinessSuggestionCard({
               data-business-card-id={card.id}
               data-business-card-index={idx}
               data-business-post-id={card.postId || ''}
-              className="flex shrink-0 w-[165px] flex-col overflow-hidden rounded-2xl border border-white/25 bg-white/10"
+              className="w-full min-w-full shrink-0 overflow-hidden rounded-xl border border-white/35 bg-white/[0.14]"
             >
-              <button
-                type="button"
-                onClick={() => {
-                  if (!card.canViewProfile) return;
-                  emitSuggestedPlacesAnalytics({
-                    action: 'business_card_profile_open',
-                    businessKey: card.id,
-                    postId: card.postId,
-                  });
-                  if (card.handle) {
-                    navigate(`/user/${card.handle}`);
-                  } else if (card.postId) {
-                    jumpToPost(card.postId);
-                  }
-                }}
-                className="w-full px-2.5 pt-2.5 disabled:cursor-not-allowed"
-                disabled={!card.canViewProfile}
-              >
-                <div className="mb-2.5 flex justify-center">
-                  <Avatar src={card.avatarSrc} name={card.name} size={94} className="!rounded-full ring-1 ring-white/10" />
-                </div>
-                <p className="truncate text-center text-[15px] font-semibold text-white leading-tight">{card.name}</p>
-                <p className="mt-0.5 truncate text-center text-[12px] text-[#8e8e8e]">{card.subtitle}</p>
-                {isSponsored && (
-                  <span className="mt-1 inline-block rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/85">
-                    Sponsored
-                  </span>
-                )}
-              </button>
-              <div className="mt-1.5 inline-flex items-center gap-1 px-2.5 text-[10px] text-white/70">
-                <FiMapPin className="h-3 w-3" />
-                <span className="truncate">{userLocal || 'Local match'}</span>
-              </div>
-              {!card.isOwn && card.handle && onHideBusiness && (
-                <div className="mt-1 flex items-center justify-between gap-2 px-2.5 pb-2">
-                  {onLikeBusiness && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const key = normalizeHandle(card.handle);
-                        if (!key) return;
-                        emitSuggestedPlacesAnalytics({
-                          action: 'business_card_more_like_this',
-                          businessKey: key,
-                          postId: card.postId,
-                        });
-                        onLikeBusiness(key);
-                      }}
-                      className="text-[10px] font-medium text-[#8ab4ff] hover:text-[#b7d0ff]"
-                    >
-                      More like this
-                    </button>
+              <div className="relative h-80 bg-[#1a1a1a]">
+                <button
+                  type="button"
+                  onClick={() => openCard(card)}
+                  disabled={!card.canViewProfile}
+                  className="absolute inset-0 block h-full w-full disabled:cursor-not-allowed"
+                >
+                  {videoSrc ? (
+                    <PreviewVideo src={videoSrc} poster={stillSrc} />
+                  ) : stillSrc ? (
+                    <img src={stillSrc} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center bg-white/[0.08]">
+                      <Avatar src={card.avatarSrc} name={card.name} size={72} hideBorder />
+                    </span>
                   )}
+                  {preview && (videoSrc || stillSrc) ? (
+                    <span className="absolute bottom-14 left-2.5 flex items-center gap-1 rounded bg-black/50 px-1.5 py-0.5">
+                      <IoPlay className="h-2.5 w-2.5 text-white" aria-hidden />
+                      <span className="text-[10px] font-semibold text-white">{formatViews(preview.views)}</span>
+                    </span>
+                  ) : null}
+                </button>
+                {!card.isOwn && card.handle && onHideBusiness ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -271,31 +303,35 @@ export default function LocalBusinessSuggestionCard({
                       setLastHiddenBusiness(key);
                       onHideBusiness(key);
                     }}
-                    className="text-[10px] font-medium text-white/55 hover:text-white/85"
+                    className="absolute right-2 top-2 z-[3] flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white"
+                    aria-label="Not interested"
                   >
-                    Not interested
+                    <IoClose className="h-3.5 w-3.5" />
                   </button>
-                </div>
-              )}
+                ) : null}
+                <button
+                  type="button"
+                  disabled={card.isOwn || !card.canViewProfile}
+                  onClick={() => openCard(card)}
+                  className="absolute bottom-2.5 left-2.5 right-2.5 z-[2] flex h-10 items-center justify-between rounded-full bg-white pl-3.5 pr-2.5 text-sm font-semibold text-[#111111] shadow-[0_2px_4px_rgba(0,0,0,0.2)] disabled:bg-white/70"
+                >
+                  <span>{card.isOwn ? 'You' : 'View profile'}</span>
+                  {card.isOwn ? null : <IoChevronForward className="h-[18px] w-[18px]" aria-hidden />}
+                </button>
+              </div>
               <button
                 type="button"
-                disabled={card.isOwn || !card.canViewProfile}
-                onClick={() => {
-                  if (card.isOwn || !card.canViewProfile) return;
-                  emitSuggestedPlacesAnalytics({
-                    action: 'business_card_profile_open',
-                    businessKey: card.id,
-                    postId: card.postId,
-                  });
-                  if (card.handle) {
-                    navigate(`/user/${card.handle}`);
-                  } else if (card.postId) {
-                    jumpToPost(card.postId);
-                  }
-                }}
-                className="mt-auto w-full bg-white py-2.5 text-sm font-semibold text-[#111111] disabled:bg-white/70"
+                onClick={() => openCard(card)}
+                disabled={!card.canViewProfile}
+                className="flex w-full items-center gap-2.5 px-3 py-3 text-left disabled:cursor-not-allowed"
               >
-                {card.isOwn ? 'You' : 'View profile'}
+                <Avatar src={card.avatarSrc} name={card.name} size={40} hideBorder />
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-bold text-white">{card.name}</span>
+                  <span className="mt-0.5 block truncate text-[13px] text-white/70">
+                    {isSponsored ? 'Sponsored' : card.subtitle}
+                  </span>
+                </span>
               </button>
             </article>
           );

@@ -6,12 +6,22 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Video, { type VideoRef } from 'react-native-video';
 import Avatar from './Avatar.native';
-import { getAvatarForHandle } from '../api/users';
+import { resolveAvatarForUser } from '../api/users';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import type { Post } from '../types';
 import { emitSuggestedPlacesAnalytics } from '../utils/suggestedPlaces';
+import { activityContextLabel, featuredPreviewFromPost } from '../utils/suggestedFollowerFeed';
+import {
+  isMockDemoVideoPath,
+  mockFeedVideoSource,
+} from '../constants/mockFeedVideos.native';
+import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 
 type Props = {
   posts: Post[];
@@ -19,6 +29,7 @@ type Props = {
   useMockBusinesses?: boolean;
   pinnedPaidPostId?: string;
   viewerHandle?: string | null;
+  viewerRegional?: string | null;
   onFollowPost?: (post: Post) => void | Promise<void>;
   onHideBusiness?: (businessKey: string) => void;
   onUnhideBusiness?: (businessKey: string) => void;
@@ -45,31 +56,101 @@ function normalizeHandle(v: string | null | undefined): string {
   return String(v || '').replace(/^@/, '').trim().toLowerCase();
 }
 
-function coverStill(post: Post | undefined): string | undefined {
-  if (!post) return undefined;
-  const extra = post as Post & {
-    thumbnail_url?: string;
-    poster_url?: string;
-    image_url?: string;
-    media_url?: string;
-  };
-  const candidates = [
-    post.thumbnailUrl,
-    extra.thumbnail_url,
-    post.videoPosterUrl,
-    extra.poster_url,
-    extra.image_url,
-    post.mediaItems?.find((item) => item.type === 'image' && item.url)?.url,
-    extra.media_url,
-    post.mediaUrl,
-  ];
-  for (const value of candidates) {
-    if (typeof value !== 'string') continue;
-    const uri = value.trim();
-    if (!uri || /\.(mp4|mov|m4v|webm)(\?|$)/i.test(uri)) continue;
-    return uri;
+function looksLikeVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url) || isMockDemoVideoPath(url);
+}
+
+function formatViews(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function MutedPreviewVideo({ url }: { url: string }) {
+  const videoRef = React.useRef<VideoRef>(null);
+  const [feedScrolling, setFeedScrolling] = React.useState(getFeedScrollBusy());
+  React.useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
+
+  return (
+    <Video
+      ref={videoRef}
+      source={mockFeedVideoSource(url)}
+      style={StyleSheet.absoluteFill}
+      resizeMode="cover"
+      paused={feedScrolling}
+      muted
+      repeat
+      controls={false}
+      playInBackground={false}
+      playWhenInactive={false}
+      ignoreSilentSwitch="obey"
+      {...androidListSafeVideoProps()}
+      pointerEvents="none"
+      onProgress={({ currentTime }) => {
+        if (currentTime > 1) videoRef.current?.seek(0);
+      }}
+    />
+  );
+}
+
+function FeaturedCover({
+  post,
+  avatarSrc,
+  name,
+}: {
+  post?: Post;
+  avatarSrc?: string;
+  name: string;
+}) {
+  const [stillFailed, setStillFailed] = React.useState(false);
+  const preview = post ? featuredPreviewFromPost(post) : null;
+  const videoUrl = preview?.mediaUrl || preview?.thumbnailUrl || '';
+  const stillIsImage =
+    Boolean(preview?.thumbnailUrl) &&
+    !looksLikeVideoUrl(preview!.thumbnailUrl) &&
+    !preview!.thumbnailUrl.startsWith('/demo-videos/') &&
+    !preview!.thumbnailUrl.startsWith('#');
+  const needsVideo =
+    Boolean(preview?.isVideo) &&
+    Boolean(videoUrl) &&
+    (isMockDemoVideoPath(videoUrl) || looksLikeVideoUrl(videoUrl)) &&
+    !stillIsImage;
+  const stillUri = stillIsImage ? resolvePublicMediaUrl(preview!.thumbnailUrl) || preview!.thumbnailUrl : '';
+
+  const badge =
+    preview && (needsVideo || (stillIsImage && !stillFailed && stillUri)) ? (
+      <View style={styles.viewsBadge}>
+        <Icon name="play" size={10} color="#fff" />
+        <Text style={styles.viewsBadgeText}>{formatViews(preview.views)}</Text>
+      </View>
+    ) : null;
+
+  if (needsVideo) {
+    const playable = isMockDemoVideoPath(videoUrl) ? videoUrl : resolvePublicMediaUrl(videoUrl) || videoUrl;
+    return (
+      <>
+        <MutedPreviewVideo url={playable} />
+        {badge}
+      </>
+    );
   }
-  return undefined;
+  if (stillIsImage && !stillFailed && stillUri) {
+    return (
+      <>
+        <Image
+          source={{ uri: stillUri }}
+          style={styles.cover}
+          resizeMode="cover"
+          onError={() => setStillFailed(true)}
+        />
+        {badge}
+      </>
+    );
+  }
+  return (
+    <View style={styles.coverFallback}>
+      <Avatar src={avatarSrc} name={name} size={72} />
+    </View>
+  );
 }
 
 function mockBusinessAvatar(name: string): string {
@@ -82,6 +163,7 @@ export default function LocalBusinessSuggestionCard({
   useMockBusinesses = false,
   pinnedPaidPostId,
   viewerHandle = null,
+  viewerRegional = null,
   onHideBusiness,
   onUnhideBusiness,
   onLikeBusiness: _onLikeBusiness,
@@ -92,6 +174,8 @@ export default function LocalBusinessSuggestionCard({
   const [locallyHiddenBusinesses, setLocallyHiddenBusinesses] = React.useState<Set<string>>(new Set());
   const [lastHiddenBusiness, setLastHiddenBusiness] = React.useState<string | null>(null);
   const seenImpressionsRef = React.useRef<Set<string>>(new Set());
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = Math.max(280, screenWidth - 32);
 
   React.useEffect(() => {
     onStripShown?.();
@@ -143,8 +227,8 @@ export default function LocalBusinessSuggestionCard({
         return {
           id: String(post.id),
           name: post.venue || post.landmark || post.userHandle,
-          subtitle: post.locationLabel || userLocal || 'Local match',
-          avatarSrc: getAvatarForHandle(post.userHandle),
+          subtitle: activityContextLabel({ local: userLocal, regional: viewerRegional || undefined }, post),
+          avatarSrc: resolveAvatarForUser(post.userHandle, post),
           handle: post.userHandle,
           postId: String(post.id),
           post,
@@ -153,7 +237,7 @@ export default function LocalBusinessSuggestionCard({
           canViewProfile: Boolean(post.userHandle) && !own,
         };
       });
-  }, [useMockBusinesses, mockBusinesses, posts, userLocal, viewerHandle]);
+  }, [useMockBusinesses, mockBusinesses, posts, userLocal, viewerHandle, viewerRegional]);
 
   const visibleBusinessCards = React.useMemo(
     () =>
@@ -221,23 +305,17 @@ export default function LocalBusinessSuggestionCard({
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
           {visibleBusinessCards.map((card) => {
             const isSponsored = Boolean(pinnedPaidPostId && card.postId && card.postId === pinnedPaidPostId);
-            const cover = coverStill(card.post) || card.avatarSrc;
             return (
-              <View key={card.id} style={styles.card}>
-                <TouchableOpacity
-                  onPress={() => openCard(card)}
-                  disabled={!card.canViewProfile}
-                  style={styles.coverTap}
-                  activeOpacity={0.9}
-                >
-                  {cover ? (
-                    <Image source={{ uri: cover }} style={styles.cover} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.coverFallback}>
-                      <Avatar src={card.avatarSrc} name={card.name} size={72} />
-                    </View>
-                  )}
-                  <View style={styles.scrim} />
+              <View key={card.id} style={[styles.card, { width: cardWidth }]}>
+                <View style={styles.coverTap}>
+                  <TouchableOpacity
+                    onPress={() => openCard(card)}
+                    disabled={!card.canViewProfile}
+                    style={StyleSheet.absoluteFill}
+                    activeOpacity={0.9}
+                  >
+                    <FeaturedCover post={card.post} avatarSrc={card.avatarSrc} name={card.name} />
+                  </TouchableOpacity>
                   {!card.isOwn && card.handle && onHideBusiness ? (
                     <TouchableOpacity
                       style={styles.dismiss}
@@ -257,7 +335,24 @@ export default function LocalBusinessSuggestionCard({
                       <Icon name="close" size={14} color="#FFFFFF" />
                     </TouchableOpacity>
                   ) : null}
-                  <View style={styles.caption}>
+                  <TouchableOpacity
+                    disabled={card.isOwn || !card.canViewProfile}
+                    onPress={() => openCard(card)}
+                    style={[styles.viewPill, (card.isOwn || !card.canViewProfile) && styles.viewPillDisabled]}
+                    accessibilityLabel={card.isOwn ? 'You' : 'View profile'}
+                  >
+                    <Text style={styles.viewPillText}>{card.isOwn ? 'You' : 'View profile'}</Text>
+                    {card.isOwn ? null : <Icon name="chevron-forward" size={18} color="#111111" />}
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  onPress={() => openCard(card)}
+                  disabled={!card.canViewProfile}
+                  style={styles.identity}
+                  activeOpacity={0.85}
+                >
+                  <Avatar src={card.avatarSrc} name={card.name} size={40} hideBorder />
+                  <View style={styles.identityText}>
                     <Text style={styles.cardName} numberOfLines={1}>
                       {card.name}
                     </Text>
@@ -265,13 +360,6 @@ export default function LocalBusinessSuggestionCard({
                       {isSponsored ? 'Sponsored' : card.subtitle}
                     </Text>
                   </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  disabled={card.isOwn || !card.canViewProfile}
-                  onPress={() => openCard(card)}
-                  style={[styles.viewBanner, (card.isOwn || !card.canViewProfile) && styles.viewBannerDisabled]}
-                >
-                  <Text style={styles.viewBannerText}>{card.isOwn ? 'You' : 'View profile'}</Text>
                 </TouchableOpacity>
               </View>
             );
@@ -345,7 +433,6 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   card: {
-    width: 168,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: 'rgba(255, 255, 255, 0.14)',
@@ -353,24 +440,35 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.35)',
   },
   coverTap: {
-    height: 210,
+    height: 320,
+    backgroundColor: '#1a1a1a',
   },
   cover: {
     ...StyleSheet.absoluteFillObject,
   },
+  viewsBadge: {
+    position: 'absolute',
+    left: 10,
+    bottom: 58,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  viewsBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
+  },
   coverFallback: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  scrim: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 78,
-    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   dismiss: {
     position: 'absolute',
@@ -383,36 +481,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  caption: {
-    position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 8,
+  identity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  identityText: {
+    flex: 1,
   },
   cardName: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   cardSubtitle: {
     marginTop: 2,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.86)',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
   },
-  viewBanner: {
+  viewPill: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 10,
+    zIndex: 2,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#FFFFFF',
-    minHeight: 40,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 14,
+    paddingRight: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  viewBannerDisabled: {
+  viewPillDisabled: {
     backgroundColor: 'rgba(255,255,255,0.72)',
   },
-  viewBannerText: {
+  viewPillText: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#111111',
-    letterSpacing: 0.2,
   },
   undoRow: {
     marginTop: 8,
