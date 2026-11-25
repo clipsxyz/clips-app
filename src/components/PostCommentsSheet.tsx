@@ -553,6 +553,12 @@ export default function PostCommentsSheet({
         // than the overlap on Android, which left a gap under the field.
         // A plain View (not an animated one) so the text field's changes reach the
         // send button on this phone.
+        const applyLift = (next: number) => {
+            const lifted = Math.max(0, Math.round(next));
+            if (Math.abs(lifted - composerLiftRef.current) < 2) return;
+            composerLiftRef.current = lifted;
+            setComposerLift(lifted);
+        };
         const alignComposer = (keyboardTop: number) => {
             footerRef.current?.measureInWindow((_x, y, _w, height) => {
                 if (cancelled) return;
@@ -560,10 +566,7 @@ export default function PostCommentsSheet({
                 // Add back the lift already applied so a second measure does not
                 // stack the same overlap on top of itself.
                 const restingBottom = visualBottom + composerLiftRef.current;
-                const next = Math.max(0, Math.round(restingBottom - keyboardTop));
-                if (Math.abs(next - composerLiftRef.current) < 2) return;
-                composerLiftRef.current = next;
-                setComposerLift(next);
+                applyLift(restingBottom - keyboardTop);
             });
         };
         const onShow = (e: { endCoordinates: { height: number; screenY: number } }) => {

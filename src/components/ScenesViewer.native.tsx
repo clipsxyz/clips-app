@@ -7,6 +7,7 @@ import {
     StyleSheet,
     Pressable,
     Image,
+    Modal,
     Platform,
     BackHandler,
     useWindowDimensions,
@@ -187,6 +188,10 @@ export default function ScenesViewer({
     const [commentsOpen, setCommentsOpen] = useState(false);
     /** Stays mounted through the close animation so the sheet can slide down. */
     const [commentsMounted, setCommentsMounted] = useState(false);
+    /** Frozen when comments open so the keyboard cannot pull this hole up over the video. */
+    const [commentsPreviewHeight, setCommentsPreviewHeight] = useState(() =>
+        Math.max(1, Math.round(windowHeight * COMMENTS_PREVIEW_RATIO)),
+    );
     const [sharePost, setSharePost] = useState<Post | null>(null);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
     const [burstKey, setBurstKey] = useState(0);
@@ -283,7 +288,7 @@ export default function ScenesViewer({
 
     useEffect(() => {
         if (commentsOpen) {
-            // Keep the video and sheet where they opened. The composer lifts on its own.
+            // Keep the video where it opened. adjustResize shortens the window; the dock is pinned to that bottom.
             const preview = Math.max(1, Math.round(stageHeightSv.value * COMMENTS_PREVIEW_RATIO));
             commentsPreviewSv.value = preview;
             commentsProgressSv.value = withTiming(1, {
@@ -337,16 +342,6 @@ export default function ScenesViewer({
             // to the top so the sheet can sit underneath it.
             top: centeredTop * (1 - commentsProgressSv.value),
             borderRadius: commentsProgressSv.value * COMMENTS_MEDIA_RADIUS,
-        };
-    });
-
-    const commentsDockStyle = useAnimatedStyle(() => {
-        const top =
-            stageHeightSv.value -
-            (stageHeightSv.value - commentsPreviewSv.value) * commentsProgressSv.value;
-        return {
-            top,
-            height: Math.max(0, stageHeightSv.value - top),
         };
     });
 
@@ -485,9 +480,12 @@ export default function ScenesViewer({
     }, []);
 
     const openComments = useCallback(() => {
+        setCommentsPreviewHeight(
+            Math.max(1, Math.round(stageHeightSv.value * COMMENTS_PREVIEW_RATIO)),
+        );
         setCommentsMounted(true);
         setCommentsOpen(true);
-    }, []);
+    }, [stageHeightSv]);
 
     const closeComments = useCallback(() => {
         setCommentsOpen(false);
@@ -1080,24 +1078,41 @@ export default function ScenesViewer({
             </View>
 
             {commentsMounted ? (
-                <Animated.View style={[styles.commentsDock, commentsDockStyle]}>
-                    <PostCommentsSheet
-                        variant="scenesEmbed"
-                        postId={String(activePost.id)}
-                        onCommentCountChange={(pid, count) => {
-                            patchPost(String(pid), (p) => ({
-                                ...p,
-                                comments_count: count,
-                                stats: { ...p.stats, comments: count },
-                            }));
-                        }}
-                        post={activePost}
-                        isOpen={commentsMounted}
-                        commentAuthorHandle={viewerHandle ?? ''}
-                        currentUserHandle={viewerHandle}
-                        onClose={closeComments}
-                    />
-                </Animated.View>
+                <Modal
+                    visible
+                    transparent
+                    animationType="slide"
+                    statusBarTranslucent
+                    presentationStyle="overFullScreen"
+                    hardwareAccelerated
+                    onRequestClose={closeComments}
+                >
+                    <View style={styles.scenesCommentsRoot}>
+                        <Pressable
+                            style={{ height: commentsPreviewHeight }}
+                            onPress={closeComments}
+                            accessibilityLabel="Dismiss comments"
+                        />
+                        <View style={styles.scenesCommentsSheet}>
+                            <PostCommentsSheet
+                                variant="scenesEmbed"
+                                postId={String(activePost.id)}
+                                onCommentCountChange={(pid, count) => {
+                                    patchPost(String(pid), (p) => ({
+                                        ...p,
+                                        comments_count: count,
+                                        stats: { ...p.stats, comments: count },
+                                    }));
+                                }}
+                                post={activePost}
+                                isOpen={commentsMounted}
+                                commentAuthorHandle={viewerHandle ?? ''}
+                                currentUserHandle={viewerHandle}
+                                onClose={closeComments}
+                            />
+                        </View>
+                    </View>
+                </Modal>
             ) : null}
 
             <PostOverflowMenuModal
@@ -1349,13 +1364,13 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         position: 'relative',
     },
-    commentsDock: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        zIndex: 40,
-        elevation: 16,
-        backgroundColor: '#060d16',
+    scenesCommentsRoot: {
+        flex: 1,
+    },
+    scenesCommentsSheet: {
+        flex: 1,
+        minHeight: 0,
+        backgroundColor: 'transparent',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         overflow: 'hidden',
