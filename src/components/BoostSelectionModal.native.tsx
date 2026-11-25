@@ -20,7 +20,7 @@ import { estimateBoostPriceApi, updateAuthProfile, apiRequest } from '../api/cli
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { confirmBoostCheckout } from '../api/boost';
 import { openStripeCheckout } from '../utils/stripeCheckoutNative';
-import { boostQuoteCents, BOOST_UNIT_PRICE_EUR } from '../utils/boostQuote';
+import { boostQuoteCents, BOOST_UNIT_PRICE_EUR, STRIPE_MIN_CHARGE_CENTS } from '../utils/boostQuote';
 import { BOOST_ACTIVATED_EVENT } from './BoostActivatedModal.native';
 import { BOOST_STATUS_REFRESH_EVENT } from '../navigation/linking';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -65,8 +65,6 @@ const durationOptions: Array<{ hours: BoostDuration; label: string; multiplier: 
     { hours: 24, label: '24h', multiplier: 2.2 },
     { hours: 72, label: '3d', multiplier: 4 },
 ];
-
-const MIN_ELIGIBLE_AUDIENCE = 100;
 
 const EXTERNAL_CHECKOUT_MESSAGE = 'You are leaving Gazetteer to make a purchase on external web checkout. Gazetteer Direct offers discounted rates.';
 
@@ -156,14 +154,14 @@ export default function BoostSelectionModal({
         selectedOption === 'local' ? 'Local audience' : selectedOption === 'regional' ? 'Regional audience' : 'National audience';
     const selectedDurationMeta = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
     const multiplier = selectedDurationMeta.multiplier;
+    const rawStripeCents = eligibleUsersCount == null
+        ? null
+        : Math.round(eligibleUsersCount * BOOST_UNIT_PRICE_EUR.stripe * multiplier * 100);
     const stripeCents = eligibleUsersCount == null ? null : boostQuoteCents(eligibleUsersCount, multiplier, 'stripe');
     const estimatedTotalPrice = stripeCents == null ? null : stripeCents / 100;
+    const stripeMinimumApplied = rawStripeCents != null && rawStripeCents > 0 && rawStripeCents < STRIPE_MIN_CHARGE_CENTS;
     const estimatedReach = eligibleUsersCount != null ? `${eligibleUsersCount.toLocaleString()} users` : '--';
-    const eligibleTooLow =
-        typeof eligibleUsersCount === 'number' &&
-        eligibleUsersCount > 0 &&
-        eligibleUsersCount < MIN_ELIGIBLE_AUDIENCE;
-    const canContinue = estimatedTotalPrice != null && estimatedTotalPrice > 0 && !eligibleTooLow && !estimateLoading;
+    const canContinue = estimatedTotalPrice != null && estimatedTotalPrice > 0 && !estimateLoading;
 
     React.useEffect(() => {
         let cancelled = false;
@@ -566,6 +564,9 @@ export default function BoostSelectionModal({
                         <Text style={styles.footerLine}>
                             Ad budget: {estimatedTotalPrice != null ? `EUR ${estimatedTotalPrice.toFixed(2)}` : '--'}
                         </Text>
+                        {stripeMinimumApplied && (
+                            <Text style={styles.footerMuted}>Card payments start at €0.50.</Text>
+                        )}
                         {estimateLoading && (
                             <View style={styles.loadingRow}>
                                 <ActivityIndicator size="small" color="#f472b6" />
@@ -575,11 +576,6 @@ export default function BoostSelectionModal({
                         {!!estimateError && <Text style={styles.errorText}>{estimateError}</Text>}
                         {!!payError && <Text style={styles.errorText}>{payError}</Text>}
                         {!!payNotice && <Text style={styles.footerMuted}>{payNotice}</Text>}
-                        {eligibleTooLow && (
-                            <Text style={styles.warnText}>
-                                Audience is below minimum ({MIN_ELIGIBLE_AUDIENCE} users). Increase radius.
-                            </Text>
-                        )}
 
                         <View style={styles.actions}>
                             <Pressable
@@ -793,7 +789,6 @@ const styles = StyleSheet.create({
     footerMuted: { color: '#9CA3AF', fontSize: 12 },
     loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
     errorText: { color: '#FCA5A5', fontSize: 12, marginTop: 4 },
-    warnText: { color: '#FCD34D', fontSize: 12, marginTop: 4 },
     actions: {
         flexDirection: 'row',
         alignItems: 'center',

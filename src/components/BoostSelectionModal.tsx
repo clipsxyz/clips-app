@@ -44,7 +44,6 @@ const durationOptions: Array<{ hours: BoostDuration; label: string; multiplier: 
     { hours: 24, label: '24h', multiplier: 2.2 },
     { hours: 72, label: '3d', multiplier: 4 },
 ];
-const MIN_ELIGIBLE_AUDIENCE = 100;
 const DEFAULT_LOCAL_BOUNDARY_KM = 2;
 const DEFAULT_REGIONAL_BOUNDARY_KM = 6;
 
@@ -131,21 +130,17 @@ export default function BoostSelectionModal({
             ? 'Regional audience'
             : 'National audience';
     const isBusinessAccount = user?.accountType === 'business';
-    const eligibleTooLow =
-        typeof eligibleUsersCount === 'number' &&
-        eligibleUsersCount > 0 &&
-        eligibleUsersCount < MIN_ELIGIBLE_AUDIENCE;
-    const suggestedRadiusKm = React.useMemo(() => {
-        if (!eligibleTooLow || !eligibleUsersCount || radiusKm <= 0) return null;
-        const ratio = MIN_ELIGIBLE_AUDIENCE / Math.max(1, eligibleUsersCount);
-        const next = Math.max(radiusKm + 0.5, radiusKm * ratio);
-        return Number((Math.ceil(next * 2) / 2).toFixed(1));
-    }, [eligibleTooLow, eligibleUsersCount, radiusKm]);
     const canContinue =
         estimatedTotalPrice != null &&
         estimatedTotalPrice > 0 &&
-        !eligibleTooLow &&
         !estimateLoading;
+    const rawAudiencePrice = eligibleUsersCount == null
+        ? null
+        : eligibleUsersCount * 0.01 * selectedDurationMeta.multiplier;
+    const stripeMinimumApplied = rawAudiencePrice != null
+        && rawAudiencePrice > 0
+        && rawAudiencePrice < 0.5
+        && (estimatedTotalPrice ?? 0) >= 0.5;
     const currentStep = activeStep;
     const totalSteps = 3;
 
@@ -261,7 +256,8 @@ export default function BoostSelectionModal({
                     };
                     const multiplier = durationOptions.find((d) => d.hours === selectedDuration)?.multiplier ?? 1;
                     const eligible = Math.max(0, Math.round(baseByFeed[debouncedSelectedOption] * (debouncedRadiusKm / 2)));
-                    const price = Number((eligible * 0.01 * multiplier).toFixed(2));
+                    const rawPrice = eligible * 0.01 * multiplier;
+                    const price = Number((rawPrice > 0 && rawPrice < 0.5 ? 0.5 : rawPrice).toFixed(2));
                     if (cancelled) return;
                     setEligibleUsersCount(eligible);
                     setEstimatedTotalPrice(price);
@@ -653,25 +649,14 @@ export default function BoostSelectionModal({
                                 {estimatedTotalPrice != null ? `€${estimatedTotalPrice.toFixed(2)}` : '--'}
                             </span>
                         </div>
+                        {stripeMinimumApplied && (
+                            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Card payments start at €0.50.</p>
+                        )}
                         {estimateLoading && (
                             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Calculating audience...</p>
                         )}
                         {estimateError && (
                             <p className="mt-2 text-xs text-red-600 dark:text-red-400">{estimateError}</p>
-                        )}
-                        {eligibleTooLow && (
-                            <div className="mt-2 rounded-xl border border-amber-300/50 bg-amber-50/70 px-2.5 py-2 text-xs text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
-                                <p>Audience is below minimum ({MIN_ELIGIBLE_AUDIENCE} users) for this radius.</p>
-                                {suggestedRadiusKm != null && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setRadiusKm(suggestedRadiusKm)}
-                                        className="mt-1 inline-flex items-center rounded-lg border border-amber-400/50 px-2 py-1 font-semibold hover:bg-amber-100/70 dark:hover:bg-amber-400/10"
-                                    >
-                                        Try {suggestedRadiusKm} km
-                                    </button>
-                                )}
-                            </div>
                         )}
                     </div>
                     <div className="flex items-center gap-2">

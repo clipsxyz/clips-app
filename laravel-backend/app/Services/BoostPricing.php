@@ -7,6 +7,9 @@ class BoostPricing
     /** Card checkout, about €10.00 per 1,000 people. */
     public const STRIPE_UNIT_PRICE_EUR = 0.010;
 
+    /** Stripe rejects a Checkout Session below this amount. */
+    public const STRIPE_MIN_CHARGE_CENTS = 50;
+
     /** App Store and Google Play, about €12.50 per 1,000 people. */
     public const STORE_UNIT_PRICE_EUR = 0.0125;
 
@@ -45,7 +48,12 @@ class BoostPricing
     /** Stripe cents for audienceCount × gateway rate × duration multiplier. */
     public static function audienceCents(int $audienceCount, int $durationHours, string $gateway = 'stripe'): int
     {
-        return (int) round($audienceCount * self::unitPriceEur($gateway) * self::durationMultiplier($durationHours) * 100);
+        $cents = (int) round($audienceCount * self::unitPriceEur($gateway) * self::durationMultiplier($durationHours) * 100);
+        if ($gateway !== 'store' && $cents > 0 && $cents < self::STRIPE_MIN_CHARGE_CENTS) {
+            return self::STRIPE_MIN_CHARGE_CENTS;
+        }
+
+        return $cents;
     }
 
     public static function eur(string $tier, int $duration): float
