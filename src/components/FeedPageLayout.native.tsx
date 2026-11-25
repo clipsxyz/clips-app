@@ -11,7 +11,7 @@
  * not as a full-screen feed background.
  */
 
-import React, { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode } from 'react';
 import {
     Platform,
     StyleSheet,
@@ -22,54 +22,11 @@ import {
     type ViewStyle,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import Animated, {
-    Easing,
-    interpolateColor,
-    runOnJS,
-    useAnimatedReaction,
-    useAnimatedStyle,
-    useSharedValue,
-    withTiming,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ox } from '../constants/nativeOpticalScale';
-import {
-    HEADER_GLASS_NEUTRAL,
-    HEADER_SCOPE_GRADIENTS,
-    type HeaderFeedScope,
-} from '../utils/headerGlassPalette';
 
 /** News feed shell / ambient canvas floor — matches share-card Passport abyss. */
 export const FEED_PAGE_BG = '#000000';
-
-/** Scope-change fade. Scroll does not drive this. */
-const HEADER_SCOPE_MORPH_MS = 300;
-
-function colorChannels(color: string): [string, string, string] | null {
-    const channels = color.match(/[\d.]+/g);
-    if (!channels || channels.length < 3) return null;
-    return [channels[0], channels[1], channels[2]];
-}
-
-/**
- * Scope ramp: saturated accent at the status bar, its palette pair through the pill
- * row, then fully transparent so the dark canvas (`HEADER_GLASS_NEUTRAL`) shows through.
- *
- * `interpolateColor` emits `rgba()`, so alphas are rebuilt per stop instead of appending
- * a hex suffix (invalid on some Android gradient parsers).
- */
-function headerScopeStops(primary: string, secondary: string): [string, string, string] {
-    const top = colorChannels(primary);
-    const mid = colorChannels(secondary);
-    if (!top || !mid) {
-        return [...FEED_CHROME_HEADER_GRADIENT];
-    }
-    return [
-        `rgba(${top[0]}, ${top[1]}, ${top[2]}, 0.95)`,
-        `rgba(${mid[0]}, ${mid[1]}, ${mid[2]}, 0.5)`,
-        'transparent',
-    ];
-}
 
 /** Web post card / article background — Champions League black canvas. */
 export const FEED_CARD_BG = '#000000';
@@ -84,15 +41,14 @@ export const FEED_CARD_CHROME_BG = '#000000';
  * Solid fill kept only as a non-glass fallback token.
  */
 export const FEED_CHROME_GLASS = 'transparent';
+/** Bluesky dim canvas (`theme--dim` background). */
+export const FEED_HEADER_CANVAS_GREY = '#151D28';
+
 /**
- * Neutral header ramp, used only when a scope colour cannot be parsed. Live stops come
- * from `headerScopeStops` and follow the active feed scope.
+ * Pinned newsfeed header on every feed. Bluesky's canvas grey at the top, black
+ * along the bottom edge.
  */
-export const FEED_CHROME_HEADER_GRADIENT = [
-    'rgba(11, 14, 20, 0.95)',
-    'rgba(11, 14, 20, 0.5)',
-    'transparent',
-] as const;
+export const FEED_CHROME_HEADER_GRADIENT = [FEED_HEADER_CANVAS_GREY, '#000000'] as const;
 export const FEED_CHROME_FOOTER_GRADIENT = [
     'rgba(11, 14, 20, 0.0)',
     'rgba(11, 14, 20, 0.75)',
@@ -743,11 +699,6 @@ export type FeedPageLayoutProps = {
      * colour and both the header and the scroll area read as frosted glass.
      */
     backdrop?: ReactNode;
-    /**
-     * Active feed scope. The pinned header gradient is this scope's palette only —
-     * it does not change as posts scroll under the chrome.
-     */
-    headerScope?: HeaderFeedScope;
     online?: boolean;
     error?: string | null;
     onRetry?: () => void;
@@ -758,7 +709,6 @@ export default function FeedPageLayout({
     header,
     children,
     backdrop,
-    headerScope = 'national',
     online = true,
     error = null,
     onRetry,
@@ -767,67 +717,15 @@ export default function FeedPageLayout({
     const insets = useSafeAreaInsets();
     const glassScrollHost = backdrop ? styles.scrollHostGlass : null;
 
-    // --- Scope header gradient -----------------------------------------------
-    // Morph runs on the UI thread. Only the packed rgba pair crosses to JS, and only
-    // while the 300ms timing is in flight. Scroll never writes these shared values.
-    const scopeMix = useSharedValue(1);
-    const fromPrimary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.primary);
-    const toPrimary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.primary);
-    const fromSecondary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.secondary);
-    const toSecondary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.secondary);
-
-    const applyScopeStops = React.useCallback((packed: string) => {
-        const separator = packed.indexOf('|');
-        if (separator <= 0) return;
-        const primary = packed.slice(0, separator);
-        const secondary = packed.slice(separator + 1);
-        if (!primary || !secondary) return;
-        setHeaderStops(headerScopeStops(primary, secondary));
-    }, []);
-
-    useEffect(() => {
-        const next = HEADER_SCOPE_GRADIENTS[headerScope] ?? HEADER_SCOPE_GRADIENTS.national;
-        if (toPrimary.value === next.primary && toSecondary.value === next.secondary) return;
-        fromPrimary.value = toPrimary.value;
-        fromSecondary.value = toSecondary.value;
-        toPrimary.value = next.primary;
-        toSecondary.value = next.secondary;
-        scopeMix.value = 0;
-        scopeMix.value = withTiming(1, {
-            duration: HEADER_SCOPE_MORPH_MS,
-            easing: Easing.out(Easing.cubic),
-        });
-    }, [fromPrimary, fromSecondary, headerScope, scopeMix, toPrimary, toSecondary]);
-
-    const [headerStops, setHeaderStops] = useState<[string, string, string]>(() =>
-        headerScopeStops(
-            HEADER_SCOPE_GRADIENTS.national.primary,
-            HEADER_SCOPE_GRADIENTS.national.secondary,
-        ),
+    const headerCanvas = (
+        <LinearGradient
+            colors={[...FEED_CHROME_HEADER_GRADIENT]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            pointerEvents="none"
+            style={styles.headerCanvasGradient}
+        />
     );
-
-    useAnimatedReaction(
-        () => {
-            const primary = interpolateColor(scopeMix.value, [0, 1], [fromPrimary.value, toPrimary.value]);
-            const secondary = interpolateColor(scopeMix.value, [0, 1], [
-                fromSecondary.value,
-                toSecondary.value,
-            ]);
-            return `${primary}|${secondary}`;
-        },
-        (current, previous) => {
-            if (current !== previous) runOnJS(applyScopeStops)(current);
-        },
-        [fromPrimary, fromSecondary, toPrimary, toSecondary],
-    );
-
-    // Opaque path (no ambient canvas) has no gradient, so morph the primary scope colour.
-    const pinnedChromeSolidStyle = useAnimatedStyle(() => ({
-        backgroundColor: interpolateColor(scopeMix.value, [0, 1], [
-            fromPrimary.value,
-            toPrimary.value,
-        ]),
-    }));
 
     const chromeBody = (
         <>
@@ -889,27 +787,17 @@ export default function FeedPageLayout({
                     collapsable={false}
                     style={[styles.pinnedChromeGlass, { paddingTop: insets.top }]}
                 >
-                    <LinearGradient
-                        colors={headerStops}
-                        locations={[0, 0.55, 1]}
-                        start={{ x: 0.5, y: 0 }}
-                        end={{ x: 0.5, y: 1 }}
-                        pointerEvents="none"
-                        style={styles.headerCanvasGradient}
-                    />
+                    {headerCanvas}
                     {chromeBody}
                 </View>
             ) : (
-                <Animated.View
-                    style={[
-                        styles.pinnedChrome,
-                        pinnedChromeSolidStyle,
-                        { paddingTop: insets.top },
-                    ]}
+                <View
+                    style={[styles.pinnedChrome, { paddingTop: insets.top }]}
                     collapsable={false}
                 >
+                    {headerCanvas}
                     {chromeBody}
-                </Animated.View>
+                </View>
             )}
 
             {/* Inner scroll host — web: flex-1 min-h-0 overflow-y-auto pb-2 */}
@@ -988,11 +876,9 @@ const styles = StyleSheet.create({
         borderBottomWidth: 0,
         borderBottomColor: 'transparent',
         overflow: 'visible',
-        // Opaque obsidian backdrop. Scrolling cards pass fully behind this band and are
-        // hidden rather than showing through it. The animated gradient is painted ON TOP
-        // of this fill, so its transparent final stop reveals the solid colour below —
-        // which is why no extra wrapper view (and no zIndex'd offscreen layer) is needed.
-        backgroundColor: HEADER_GLASS_NEUTRAL,
+        // Opaque band. Scrolling cards pass fully behind it. The grey-to-black gradient
+        // is painted on top of this fill.
+        backgroundColor: '#000000',
     },
     /** Painted under the pill row. Touches pass through to the header controls. */
     headerCanvasGradient: {

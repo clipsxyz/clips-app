@@ -1,7 +1,8 @@
 import { normalizeHex } from './feedAmbientPalette';
 
 /**
- * Vibrant accents for the pinned feed header. Each feed scope pairs two of these.
+ * Accent ramp kept for ordinal helpers. The pinned newsfeed header no longer uses it;
+ * every feed shares the black → Bluesky-canvas gradient in FeedPageLayout.
  */
 export const HEADER_GLASS_PALETTE = [
     '#FF4D6D', // 0: Vivid Pink
@@ -27,23 +28,8 @@ export const HEADER_GLASS_PALETTE = [
  */
 export const HEADER_GLASS_NEUTRAL = '#0B0E14';
 
-/** Feed scopes that own the pinned header canvas. Scroll position does not. */
+/** Feed scopes. The pinned header canvas is the same black/grey gradient for all of them. */
 export type HeaderFeedScope = 'local' | 'regional' | 'national' | 'following';
-
-/**
- * Scope → header ramp, taken from `HEADER_GLASS_PALETTE` (the feed header accents).
- * Top stop is the saturated hue; the second stop is its pair. The canvas layer fades
- * both into transparent so `HEADER_GLASS_NEUTRAL` shows through underneath.
- */
-export const HEADER_SCOPE_GRADIENTS: Record<
-    HeaderFeedScope,
-    { primary: string; secondary: string }
-> = {
-    local: { primary: HEADER_GLASS_PALETTE[4], secondary: HEADER_GLASS_PALETTE[8] },
-    regional: { primary: HEADER_GLASS_PALETTE[3], secondary: HEADER_GLASS_PALETTE[0] },
-    national: { primary: HEADER_GLASS_PALETTE[1], secondary: HEADER_GLASS_PALETTE[6] },
-    following: { primary: HEADER_GLASS_PALETTE[6], secondary: HEADER_GLASS_PALETTE[11] },
-};
 
 /**
  * Palette colour for a post's ordinal position in the feed, cycling through the ramp.

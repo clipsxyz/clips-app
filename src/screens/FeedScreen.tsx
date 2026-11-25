@@ -5812,7 +5812,6 @@ onVisitProfile={() =>
                 online={online}
                 error={error}
                 backdrop={<FeedAmbientCanvas />}
-                headerScope={headerFeedScope}
                 onRetry={() => {
                     setError(null);
                     void reloadFeedFromStartRef.current();
