@@ -8,13 +8,18 @@ import { profileShareDisplayName } from '../../utils/profileShareStory';
 type Props = {
     handle: string;
     avatarUrl?: string;
+    /** Person who shared this profile into Shorts. */
+    sharerName?: string;
     onViewProfile?: (handle: string) => void;
 };
 
 /** Profile shared into Stories 24: portrait, name, and a way into the profile. */
-export default function StoryProfileShareCard({ handle, avatarUrl, onViewProfile }: Props) {
+export default function StoryProfileShareCard({ handle, avatarUrl, sharerName, onViewProfile }: Props) {
     const name = profileShareDisplayName(handle);
     const handleLabel = handle.replace(/^@/, '');
+    const sharerHandle = (sharerName || '').trim();
+    const sharer = sharerHandle ? profileShareDisplayName(sharerHandle) : '';
+    const kicker = sharer ? `${sharer} says check out` : 'Check out';
     const { width, height } = useWindowDimensions();
     const insets = useSafeAreaInsets();
 
@@ -26,7 +31,7 @@ export default function StoryProfileShareCard({ handle, avatarUrl, onViewProfile
             end={{ x: 0.8, y: 1 }}
             style={[styles.fill, { width, height, paddingTop: insets.top + 88, paddingBottom: insets.bottom + 108 }]}
         >
-            <Text style={styles.kicker}>Gazetteer says</Text>
+            <Text style={styles.kicker}>{kicker}</Text>
             <LinearGradient
                 colors={['#22C55E', '#FFD400', '#FF4D9A']}
                 start={{ x: 0, y: 0 }}
@@ -68,6 +73,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
+        textAlign: 'center',
         color: '#FFFFFF',
     },
     ring: {

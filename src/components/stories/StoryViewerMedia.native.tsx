@@ -74,6 +74,7 @@ export default function StoryViewerMedia({ story, isMuted, paused, authorAvatar,
             <StoryProfileShareCard
                 handle={profileShareHandle}
                 avatarUrl={story.mediaUrl}
+                sharerName={story.userHandle || authorName}
                 onViewProfile={onViewProfile}
             />
         );

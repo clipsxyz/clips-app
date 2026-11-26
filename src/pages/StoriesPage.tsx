@@ -2280,6 +2280,7 @@ export default function StoriesPage() {
                                             <StoryProfileShareCard
                                                 handle={profileShareHandle}
                                                 avatarUrl={currentStory.mediaUrl}
+                                                sharerName={currentStory.userHandle || currentGroup?.userHandle}
                                                 onViewProfile={() => {
                                                     const handle = profileShareHandle;
                                                     setViewingStories(false);

@@ -4,20 +4,25 @@ import { profileShareDisplayName } from '../../utils/profileShareStory';
 type Props = {
     handle: string;
     avatarUrl?: string;
+    /** Person who shared this profile into Shorts. */
+    sharerName?: string;
     onViewProfile: () => void;
 };
 
 /** Profile shared into Stories 24: portrait, name, and a way into the profile. */
-export default function StoryProfileShareCard({ handle, avatarUrl, onViewProfile }: Props) {
+export default function StoryProfileShareCard({ handle, avatarUrl, sharerName, onViewProfile }: Props) {
     const name = profileShareDisplayName(handle);
     const handleLabel = handle.replace(/^@/, '');
+    const sharerHandle = (sharerName || '').trim();
+    const sharer = sharerHandle ? profileShareDisplayName(sharerHandle) : '';
+    const kicker = sharer ? `${sharer} says check out` : 'Check out';
 
     return (
         <div
             className="flex h-full w-full flex-col items-center justify-center px-8"
             style={{ background: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)' }}
         >
-            <p className="mb-6 text-xs font-semibold uppercase tracking-[0.6px] text-white">Gazetteer says</p>
+            <p className="mb-6 text-center text-xs font-semibold uppercase tracking-[0.6px] text-white">{kicker}</p>
             <div
                 className="rounded-full p-[3px]"
                 style={{ background: 'linear-gradient(135deg, #22C55E, #FFD400, #FF4D9A)' }}
