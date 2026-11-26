@@ -2,16 +2,13 @@
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#000000"/>
-      <stop offset="16%" stop-color="#1A0832"/>
-      <stop offset="38%" stop-color="#3A1272"/>
-      <stop offset="58%" stop-color="#551C9C"/>
-      <stop offset="78%" stop-color="#6824B4"/>
-      <stop offset="100%" stop-color="#742CD0"/>
+      <stop offset="65%" stop-color="#060609"/>
+      <stop offset="84%" stop-color="#140D2E"/>
+      <stop offset="100%" stop-color="#1E1344"/>
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
-  <path id="bracket0" d="M 390.48 286.48 L 336.48 286.48 C 308.87 286.48 286.48 308.87 286.48 336.48 L 286.48 390.48" fill="none" stroke="#FFFFFF" stroke-width="20.00" stroke-linecap="round" stroke-linejoin="round"/>
-  <path id="bracket1" d="M 390.48 318.48 L 336.48 318.48 C 326.54 318.48 318.48 326.54 318.48 336.48 L 318.48 390.48" fill="none" stroke="#FFFFFF" stroke-width="20.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="316.48" cy="316.48" r="40.00" fill="#FFFFFF"/>
   <path id="bracket2" d="M 633.52 286.48 L 687.52 286.48 C 715.13 286.48 737.52 308.87 737.52 336.48 L 737.52 390.48" fill="none" stroke="#FFFFFF" stroke-width="20.00" stroke-linecap="round" stroke-linejoin="round"/>
   <path id="bracket3" d="M 633.52 318.48 L 687.52 318.48 C 697.46 318.48 705.52 326.54 705.52 336.48 L 705.52 390.48" fill="none" stroke="#FFFFFF" stroke-width="20.00" stroke-linecap="round" stroke-linejoin="round"/>
   <path id="bracket4" d="M 390.48 737.52 L 336.48 737.52 C 308.87 737.52 286.48 715.13 286.48 687.52 L 286.48 633.52" fill="none" stroke="#FFFFFF" stroke-width="20.00" stroke-linecap="round" stroke-linejoin="round"/>
