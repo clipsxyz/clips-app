@@ -295,12 +295,12 @@ function BottomNav({ onCreateClick, onInboxClick }: { onCreateClick: () => void;
             </span>
           )}
           {showContributeBadge && (
-            <span className={`contribute-badge-pop absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white/80 bg-gradient-to-r from-[#f6e27a] via-[#d4af37] to-[#d8dde3] text-[#111827] text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(212,175,55,0.42)] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
-              <span className="inline-flex items-center gap-1">
+            <span className={`contribute-badge-pop absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-gradient-to-r from-[#22C55E] via-[#FFD400] to-[#FF4D9A] p-[1.5px] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
+              <span className="inline-flex items-center gap-1 rounded-[14px] bg-black px-3.5 py-1 text-[11px] font-bold text-white">
                 <FiMapPin className="w-3.5 h-3.5" />
                 <span>Add Yours</span>
               </span>
-              <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 bg-[#d8dde3] rotate-45 rounded-[2px]" />
+              <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 bg-black rotate-45 rounded-[2px]" />
             </span>
           )}
           {showContributeBadge && showContributeBurst && (
@@ -959,13 +959,13 @@ function PillTabs(props: {
             >
               {showFeedSwitchCue && !menuOpen ? (
                 <span
-                  className={`contribute-badge-pop pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white bg-black px-2.5 py-1 text-[11px] font-bold text-white ${showFeedSwitchBurst ? 'contribute-badge-burst' : ''}`}
+                  className={`contribute-badge-pop pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-xl bg-gradient-to-r from-[#22C55E] via-[#FFD400] to-[#FF4D9A] p-[1.5px] ${showFeedSwitchBurst ? 'contribute-badge-burst' : ''}`}
                 >
-                  <span className="inline-flex items-center gap-1">
+                  <span className="inline-flex items-center gap-1 rounded-[10px] bg-black px-2.5 py-1 text-[11px] font-bold text-white">
                     <FiMapPin className="h-3 w-3 text-white" />
                     <span>Switch feed</span>
                   </span>
-                  <span className="absolute left-1/2 -bottom-1 h-2 w-2 -translate-x-1/2 rotate-45 rounded-[1px] border-b border-r border-white bg-black" />
+                  <span className="absolute left-1/2 -bottom-1 h-2 w-2 -translate-x-1/2 rotate-45 rounded-[1px] bg-black" />
                 </span>
               ) : null}
               <span className="shrink-0" aria-hidden>
@@ -2630,7 +2630,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, postUserAccountType, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; postUserAccountType?: string | null; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel, postCreatedAt, postId, postUserAccountType, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; postUserAccountType?: string | null; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -4081,31 +4081,46 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         )}
 
         {feedTwoPlayHold && currentItem?.type === 'video' ? (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/35">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                handleOpenScenesPress();
-              }}
-              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-white px-5 text-[15px] font-bold text-[#111111]"
+          <div
+            className="absolute inset-0 z-20 flex items-center justify-center px-6"
+            style={{ background: 'rgba(0,0,0,0.42)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="w-[255px] rounded-[22px] p-[1.5px]"
+              style={{ background: 'linear-gradient(90deg, #22C55E, #FFD400, #FF4D9A)' }}
             >
-              <FiMaximize2 size={18} />
-              View in full screen
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                replayFeedClip();
-              }}
-              className="mt-3.5 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[15px] font-semibold text-white"
-            >
-              <FiRefreshCw size={16} />
-              Replay
-            </button>
+              <div className="rounded-[20.5px] bg-black px-3.5 pb-2 pt-2.5">
+                <div className="mb-2 flex items-center justify-center gap-1 text-[11px] font-semibold uppercase tracking-[1.2px] text-white">
+                  <FiMapPin className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{postLocationLabel || 'Gazetteer'}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleOpenScenesPress();
+                  }}
+                  className="flex h-[42px] w-full items-center justify-center gap-1.5 rounded-full bg-black text-sm font-semibold text-white"
+                >
+                  <FiMaximize2 size={15} />
+                  Watch Full Screen
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    replayFeedClip();
+                  }}
+                  className="mt-1.5 flex w-full items-center justify-center gap-1.5 bg-transparent py-1.5 text-[13px] font-medium text-white"
+                >
+                  <FiRefreshCw size={14} />
+                  Replay Clip
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -5535,7 +5550,18 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             subtitlesEnabled={post.subtitlesEnabled}
             subtitleText={post.subtitleText}
             postUserHandle={post.userHandle}
-            postLocationLabel={post.locationLabel}
+            postLocationLabel={
+              [
+                post.locationRegional,
+                post.locationNational,
+                post.userRegional,
+                post.userNational,
+                post.locationLocal,
+                post.locationLabel,
+              ]
+                .map((value) => String(value || '').replace(/^(venue:|landmark:)/i, '').trim())
+                .find(Boolean) || 'Gazetteer'
+            }
             postCreatedAt={post.createdAt?.toString()}
             postUserAccountType={post.userAccountType}
             videoPosterUrl={post.videoPosterUrl}

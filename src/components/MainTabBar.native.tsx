@@ -151,13 +151,15 @@ export default function MainTabBar({
               {showAddYours && route.name === 'Create' ? (
                 <View style={styles.addYoursBubble} pointerEvents="none">
                   <LinearGradient
-                    colors={['#f6e27a', '#d4af37', '#d8dde3']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.addYoursGradient}
+                    colors={['#22C55E', '#FFD400', '#FF4D9A']}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={styles.addYoursEdge}
                   >
-                    <Icon name="location" size={10} color="#111827" />
-                    <Text style={styles.addYoursText}>Add Yours</Text>
+                    <View style={styles.addYoursFill}>
+                      <Icon name="location" size={10} color="#FFFFFF" />
+                      <Text style={styles.addYoursText}>Add Yours</Text>
+                    </View>
                   </LinearGradient>
                   <View style={styles.addYoursTail} />
                 </View>
@@ -273,25 +275,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 20,
   },
-  addYoursGradient: {
+  addYoursEdge: {
+    borderRadius: 12,
+    padding: 1.5,
+  },
+  addYoursFill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.8)',
+    borderRadius: 10.5,
+    backgroundColor: '#000000',
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   addYoursText: {
     fontSize: 9,
     fontWeight: '700',
-    color: '#111827',
+    color: '#FFFFFF',
   },
   addYoursTail: {
     width: 6,
     height: 6,
-    backgroundColor: '#d8dde3',
+    backgroundColor: '#000000',
     transform: [{ rotate: '45deg' }],
     marginTop: -3,
     borderRadius: 1,

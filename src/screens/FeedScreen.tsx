@@ -938,10 +938,17 @@ function PillTabs({
                                     },
                                 ]}
                             >
-                                <View style={styles.feedSwitchBadgeInner}>
-                                    <Icon name="location" size={ox(11)} color="#FFFFFF" />
-                                    <Text style={styles.feedSwitchBadgeText}>Switch feed</Text>
-                                </View>
+                                <LinearGradient
+                                    colors={['#22C55E', '#FFD400', '#FF4D9A']}
+                                    start={{ x: 0, y: 0.5 }}
+                                    end={{ x: 1, y: 0.5 }}
+                                    style={styles.feedSwitchBadgeEdge}
+                                >
+                                    <View style={styles.feedSwitchBadgeInner}>
+                                        <Icon name="location" size={ox(11)} color="#FFFFFF" />
+                                        <Text style={styles.feedSwitchBadgeText}>Switch feed</Text>
+                                    </View>
+                                </LinearGradient>
                                 <View style={styles.feedSwitchBadgeCaret} />
                             </Animated.View>
                         ) : null}
@@ -6895,15 +6902,17 @@ feedSwitchPillBorder: {
           overflow: 'hidden',
           zIndex: 1,
       },
+    feedSwitchBadgeEdge: {
+        borderRadius: ox(12),
+        padding: 1.5,
+    },
     feedSwitchBadgeInner: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(4),
         paddingHorizontal: ox(10),
         paddingVertical: ox(4),
-        borderRadius: ox(12),
-        borderWidth: 1,
-        borderColor: '#FFFFFF',
+        borderRadius: ox(10.5),
         backgroundColor: '#000000',
     },
     feedSwitchBadgeText: {
@@ -6916,9 +6925,6 @@ feedSwitchPillBorder: {
         height: 7,
         marginTop: ox(-4),
         backgroundColor: '#000000',
-        borderRightWidth: 1,
-        borderBottomWidth: 1,
-        borderColor: '#FFFFFF',
         transform: [{ rotate: '45deg' }],
         borderRadius: ox(1),
         zIndex: 1,
