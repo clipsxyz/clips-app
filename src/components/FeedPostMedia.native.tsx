@@ -67,6 +67,22 @@ import LinearGradient from 'react-native-linear-gradient';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 
+function clipPassportPlace(post: Post): string {
+    const clean = (value?: string | null) =>
+        String(value || '')
+            .replace(/^(venue:|landmark:)/i, '')
+            .trim();
+    return (
+        clean(post.locationRegional) ||
+        clean(post.locationNational) ||
+        clean(post.userRegional) ||
+        clean(post.userNational) ||
+        clean(post.locationLocal) ||
+        clean(post.locationLabel) ||
+        'Gazetteer'
+    );
+}
+
 function firstMediaUri(...vals: unknown[]): string | undefined {
     for (const v of vals) {
         if (typeof v === 'string' && v.trim() && !/^data:text\//i.test(v.trim())) {
@@ -1712,27 +1728,43 @@ const FeedPostMedia = React.memo(
             {renderFeedTapOverlay()}
             {showFeedTwoPlayOverlay ? (
                 <View style={styles.twoPlayOverlay} pointerEvents="box-none">
-                    <Pressable
-                        style={styles.twoPlayFullScreen}
-                        onPress={() => onSingleTap?.()}
-                        accessibilityRole="button"
-                        accessibilityLabel="View in full screen"
-                    >
-                        <Icon name="expand-outline" size={18} color="#111111" />
-                        <Text style={styles.twoPlayFullScreenText}>View in full screen</Text>
-                    </Pressable>
-                    <Pressable
-                        style={styles.twoPlayReplay}
-                        onPress={replayFeedClip}
-                        accessibilityRole="button"
-                        accessibilityLabel="Replay"
-                    >
-                        <Icon name="refresh" size={16} color="#FFFFFF" />
-                        <Text style={styles.twoPlayReplayText}>Replay</Text>
-                    </Pressable>
+                    <View style={styles.twoPlayCard}>
+                        <View style={styles.twoPlayStamp}>
+                            <Icon name="location-outline" size={12} color="#FFFFFF" />
+                            <Text style={styles.twoPlayStampText} numberOfLines={1}>
+                                {clipPassportPlace(post)}
+                            </Text>
+                        </View>
+                        <Pressable
+                            style={styles.twoPlayFullScreen}
+                            onPress={() => onSingleTap?.()}
+                            accessibilityRole="button"
+                            accessibilityLabel="Watch full screen"
+                        >
+                            <LinearGradient
+                                colors={['#000000', '#060609', '#140D2E', '#1E1344']}
+                                locations={[0, 0.65, 0.84, 1]}
+                                start={{ x: 0, y: 0.5 }}
+                                end={{ x: 1, y: 0.5 }}
+                                style={styles.twoPlayFullScreenFill}
+                            >
+                                <Icon name="expand-outline" size={15} color="#FFFFFF" />
+                                <Text style={styles.twoPlayFullScreenText}>Watch Full Screen</Text>
+                            </LinearGradient>
+                        </Pressable>
+                        <Pressable
+                            style={styles.twoPlayReplay}
+                            onPress={replayFeedClip}
+                            accessibilityRole="button"
+                            accessibilityLabel="Replay clip"
+                        >
+                            <Icon name="refresh" size={14} color="#FFFFFF" />
+                            <Text style={styles.twoPlayReplayText}>Replay Clip</Text>
+                        </Pressable>
+                    </View>
                 </View>
             ) : null}
-            {mode === 'feed' && !immediateVideoSurface ? (
+            {mode === 'feed' && !immediateVideoSurface && !showFeedTwoPlayOverlay ? (
             <LinearGradient
                 style={styles.mediaScrim}
                 colors={['transparent', 'rgba(11, 14, 20, 0.90)']}
@@ -1858,38 +1890,70 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        backgroundColor: 'rgba(0, 0, 0, 0.42)',
         zIndex: 30,
-        elevation: 12,
+        elevation: 6,
+        paddingHorizontal: 24,
     },
-    twoPlayFullScreen: {
+    twoPlayCard: {
+        width: 255,
+        borderRadius: 22,
+        backgroundColor: 'rgba(16, 11, 32, 0.78)',
+        borderWidth: 1,
+        borderColor: 'rgba(216, 180, 254, 0.25)',
+        paddingHorizontal: 14,
+        paddingTop: 10,
+        paddingBottom: 8,
+    },
+    twoPlayStamp: {
+        alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        minHeight: 48,
-        paddingHorizontal: 18,
-        borderRadius: 24,
-        backgroundColor: '#FFFFFF',
+        gap: 4,
+        marginBottom: 8,
+        maxWidth: '100%',
+    },
+    twoPlayStampText: {
+        flexShrink: 1,
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '600',
+        letterSpacing: 1.2,
+        textTransform: 'uppercase',
+    },
+    twoPlayFullScreen: {
+        borderRadius: 21,
+        overflow: 'hidden',
+    },
+    twoPlayFullScreenFill: {
+        height: 42,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 7,
+        paddingHorizontal: 14,
     },
     twoPlayFullScreenText: {
-        color: '#111111',
-        fontSize: 15,
-        fontWeight: '700',
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
     },
     twoPlayReplay: {
+        marginTop: 6,
+        alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 6,
-        marginTop: 14,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingVertical: 6,
+        paddingHorizontal: 4,
+        backgroundColor: 'transparent',
     },
     twoPlayReplayText: {
         color: '#FFFFFF',
-        fontSize: 15,
-        fontWeight: '600',
+        fontSize: 13,
+        fontWeight: '500',
     },
     playBadge: {
         ...StyleSheet.absoluteFill,

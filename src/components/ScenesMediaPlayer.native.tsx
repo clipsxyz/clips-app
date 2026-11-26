@@ -6,6 +6,7 @@ import {
     ScrollView,
     Dimensions,
     Animated,
+    Easing,
     NativeScrollEvent,
     NativeSyntheticEvent,
     type GestureResponderEvent,
@@ -24,6 +25,87 @@ import {
 } from '../utils/scenesMediaNative';
 import { fitContainBox, intrinsicRatio } from '../utils/mediaAspectRatio';
 import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
+
+/** Center mark shown while a fullscreen clip is paused. Springs in, then fades out on resume. */
+function ScenesPauseMark({ visible }: { visible: boolean }) {
+    const opacity = useRef(new Animated.Value(0)).current;
+    const scale = useRef(new Animated.Value(0.62)).current;
+    const ring = useRef(new Animated.Value(0)).current;
+    const [rendered, setRendered] = useState(visible);
+    const visibleRef = useRef(visible);
+    visibleRef.current = visible;
+
+    useEffect(() => {
+        if (visible) {
+            setRendered(true);
+            opacity.setValue(0);
+            scale.setValue(0.62);
+            ring.setValue(0);
+            Animated.parallel([
+                Animated.timing(opacity, {
+                    toValue: 1,
+                    duration: 160,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+                Animated.spring(scale, {
+                    toValue: 1,
+                    speed: 18,
+                    bounciness: 7,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(ring, {
+                    toValue: 1,
+                    duration: 520,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+            ]).start();
+            return;
+        }
+
+        const exit = Animated.parallel([
+            Animated.timing(opacity, {
+                toValue: 0,
+                duration: 140,
+                easing: Easing.in(Easing.cubic),
+                useNativeDriver: true,
+            }),
+            Animated.timing(scale, {
+                toValue: 0.86,
+                duration: 140,
+                easing: Easing.in(Easing.cubic),
+                useNativeDriver: true,
+            }),
+        ]);
+        exit.start(({ finished }) => {
+            if (finished && !visibleRef.current) setRendered(false);
+        });
+        return () => exit.stop();
+    }, [opacity, ring, scale, visible]);
+
+    if (!rendered) return null;
+
+    const ringScale = ring.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1.7] });
+    const ringOpacity = ring.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.55, 0] });
+
+    return (
+        <View style={styles.pauseOverlay} pointerEvents="none">
+            <Animated.View
+                style={[
+                    styles.pauseRing,
+                    { opacity: ringOpacity, transform: [{ scale: ringScale }] },
+                ]}
+            />
+            <Animated.View style={[styles.pauseBadge, { opacity, transform: [{ scale }] }]}>
+                <View style={styles.pauseBars}>
+                    <View style={styles.pauseBar} />
+                    <View style={styles.pauseBar} />
+                </View>
+            </Animated.View>
+        </View>
+    );
+}
 
 type Props = {
     post: Post;
@@ -552,13 +634,7 @@ export default function ScenesMediaPlayer({
                 </View>
             ) : null}
 
-            {showPauseOverlay && paused ? (
-                <View style={styles.pauseOverlay} pointerEvents="none">
-                    <View style={styles.pauseBadge}>
-                        <Icon name="play" size={28} color="#FFFFFF" />
-                    </View>
-                </View>
-            ) : null}
+            <ScenesPauseMark visible={showPauseOverlay && paused} />
 
             {/* Full-bleed tap only for single media — on carousels it blocked horizontal swipe. */}
             {!hasCarousel && onMediaPress && isActive ? renderTapCapture(true) : null}
@@ -650,18 +726,36 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0,0,0,0.15)',
         zIndex: 20,
     },
+    pauseRing: {
+        position: 'absolute',
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.7)',
+    },
     pauseBadge: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: 'rgba(0,0,0,0.45)',
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        backgroundColor: 'rgba(8,8,12,0.46)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.35)',
+        borderColor: 'rgba(255,255,255,0.22)',
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    pauseBars: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+    },
+    pauseBar: {
+        width: 5,
+        height: 20,
+        borderRadius: 2.5,
+        backgroundColor: '#FFFFFF',
     },
     progressRow: {
         flexDirection: 'row',
