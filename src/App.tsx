@@ -2595,35 +2595,24 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
   );
 }
 
-/** Radiating red/pink lines burst for YouTube Shorts-style double-tap like (SVG from center). */
+/** Radiating green, gold, and pink lines for the double-tap like burst. */
 function ShortsLikeBurstLines() {
-  const id = React.useId().replace(/:/g, '');
   const cx = 50;
   const cy = 50;
   const count = 36;
+  const strokes = ['#22C55E', '#FFD400', '#FF4D9A'];
+  const widths = [2.2, 2, 1.8];
   const lines = React.useMemo(() => {
     return Array.from({ length: count }, (_, i) => {
       const angle = (i * 360) / count * (Math.PI / 180);
       const r = 38 + (i % 3) * 4;
       const x2 = cx + r * Math.cos(angle);
       const y2 = cy + r * Math.sin(angle);
-      const stroke = i % 2 === 0 ? `url(#${id}-red)` : `url(#${id}-pink)`;
-      const strokeWidth = i % 2 === 0 ? 2.2 : 1.6;
-      return { x2, y2, stroke, strokeWidth };
+      return { x2, y2, stroke: strokes[i % 3], strokeWidth: widths[i % 3] };
     });
-  }, [id]);
+  }, []);
   return (
     <svg className="w-full h-full" viewBox="0 0 100 100" fill="none">
-      <defs>
-        <linearGradient id={`${id}-red`} x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#ff1744" />
-          <stop offset="100%" stopColor="#e53935" />
-        </linearGradient>
-        <linearGradient id={`${id}-pink`} x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#f48fb1" />
-          <stop offset="100%" stopColor="#ec407a" />
-        </linearGradient>
-      </defs>
       <g strokeLinecap="round">
         {lines.map((l, i) => (
           <line
@@ -4221,7 +4210,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             </div>
           </div>
         )}
-        {/* Double-tap like pop-up - YouTube Shorts: big white thumb + radiating red/pink lines */}
+        {/* Double-tap like pop-up - white thumb with green, gold, and pink lines */}
         {tapPosition && (
           <div
             className="absolute pointer-events-none z-50"

@@ -37,35 +37,24 @@ import { showToast } from '../utils/toast';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 
-/** Radiating red/pink lines burst for YouTube Shorts-style double-tap like (used in Scenes). */
+/** Radiating green, gold, and pink lines for the double-tap like burst. */
 function ShortsLikeBurstLines() {
-    const id = React.useId().replace(/:/g, '');
     const cx = 50;
     const cy = 50;
     const count = 36;
+    const strokes = ['#22C55E', '#FFD400', '#FF4D9A'];
+    const widths = [2.2, 2, 1.8];
     const lines = React.useMemo(() => {
         return Array.from({ length: count }, (_, i) => {
             const angle = (i * 360) / count * (Math.PI / 180);
             const r = 38 + (i % 3) * 4;
             const x2 = cx + r * Math.cos(angle);
             const y2 = cy + r * Math.sin(angle);
-            const stroke = i % 2 === 0 ? `url(#${id}-red)` : `url(#${id}-pink)`;
-            const strokeWidth = i % 2 === 0 ? 2.2 : 1.6;
-            return { x2, y2, stroke, strokeWidth };
+            return { x2, y2, stroke: strokes[i % 3], strokeWidth: widths[i % 3] };
         });
-    }, [id]);
+    }, []);
     return (
         <svg className="w-full h-full" viewBox="0 0 100 100" fill="none">
-            <defs>
-                <linearGradient id={`${id}-red`} x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#ff1744" />
-                    <stop offset="100%" stopColor="#e53935" />
-                </linearGradient>
-                <linearGradient id={`${id}-pink`} x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#f48fb1" />
-                    <stop offset="100%" stopColor="#ec407a" />
-                </linearGradient>
-            </defs>
             <g strokeLinecap="round">
                 {lines.map((l, i) => (
                     <line key={i} x1={cx} y1={cy} x2={l.x2} y2={l.y2} stroke={l.stroke} strokeWidth={l.strokeWidth} />
@@ -1710,39 +1699,6 @@ export default function ScenesModal({
                                             </div>
                                         ) : (
                                             <>
-                                    {/* Top edge — segmented progress (multi-clip) or single bar (video) */}
-                                    {(hasMultipleItems || currentItem?.type === 'video') && (
-                                        <div
-                                            className="absolute left-0 right-0 z-[38] flex gap-1 px-2.5 pointer-events-none"
-                                            style={{ top: 'max(8px, env(safe-area-inset-top, 0px))' }}
-                                        >
-                                            {hasMultipleItems ? (
-                                                items.map((it, i) => {
-                                                    let pct = 0;
-                                                    if (i < currentIndex) pct = 100;
-                                                    else if (i === currentIndex) {
-                                                        pct = it.type === 'video' ? videoProgress * 100 : 100;
-                                                    }
-                                                    return (
-                                                        <div key={i} className="flex-1 min-w-0 h-[2.5px] rounded-full bg-white/35 overflow-hidden">
-                                                            <div
-                                                                className="h-full rounded-full bg-white"
-                                                                style={{ width: `${pct}%` }}
-                                                            />
-                                                        </div>
-                                                    );
-                                                })
-                                            ) : (
-                                                <div className="w-full h-[2.5px] rounded-full bg-white/35 overflow-hidden">
-                                                    <div
-                                                        className="h-full rounded-full bg-white"
-                                                        style={{ width: `${videoProgress * 100}%` }}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
                                     {/* Top left — back button */}
                                     <div className="absolute left-2.5 z-30" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 0.85rem))' }}>
                                         <button
@@ -2126,7 +2082,7 @@ export default function ScenesModal({
                             </>
                         )}
 
-                        {/* YouTube Shorts-style double-tap: thumbs-up + red/pink burst (same as feed) */}
+                        {/* Double-tap: thumbs-up with green, gold, and pink burst */}
                         {tapPosition && heartBurst && (
                             <div
                                 className="absolute pointer-events-none z-50"
@@ -2201,7 +2157,7 @@ export default function ScenesModal({
                                             <span className="truncate">{reclipperLabel} reclipped</span>
                                         </div>
                                     ) : null}
-                                    <div className="flex items-center gap-3 mb-4 pr-[70px]">
+                                    <div className="flex items-center gap-3 pr-[70px]">
                                         <div className="relative shrink-0">
                                         <button
                                             onClick={() => {
@@ -2274,6 +2230,43 @@ export default function ScenesModal({
                                             </div>
                                         </div>
                                     </div>
+
+                                    {(hasMultipleItems || currentItem?.type === 'video') && (
+                                        <div className="mb-3 mt-2 pr-[70px] pointer-events-none">
+                                            {hasMultipleItems ? (
+                                                <div className="flex gap-1">
+                                                    {items.map((it, i) => {
+                                                        let pct = 0;
+                                                        if (i < currentIndex) pct = 100;
+                                                        else if (i === currentIndex) {
+                                                            pct = it.type === 'video' ? videoProgress * 100 : 100;
+                                                        }
+                                                        return (
+                                                            <div key={i} className="relative h-[2.5px] min-w-0 flex-1 overflow-hidden rounded-full bg-white/30">
+                                                                <div
+                                                                    className="absolute inset-0"
+                                                                    style={{
+                                                                        background: 'linear-gradient(90deg, #22C55E 0%, #FFD400 50%, #FF4D9A 100%)',
+                                                                        clipPath: `inset(0 ${Math.max(0, 100 - pct)}% 0 0)`,
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : (
+                                                <div className="relative h-[2.5px] w-full overflow-hidden rounded-full bg-white/30">
+                                                    <div
+                                                        className="absolute inset-0"
+                                                        style={{
+                                                            background: 'linear-gradient(90deg, #22C55E 0%, #FFD400 50%, #FF4D9A 100%)',
+                                                            clipPath: `inset(0 ${Math.max(0, 100 - videoProgress * 100)}% 0 0)`,
+                                                        }}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* Caption for media posts */}
                                     {(() => {

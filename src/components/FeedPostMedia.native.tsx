@@ -1728,6 +1728,12 @@ const FeedPostMedia = React.memo(
             {renderFeedTapOverlay()}
             {showFeedTwoPlayOverlay ? (
                 <View style={styles.twoPlayOverlay} pointerEvents="box-none">
+                    <LinearGradient
+                        colors={['#22C55E', '#FFD400', '#FF4D9A']}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={styles.twoPlayCardEdge}
+                    >
                     <View style={styles.twoPlayCard}>
                         <View style={styles.twoPlayStamp}>
                             <Icon name="location-outline" size={12} color="#FFFFFF" />
@@ -1741,16 +1747,10 @@ const FeedPostMedia = React.memo(
                             accessibilityRole="button"
                             accessibilityLabel="Watch full screen"
                         >
-                            <LinearGradient
-                                colors={['#000000', '#060609', '#140D2E', '#1E1344']}
-                                locations={[0, 0.65, 0.84, 1]}
-                                start={{ x: 0, y: 0.5 }}
-                                end={{ x: 1, y: 0.5 }}
-                                style={styles.twoPlayFullScreenFill}
-                            >
+                            <View style={styles.twoPlayFullScreenFill}>
                                 <Icon name="expand-outline" size={15} color="#FFFFFF" />
                                 <Text style={styles.twoPlayFullScreenText}>Watch Full Screen</Text>
-                            </LinearGradient>
+                            </View>
                         </Pressable>
                         <Pressable
                             style={styles.twoPlayReplay}
@@ -1762,6 +1762,7 @@ const FeedPostMedia = React.memo(
                             <Text style={styles.twoPlayReplayText}>Replay Clip</Text>
                         </Pressable>
                     </View>
+                    </LinearGradient>
                 </View>
             ) : null}
             {mode === 'feed' && !immediateVideoSurface && !showFeedTwoPlayOverlay ? (
@@ -1895,12 +1896,14 @@ const styles = StyleSheet.create({
         elevation: 6,
         paddingHorizontal: 24,
     },
-    twoPlayCard: {
+    twoPlayCardEdge: {
         width: 255,
         borderRadius: 22,
-        backgroundColor: 'rgba(16, 11, 32, 0.78)',
-        borderWidth: 1,
-        borderColor: 'rgba(216, 180, 254, 0.25)',
+        padding: 1.5,
+    },
+    twoPlayCard: {
+        borderRadius: 20.5,
+        backgroundColor: '#000000',
         paddingHorizontal: 14,
         paddingTop: 10,
         paddingBottom: 8,
@@ -1933,6 +1936,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: 7,
         paddingHorizontal: 14,
+        backgroundColor: '#000000',
     },
     twoPlayFullScreenText: {
         color: '#FFFFFF',

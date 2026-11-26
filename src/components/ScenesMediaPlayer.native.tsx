@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import Video, { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
@@ -642,6 +643,40 @@ export default function ScenesMediaPlayer({
     );
 }
 
+const SCENES_PROGRESS_SPECTRUM = ['#22C55E', '#FFD400', '#FF4D9A'] as const;
+
+/** Profile-tile border colors, clipped to the played portion of the track. */
+export function ScenesSpectrumTrack({
+    pct,
+    style,
+}: {
+    pct: number;
+    style?: object;
+}) {
+    const [trackWidth, setTrackWidth] = useState(0);
+    const clamped = Math.max(0, Math.min(100, pct));
+    return (
+        <View
+            style={[styles.progressSegmentTrack, style]}
+            onLayout={(event) => {
+                const next = event.nativeEvent.layout.width;
+                setTrackWidth((prev) => (Math.abs(prev - next) < 0.5 ? prev : next));
+            }}
+        >
+            <View style={{ width: `${clamped}%`, height: '100%', overflow: 'hidden' }}>
+                {trackWidth > 0 ? (
+                    <LinearGradient
+                        colors={[...SCENES_PROGRESS_SPECTRUM]}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={{ width: trackWidth, height: '100%' }}
+                    />
+                ) : null}
+            </View>
+        </View>
+    );
+}
+
 export function ScenesMediaProgressBar({
     slides,
     activeIndex,
@@ -671,11 +706,7 @@ export function ScenesMediaProgressBar({
                               ? 100
                               : 0;
                 }
-                return (
-                    <View key={i} style={styles.progressSegmentTrack}>
-                        <View style={[styles.progressSegmentFill, { width: `${pct}%` }]} />
-                    </View>
-                );
+                return <ScenesSpectrumTrack key={i} pct={pct} />;
             })}
         </View>
     );
@@ -766,12 +797,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 2.5,
         borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.35)',
+        backgroundColor: 'rgba(255,255,255,0.28)',
         overflow: 'hidden',
-    },
-    progressSegmentFill: {
-        height: '100%',
-        backgroundColor: '#FFFFFF',
-        borderRadius: 999,
     },
 });

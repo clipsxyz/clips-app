@@ -864,26 +864,6 @@ export default function ScenesViewer({
                         </GestureDetector>
                     </Animated.View>
 
-            <View style={[styles.progressTrack, { top: insets.top }]} pointerEvents="none">
-                {showSegmentedProgress ? (
-                    <ScenesMediaProgressBar
-                        slides={activeMediaSlides}
-                        activeIndex={mediaSlideIndex}
-                        videoProgress={mediaSlideProgress || progress}
-                        style={styles.progressRowInset}
-                    />
-                ) : (
-                    <View style={styles.singleProgressTrack}>
-                        <View
-                            style={[
-                                styles.progressFill,
-                                { width: `${Math.min(100, (mediaSlideProgress || progress) * 100)}%` },
-                            ]}
-                        />
-                    </View>
-                )}
-            </View>
-
             <Pressable style={[styles.backBtn, { top: insets.top + 14 }]} onPress={handleBack}>
                 <View style={styles.chromeCircle}>
                     <Icon name="chevron-back" size={18} color="#FFFFFF" />
@@ -984,7 +964,7 @@ export default function ScenesViewer({
                         </Text>
                     </View>
                 ) : null}
-                <View style={styles.profileRow}>
+                <View style={[styles.profileRow, showSegmentedProgress ? null : styles.profileRowSpaced]}>
                     <Pressable
                         style={styles.avatarBtn}
                         onPress={() => onVisitProfile(profileHandle)}
@@ -1030,6 +1010,14 @@ export default function ScenesViewer({
                         ) : null}
                     </View>
                 </View>
+                {showSegmentedProgress ? (
+                    <ScenesMediaProgressBar
+                        slides={activeMediaSlides}
+                        activeIndex={mediaSlideIndex}
+                        videoProgress={mediaSlideProgress || progress}
+                        style={styles.progressUnderAuthor}
+                    />
+                ) : null}
                 {activePost.isBoosted ? (
                     <View style={styles.promotedRow}>
                         <PromotedBadge />
@@ -1383,26 +1371,10 @@ const styles = StyleSheet.create({
     },
     page: { width: '100%', backgroundColor: '#000' },
     fallback: { ...StyleSheet.absoluteFill, backgroundColor: '#111' },
-    progressTrack: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        zIndex: 30,
-    },
-    progressRowInset: {
-        flex: 1,
-    },
-    singleProgressTrack: {
-        height: 2.5,
-        marginHorizontal: 10,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.35)',
-        overflow: 'hidden',
-    },
-    progressFill: {
-        height: '100%',
-        backgroundColor: '#FFFFFF',
-        borderRadius: 999,
+    progressUnderAuthor: {
+        marginTop: 8,
+        marginBottom: 10,
+        paddingHorizontal: 0,
     },
     footerIconBtn: {
         width: 48,
@@ -1517,6 +1489,8 @@ const styles = StyleSheet.create({
     profileRow: {
         flexDirection: 'row',
         alignItems: 'center',
+    },
+    profileRowSpaced: {
         marginBottom: 10,
     },
     avatarBtn: {

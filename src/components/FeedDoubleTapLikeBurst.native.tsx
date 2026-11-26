@@ -12,28 +12,31 @@ const THUMB_SIZE = 96;
 function BurstLines() {
     // One <Path> per stroke color keeps the same radiating spokes at 2 native
     // views instead of 36, so mounting the burst can't jank the TextureView video.
-    const { bright, soft } = useMemo(() => {
+    const { green, gold, pink } = useMemo(() => {
         const cx = 50;
         const cy = 50;
-        let bright = '';
-        let soft = '';
+        let green = '';
+        let gold = '';
+        let pink = '';
         for (let i = 0; i < LINE_COUNT; i++) {
             const angle = ((i * 360) / LINE_COUNT) * (Math.PI / 180);
             const r = 38 + (i % 3) * 4;
             const x2 = (cx + r * Math.cos(angle)).toFixed(3);
             const y2 = (cy + r * Math.sin(angle)).toFixed(3);
             const segment = `M50,50L${x2},${y2}`;
-            if (i % 2 === 0) bright += segment;
-            else soft += segment;
+            if (i % 3 === 0) green += segment;
+            else if (i % 3 === 1) gold += segment;
+            else pink += segment;
         }
-        return { bright, soft };
+        return { green, gold, pink };
     }, []);
 
     return (
         <Svg width={BURST_SIZE} height={BURST_SIZE} viewBox="0 0 100 100">
             <G strokeLinecap="round" fill="none">
-                <Path d={bright} stroke="#ff1744" strokeWidth={2.2} />
-                <Path d={soft} stroke="#f48fb1" strokeWidth={1.6} />
+                <Path d={green} stroke="#22C55E" strokeWidth={2.2} />
+                <Path d={gold} stroke="#FFD400" strokeWidth={2} />
+                <Path d={pink} stroke="#FF4D9A" strokeWidth={1.8} />
             </G>
         </Svg>
     );
