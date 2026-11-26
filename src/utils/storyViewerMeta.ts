@@ -15,11 +15,16 @@ export function buildStoryMetadataItems(
     const locationLabel = isSharedPost && originalPost?.locationLabel
         ? originalPost.locationLabel.trim()
         : (story.location && story.location.trim()) || '';
+    const locationOnCanvas = (story.stickers || []).some((overlay) => {
+        if (overlay?.sticker?.category !== 'Location') return false;
+        const label = String(overlay.textContent || overlay.sticker?.name || '').trim();
+        return label.length > 0;
+    });
     const venueLabel = isSharedPost && originalPost?.venue
         ? originalPost.venue.trim()
         : (story.venue && story.venue.trim()) || '';
     const out: StoryMetadataItem[] = [];
-    if (locationLabel) out.push({ label: locationLabel, type: 'location' });
+    if (locationLabel && !locationOnCanvas) out.push({ label: locationLabel, type: 'location' });
     if (venueLabel) out.push({ label: venueLabel, type: 'venue' });
     const audienceLabel =
         story.audience === 'close_friends'

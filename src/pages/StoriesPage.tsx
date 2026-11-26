@@ -1,7 +1,7 @@
 import React from 'react';
 import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { parsePublicShareLink } from '../utils/publicShareLink';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock, FiUsers, FiCheck } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiSend, FiLink, FiCopy, FiPlus, FiCheck } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, sortStoriesNewestFirst, getLastStoriesLoadSource, fetchStoryInsights, storyViewerIdentities } from '../api/stories';
@@ -465,9 +465,13 @@ export default function StoriesPage() {
         if (!s) return [];
         const isSharedPost = s.sharedFromPost && originalPost?.id === s.sharedFromPost;
         const locationLabel = isSharedPost && originalPost?.locationLabel ? originalPost.locationLabel.trim() : (s.location && s.location.trim()) || '';
+        const locationOnCanvas = (s.stickers || []).some((overlay) => {
+            if (overlay?.sticker?.category !== 'Location') return false;
+            return String(overlay.textContent || overlay.sticker?.name || '').trim().length > 0;
+        });
         const venueLabel = isSharedPost && originalPost?.venue ? originalPost.venue.trim() : (s.venue && s.venue.trim()) || '';
         const out: Array<{ label: string; type: 'location' | 'venue' | 'audience' | 'timestamp' }> = [];
-        if (locationLabel) out.push({ label: locationLabel, type: 'location' });
+        if (locationLabel && !locationOnCanvas) out.push({ label: locationLabel, type: 'location' });
         if (venueLabel) out.push({ label: venueLabel, type: 'venue' });
         const audienceLabel =
             s.audience === 'close_friends'
@@ -2476,7 +2480,9 @@ export default function StoriesPage() {
                                 {/* Sticker Overlays for all stories (but never on re-shared posts from feed) */}
                                 {currentStory?.stickers && currentStory.stickers.length > 0 && !currentStory?.sharedFromPost && (
                                     <>
-                                        {currentStory.stickers.map((overlay) => {
+                                        {(() => {
+                                            const seenLocations = new Set<string>();
+                                            return currentStory.stickers.map((overlay) => {
                                             // Render link stickers (clickable)
                                             if (overlay.linkUrl) {
                                                 const scale = overlay.scale || 1;
@@ -2507,38 +2513,11 @@ export default function StoriesPage() {
                                                         }}
                                                     >
                                                         <div
-                                                            className="font-semibold text-center rounded-full overflow-hidden transition-transform active:scale-[0.97] inline-flex items-center gap-1.5 justify-center max-w-[86vw] px-2.5 py-1"
-                                                            style={{
-                                                                whiteSpace: 'nowrap',
-                                                                maxWidth: '11rem',
-                                                                background: 'rgba(255,255,255,0.68)',
-                                                                border: '1px solid rgba(255,255,255,0.52)',
-                                                                boxShadow: '0 8px 22px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,255,255,0.08) inset',
-                                                                backdropFilter: 'blur(8px)',
-                                                                WebkitBackdropFilter: 'blur(8px)',
-                                                            }}
+                                                            className="inline-flex items-center gap-1.5 rounded-[10px] bg-white px-3 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.22)]"
+                                                            style={{ maxWidth: '14rem' }}
                                                         >
-                                                            <span
-                                                                className="inline-flex h-[18px] w-[18px] items-center justify-center shrink-0 rounded-full"
-                                                                style={{
-                                                                    color: '#E11D48',
-                                                                    background: 'rgba(255,255,255,0.58)',
-                                                                    border: '1px solid rgba(255,255,255,0.68)',
-                                                                }}
-                                                            >
-                                                                <FiLink className="w-2.5 h-2.5" />
-                                                            </span>
-                                                            <span
-                                                                className="truncate max-w-[7.7rem]"
-                                                                style={{
-                                                                    fontFamily: 'Inter, system-ui, sans-serif',
-                                                                    fontSize: '11px',
-                                                                    lineHeight: 1,
-                                                                    fontWeight: 600,
-                                                                    color: '#0B1220',
-                                                                    letterSpacing: '0.05px',
-                                                                }}
-                                                            >
+                                                            <FiLink className="h-3.5 w-3.5 shrink-0 text-[#111111]" />
+                                                            <span className="truncate text-sm font-semibold text-[#111111]">
                                                                 {linkLabel}
                                                             </span>
                                                         </div>
@@ -2548,10 +2527,35 @@ export default function StoriesPage() {
                                             
                                             // Render text stickers (text and location)
                                             if (overlay.textContent && !overlay.linkUrl) {
-                                                const fontSize = overlay.fontSize === 'small' ? 'text-sm' :
-                                                    overlay.fontSize === 'large' ? 'text-3xl' : 'text-xl';
                                                 const scale = overlay.scale || 1;
                                                 const isLocation = overlay.sticker.category === 'Location';
+                                                if (isLocation) {
+                                                    const locationKey = String(overlay.textContent).trim().toLowerCase();
+                                                    if (seenLocations.has(locationKey)) return null;
+                                                    seenLocations.add(locationKey);
+                                                    return (
+                                                        <div
+                                                            key={overlay.id}
+                                                            className="absolute pointer-events-none"
+                                                            style={{
+                                                                left: `${overlay.x}%`,
+                                                                top: `${overlay.y}%`,
+                                                                transform: `translate(-50%, -50%) scale(${scale}) rotate(${overlay.rotation}deg)`,
+                                                                opacity: overlay.opacity,
+                                                                zIndex: 20,
+                                                            }}
+                                                        >
+                                                            <div className="inline-flex max-w-[78vw] items-center gap-1.5 rounded-lg bg-black/60 px-3 py-1.5">
+                                                                <svg className="h-3.5 w-3.5 shrink-0 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                                                                </svg>
+                                                                <span className="truncate text-sm font-semibold text-white">{overlay.textContent}</span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                const fontSize = overlay.fontSize === 'small' ? 'text-sm' :
+                                                    overlay.fontSize === 'large' ? 'text-3xl' : 'text-xl';
                                                 return (
                                                     <div
                                                         key={overlay.id}
@@ -2565,22 +2569,18 @@ export default function StoriesPage() {
                                                         }}
                                                     >
                                                         <div
-                                                            className={`font-bold text-center ${fontSize} inline-flex items-center gap-1.5 justify-center flex-wrap`}
+                                                            className={`text-center font-semibold ${fontSize}`}
                                                             style={{
                                                                 color: overlay.textColor || '#FFFFFF',
-                                                                textShadow: '2px 2px 8px rgba(0,0,0,0.9), -1px -1px 0 rgba(0,0,0,0.9), 1px -1px 0 rgba(0,0,0,0.9), -1px 1px 0 rgba(0,0,0,0.9), 1px 1px 0 rgba(0,0,0,0.9)',
+                                                                textShadow: '0 1px 6px rgba(0,0,0,0.65)',
                                                                 whiteSpace: 'pre-wrap',
                                                                 overflowWrap: 'anywhere',
                                                                 wordBreak: 'break-word',
-                                                                lineHeight: 1.15,
+                                                                lineHeight: 1.25,
+                                                                letterSpacing: '-0.01em',
                                                                 maxWidth: 'min(82vw, 24rem)'
                                                             }}
                                                         >
-                                                            {isLocation && (
-                                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                                                    <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                                                                </svg>
-                                                            )}
                                                             {overlay.textContent}
                                                         </div>
                                                     </div>
@@ -2633,7 +2633,8 @@ export default function StoriesPage() {
                                             }
                                             
                                             return null;
-                                        })}
+                                        });
+                                        })()}
                                     </>
                                 )}
 
@@ -2744,27 +2745,16 @@ export default function StoriesPage() {
                                                     <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
                                                 ) : null;
                                             }
-                                            const Icon =
-                                                current.type === 'location'
-                                                    ? FiMapPin
-                                                    : current.type === 'venue'
-                                                        ? FiHome
-                                                        : current.type === 'audience'
-                                                            ? FiUsers
-                                                            : FiClock;
                                             return (
                                                 <div
-                                                    className="flex items-center gap-0.5 min-w-0 max-w-[110px] min-h-[1rem] overflow-hidden"
+                                                    className="min-w-0 max-w-[160px] overflow-hidden"
                                                     title={storyMetadataItems.map((m) => m.label).join(' · ')}
                                                 >
                                                     <div
                                                         key={storyMetadataIndex}
-                                                        className="flex items-center gap-0.5 min-w-0 max-w-[110px] rounded-full bg-white/95 px-1.5 py-0.5 shadow-sm text-gray-900 metadata-carousel-slide-left"
+                                                        className="truncate text-xs font-medium text-white/80 metadata-carousel-slide-left"
                                                     >
-                                                        <Icon className="w-2.5 h-2.5 flex-shrink-0 text-gray-900" />
-                                                        <span className="text-[10px] font-medium whitespace-nowrap truncate text-gray-900">
-                                                            {current.label}
-                                                        </span>
+                                                        {current.label}
                                                     </div>
                                                 </div>
                                             );

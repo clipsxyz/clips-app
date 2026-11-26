@@ -24,19 +24,6 @@ type Props = {
     onClose: () => void;
 };
 
-function metadataIcon(type: StoryMetadataItem['type']): string {
-    switch (type) {
-        case 'location':
-            return 'location-outline';
-        case 'venue':
-            return 'home-outline';
-        case 'audience':
-            return 'people-outline';
-        default:
-            return 'time-outline';
-    }
-}
-
 export default function StoryViewerHeader({
     avatarRef,
     avatarUrl,
@@ -113,16 +100,9 @@ export default function StoryViewerHeader({
                         <VerifiedBadge accountType={accountType} size={13} />
                     </View>
                     {currentMeta ? (
-                        <View style={styles.metaPill}>
-                            <Icon
-                                name={metadataIcon(currentMeta.type)}
-                                size={10}
-                                color="#111827"
-                            />
-                            <Text style={styles.metaText} numberOfLines={1}>
-                                {currentMeta.label}
-                            </Text>
-                        </View>
+                        <Text style={styles.metaText} numberOfLines={1}>
+                            {currentMeta.label}
+                        </Text>
                     ) : null}
                 </TouchableOpacity>
             </View>
@@ -206,18 +186,12 @@ const styles = StyleSheet.create({
         maxWidth: '100%',
     },
     handle: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
-    metaPill: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        alignSelf: 'flex-start',
-        maxWidth: 140,
-        backgroundColor: 'rgba(255,255,255,0.95)',
-        borderRadius: 999,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
+    metaText: {
+        color: 'rgba(255,255,255,0.82)',
+        fontSize: 12,
+        fontWeight: '500',
+        flexShrink: 1,
     },
-    metaText: { color: '#111827', fontSize: 10, fontWeight: '600', flexShrink: 1 },
     right: {
         flexDirection: 'row',
         alignItems: 'center',

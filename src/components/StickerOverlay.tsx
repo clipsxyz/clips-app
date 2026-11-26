@@ -416,38 +416,13 @@ export default function StickerOverlayComponent({
                     </span>
                 ) : isLinkSticker ? (
                     <div
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full overflow-hidden"
-                        style={{
-                            pointerEvents: 'none',
-                            maxWidth: '100%',
-                            background: 'rgba(255,255,255,0.68)',
-                            border: '1px solid rgba(255,255,255,0.52)',
-                            boxShadow: '0 8px 22px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,255,255,0.08) inset',
-                            backdropFilter: 'blur(8px)',
-                            WebkitBackdropFilter: 'blur(8px)',
-                        }}
+                        className="inline-flex items-center gap-1.5 rounded-[10px] bg-white px-3 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.22)]"
+                        style={{ pointerEvents: 'none', maxWidth: '100%' }}
                     >
+                        <FiLink className="h-3.5 w-3.5 shrink-0 text-[#111111]" />
                         <span
-                            className="inline-flex h-[18px] w-[18px] items-center justify-center shrink-0 rounded-full"
-                            style={{
-                                color: '#E11D48',
-                                background: 'rgba(255,255,255,0.58)',
-                                border: '1px solid rgba(255,255,255,0.68)',
-                            }}
-                        >
-                            <FiLink className="w-2.5 h-2.5" />
-                        </span>
-                        <span
-                            className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis"
-                            style={{
-                                fontFamily: 'Inter, system-ui, sans-serif',
-                                fontSize: '11px',
-                                lineHeight: '1',
-                                maxWidth: `${Math.max(74, width - 42)}px`,
-                                color: '#0B1220',
-                                letterSpacing: '0.05px',
-                                fontWeight: 600,
-                            }}
+                            className="truncate text-sm font-semibold text-[#111111]"
+                            style={{ pointerEvents: 'none', maxWidth: `${Math.max(74, width - 42)}px` }}
                         >
                             {getLinkLabel()}
                         </span>
@@ -466,7 +441,7 @@ export default function StickerOverlayComponent({
                     />
                 ) : overlay.sticker.category === 'Text' && overlay.sticker.name ? (
                     <span
-                        className="font-bold drop-shadow-lg whitespace-pre-wrap break-words text-center"
+                        className="text-center font-semibold whitespace-pre-wrap break-words"
                         style={{
                             fontSize:
                                 (overlay as any).fontSize === 'small'
@@ -475,27 +450,21 @@ export default function StickerOverlayComponent({
                                         ? `${30 * (overlay.scale || 1)}px`
                                         : `${20 * (overlay.scale || 1)}px`,
                             color: (overlay as any).textColor || '#FFFFFF',
-                            textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)',
-                            // Keep editor preview close to posted-story wrapping (avoid one-word columns or giant blocks).
+                            textShadow: '0 1px 6px rgba(0,0,0,0.65)',
+                            letterSpacing: '-0.01em',
                             maxWidth: `${Math.min(containerWidth * 0.72, Math.max(150, width * 1.35))}px`,
-                            lineHeight: 1.15,
+                            lineHeight: 1.25,
                             pointerEvents: 'none'
                         }}
                     >
                         {(overlay as any).textContent || overlay.sticker.name}
                     </span>
                 ) : overlay.sticker.category === 'Location' && overlay.sticker.name ? (
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-white/90 rounded-full" style={{ pointerEvents: 'none' }}>
-                        <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: '#EF4444' }}>
+                    <div className="inline-flex max-w-[78vw] items-center gap-1.5 rounded-lg bg-black/60 px-3 py-1.5" style={{ pointerEvents: 'none' }}>
+                        <svg className="h-3.5 w-3.5 shrink-0 text-white" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
                         </svg>
-                        <span
-                            className="font-semibold text-gray-900 whitespace-nowrap text-xs"
-                            style={{
-                                fontSize: `${size * 0.4}px`,
-                                pointerEvents: 'none'
-                            }}
-                        >
+                        <span className="truncate text-sm font-semibold text-white" style={{ pointerEvents: 'none' }}>
                             {(overlay as any).textContent || overlay.sticker.name}
                         </span>
                     </div>

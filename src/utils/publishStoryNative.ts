@@ -40,25 +40,32 @@ export function buildStoryComposerStickers(options: {
     }
 
     if (location) {
-        const id = `location-sticker-${Date.now()}`;
-        all.push({
-            id,
-            stickerId: id,
-            sticker: {
-                id,
-                name: location,
-                category: 'Location',
-                isTrending: false,
-            },
-            x: 50,
-            y: 85,
-            scale: 0.9,
-            rotation: 0,
-            opacity: 1,
-            textContent: location,
-            textColor: '#FFFFFF',
-            fontSize: 'small',
+        const alreadyPlaced = all.some((overlay) => {
+            if (overlay?.sticker?.category !== 'Location') return false;
+            const label = String(overlay.textContent || overlay.sticker?.name || '').trim().toLowerCase();
+            return label === location.toLowerCase();
         });
+        if (!alreadyPlaced) {
+            const id = `location-sticker-${Date.now()}`;
+            all.push({
+                id,
+                stickerId: id,
+                sticker: {
+                    id,
+                    name: location,
+                    category: 'Location',
+                    isTrending: false,
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: location,
+                textColor: '#FFFFFF',
+                fontSize: 'small',
+            });
+        }
     }
 
     return all;

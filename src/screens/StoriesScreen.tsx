@@ -1600,11 +1600,12 @@ export default function StoriesScreen({ route, navigation }: any) {
                         </View>
                     ) : null}
 
-                    {Array.isArray(currentStory.stickers) &&
-                        currentStory.stickers.map((overlay) => {
+                    {(() => {
+                        const seenLocations = new Set<string>();
+                        return Array.isArray(currentStory.stickers)
+                            ? currentStory.stickers.map((overlay) => {
                             if (overlay?.linkUrl) {
                                 const label = (overlay.linkName || overlay.textContent || 'Shop now').trim();
-                                const iconColor = '#E11D48';
                                 const labelColor = '#111111';
                                 return (
                                     <TouchableOpacity
@@ -1617,8 +1618,8 @@ export default function StoriesScreen({ route, navigation }: any) {
                                                 left: `${overlay.x}%`,
                                                 top: `${overlay.y}%`,
                                                 transform: [
-                                                    { translateX: -91 },
-                                                    { translateY: -17 },
+                                                    { translateX: '-50%' },
+                                                    { translateY: '-50%' },
                                                     { scale: overlay.scale || 1 },
                                                     { rotate: `${overlay.rotation || 0}deg` },
                                                 ],
@@ -1627,7 +1628,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         ]}
                                     >
                                         <View style={styles.storyLinkIconTile}>
-                                            <Icon name="link-outline" size={ox(15)} color={iconColor} />
+                                        <Icon name="link" size={ox(15)} color="#111111" />
                                         </View>
                                         <Text numberOfLines={1} style={[styles.storyLinkLabel, { color: labelColor }]}>
                                             {label}
@@ -1639,6 +1640,38 @@ export default function StoriesScreen({ route, navigation }: any) {
                             const caption = String(overlay?.textContent || '').trim();
                             if (!caption) return null;
                             const isLocation = overlay.sticker?.category === 'Location';
+                            if (isLocation) {
+                                const key = caption.toLowerCase();
+                                if (seenLocations.has(key)) return null;
+                                seenLocations.add(key);
+                                return (
+                                    <View
+                                        key={overlay.id}
+                                        pointerEvents="none"
+                                        style={[
+                                            styles.storyTextSticker,
+                                            {
+                                                left: `${overlay.x ?? 50}%`,
+                                                top: `${overlay.y ?? 42}%`,
+                                                opacity: overlay.opacity ?? 1,
+                                                transform: [
+                                                    { translateX: '-50%' },
+                                                    { translateY: '-50%' },
+                                                    { scale: overlay.scale || 1 },
+                                                    { rotate: `${overlay.rotation || 0}deg` },
+                                                ],
+                                            },
+                                        ]}
+                                    >
+                                        <View style={styles.storyLocationPill}>
+                                            <Icon name="location-sharp" size={ox(14)} color="#FFFFFF" />
+                                            <Text numberOfLines={1} style={styles.storyLocationText}>
+                                                {caption}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                );
+                            }
                             const fontSize =
                                 overlay.fontSize === 'small'
                                     ? ox(16)
@@ -1651,7 +1684,6 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     pointerEvents="none"
                                     style={[
                                         styles.storyTextSticker,
-                                        { flexDirection: isLocation ? 'row' : 'column' },
                                         {
                                             left: `${overlay.x ?? 50}%`,
                                             top: `${overlay.y ?? 42}%`,
@@ -1665,9 +1697,6 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         },
                                     ]}
                                 >
-                                    {isLocation ? (
-                                        <Icon name="location" size={ox(16)} color={overlay.textColor || '#FFFFFF'} />
-                                    ) : null}
                                     <Text
                                         numberOfLines={4}
                                         style={[
@@ -1675,8 +1704,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                             {
                                                 color: overlay.textColor || '#FFFFFF',
                                                 fontSize,
-                                                lineHeight: Math.round(fontSize * 1.2),
-                                                marginLeft: isLocation ? ox(6) : 0,
+                                                lineHeight: Math.round(fontSize * 1.25),
                                             },
                                         ]}
                                     >
@@ -1684,7 +1712,9 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     </Text>
                                 </View>
                             );
-                        })}
+                        })
+                            : null;
+                    })()}
 
                     {profileShareHandle ? null : storyTagPins(currentStory).map((pin) => (
                         <TouchableOpacity
@@ -2303,25 +2333,41 @@ const styles = StyleSheet.create({
     },
     storyTextStickerLabel: {
         flexShrink: 1,
-        fontWeight: '800',
+        fontWeight: '700',
         textAlign: 'center',
-        textShadowColor: 'rgba(0,0,0,0.75)',
+        letterSpacing: -0.2,
+        textShadowColor: 'rgba(0,0,0,0.65)',
         textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 4,
+        textShadowRadius: 6,
+    },
+    storyLocationPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(6),
+        maxWidth: '100%',
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(7),
+        borderRadius: ox(8),
+        backgroundColor: 'rgba(0,0,0,0.58)',
+    },
+    storyLocationText: {
+        flexShrink: 1,
+        color: '#FFFFFF',
+        fontSize: ox(14),
+        fontWeight: '600',
     },
     storyLinkSticker: {
         position: 'absolute',
-        width: 176,
-        height: ox(32),
-        borderRadius: ox(16),
-        backgroundColor: 'rgba(255,255,255,0.72)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.52)',
+        maxWidth: 220,
+        borderRadius: ox(10),
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
         flexDirection: 'row',
         alignItems: 'center',
-        overflow: 'hidden',
+        gap: ox(6),
         shadowColor: '#000',
-        shadowOpacity: 0.24,
+        shadowOpacity: 0.22,
         shadowRadius: 8,
         shadowOffset: { width: 0, height: 3 },
         elevation: 5,
@@ -2330,24 +2376,15 @@ const styles = StyleSheet.create({
     storyLinkIconTile: {
         width: ox(18),
         height: ox(18),
-        marginLeft: 6,
-        borderRadius: ox(9),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.68)',
-        backgroundColor: 'rgba(255,255,255,0.58)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     storyLinkLabel: {
-        flex: 1,
-        marginLeft: 7,
-        marginRight: 7,
-        fontSize: ox(11),
-        lineHeight: ox(11.5),
-        fontFamily: 'Inter-SemiBold',
+        flexShrink: 1,
+        fontSize: ox(14),
+        lineHeight: ox(18),
         fontWeight: '600',
-        letterSpacing: ox(0.05),
-        color: '#0B1220',
+        color: '#111111',
     },
     replyModal: {
         flex: 1,

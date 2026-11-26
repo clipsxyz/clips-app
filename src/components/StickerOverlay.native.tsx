@@ -211,7 +211,7 @@ export default function StickerOverlayNative({
 
     const content = isLocationSticker ? (
         <View style={styles.locationPill}>
-            <Icon name="location" size={12} color="#EF4444" />
+            <Icon name="location-sharp" size={14} color="#FFFFFF" />
             <Text style={styles.locationPillText} numberOfLines={1}>
                 {label}
             </Text>
@@ -219,7 +219,7 @@ export default function StickerOverlayNative({
     ) : isLinkSticker ? (
         <View style={styles.linkPill}>
             <View style={styles.linkIconWrap}>
-                <Icon name="link" size={11} color="#E11D48" />
+            <Icon name="link" size={14} color="#111111" />
             </View>
             <Text style={styles.linkPillText} numberOfLines={1}>
                 {label}
@@ -329,11 +329,12 @@ const styles = StyleSheet.create({
     },
     emojiSticker: { textAlign: 'center' },
     textSticker: {
-        fontWeight: '800',
+        fontWeight: '700',
         textAlign: 'center',
-        textShadowColor: 'rgba(0,0,0,0.6)',
+        letterSpacing: -0.2,
+        textShadowColor: 'rgba(0,0,0,0.65)',
         textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 3,
+        textShadowRadius: 6,
         paddingHorizontal: 4,
     },
     imageSticker: { width: '100%', height: '100%' },
@@ -344,14 +345,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.9)',
+        maxWidth: 240,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 8,
+        backgroundColor: 'rgba(0,0,0,0.58)',
     },
     locationPillText: {
-        color: '#111827',
-        fontSize: 12,
+        color: '#FFFFFF',
+        fontSize: 14,
         fontWeight: '600',
         flexShrink: 1,
     },
@@ -359,26 +361,26 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.68)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.52)',
+        maxWidth: 220,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+        shadowColor: '#000',
+        shadowOpacity: 0.22,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 3 },
+        elevation: 4,
     },
     linkIconWrap: {
         width: 18,
         height: 18,
-        borderRadius: 9,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.58)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.68)',
     },
     linkPillText: {
-        color: '#0B1220',
-        fontSize: 11,
+        color: '#111111',
+        fontSize: 14,
         fontWeight: '600',
         flexShrink: 1,
     },
