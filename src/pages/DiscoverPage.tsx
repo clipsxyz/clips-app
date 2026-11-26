@@ -10,6 +10,7 @@ import {
     IoLocateOutline,
     IoLocationOutline,
     IoPulseOutline,
+    IoReturnDownForwardOutline,
     IoSparklesOutline,
 } from 'react-icons/io5';
 import { useAuth } from '../context/Auth';
@@ -334,6 +335,7 @@ export default function DiscoverPage() {
                             className="flex min-w-0 flex-1 items-center gap-1 text-left"
                             aria-label={`Open ${pill.label} feed`}
                         >
+                            <IoReturnDownForwardOutline size={18} className="shrink-0 text-[#C4C7C5]" />
                             <pill.Icon size={18} className="shrink-0 text-[#C4C7C5]" />
                             <span className="truncate text-[15px] font-normal leading-5 text-[#D2D5DA]">{pill.label}</span>
                         </button>
@@ -421,6 +423,7 @@ export default function DiscoverPage() {
                                     className="flex items-center gap-3.5 py-0.5 text-left"
                                     aria-label={item.label}
                                 >
+                                    <IoReturnDownForwardOutline size={18} className="shrink-0 text-[#C4C7C5]" />
                                     {React.createElement(PROMPT_ICONS[item.icon], { size: 18, className: 'shrink-0 text-[#C4C7C5]' })}
                                     <span className="text-[15px] font-normal leading-[21px] text-[#C4C7C5]">{item.label}</span>
                                 </button>

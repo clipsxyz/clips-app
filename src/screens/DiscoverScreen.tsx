@@ -408,6 +408,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                 style={styles.promptRow}
                                 accessibilityLabel={item.label}
                             >
+                                <Icon name="return-down-forward-outline" size={ox(18)} color="#C4C7C5" />
                                 <Icon name={item.icon} size={ox(18)} color="#C4C7C5" style={styles.listIcon} />
                                 <Text style={styles.promptText}>{item.label}</Text>
                             </TouchableOpacity>
@@ -494,6 +495,7 @@ export default function DiscoverScreen({ navigation }: any) {
                             style={styles.scopePill}
                             accessibilityLabel={`Open ${pill.label} feed`}
                         >
+                            <Icon name="return-down-forward-outline" size={ox(18)} color="#C4C7C5" />
                             <Icon name={pill.icon} size={ox(18)} color="#C4C7C5" />
                             <Text style={styles.scopePillText} numberOfLines={1}>
                                 {pill.label}
