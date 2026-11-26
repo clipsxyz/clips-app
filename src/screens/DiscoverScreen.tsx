@@ -11,10 +11,7 @@ import {
     Platform,
     KeyboardAvoidingView,
     DeviceEventEmitter,
-    Animated,
-    Easing,
 } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,9 +22,6 @@ import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSel
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import Avatar from '../components/Avatar.native';
 import {
-    UCL_CANVAS_NAVY,
-    UCL_SHEET_GRADIENT,
-    UCL_SHEET_GRADIENT_LOCATIONS,
     UCL_TEXT_ACTIVE,
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
@@ -37,6 +31,14 @@ import { navigateMainTab, navigatePassport } from '../navigation/mainTabs';
 import { clearPendingLocationFeed, writePendingLocationFeed } from '../utils/pendingLocationNative';
 import { ox } from '../constants/nativeOpticalScale';
 import { connectSocket, joinLocationFeed, leaveLocationFeed } from '../services/socketio';
+import {
+    buildDiscoverPrompts,
+    discoverDisplayName,
+    discoverGreeting,
+    DISCOVER_GREETINGS,
+    loadDiscoverActivePlaces,
+    type DiscoverActivePlaces,
+} from '../utils/discoverHomeRotation';
 
 const POPULAR = [
     'Dublin', 'Cork', 'London', 'Paris', 'Berlin', 'New York', 'Tokyo', 'Sydney',
@@ -47,12 +49,12 @@ const ROTATING_CITIES = [
     'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam',
 ];
 const PLACEHOLDER_ROTATE_MS = 2800;
-const AVATAR = ox(72);
-const AVATAR_RING = AVATAR + 12;
-const AVATAR_STROKE = 3;
-const AVATAR_RADIUS = (AVATAR_RING - AVATAR_STROKE) / 2;
-const AVATAR_CIRCUMFERENCE = 2 * Math.PI * AVATAR_RADIUS;
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+/** Pitch black through the hero; deep violet glow only in the bottom third. */
+const DISCOVER_CANVAS_COLORS = ['#000000', '#060609', '#140D2E', '#1E1344'] as const;
+const DISCOVER_CANVAS_LOCATIONS = [0, 0.65, 0.84, 1] as const;
+
+const AVATAR = ox(68);
+const AVATAR_RING_COLOR = 'rgba(255, 255, 255, 0.22)';
 
 export default function DiscoverScreen({ navigation }: any) {
     const { user } = useAuth();
@@ -64,14 +66,15 @@ export default function DiscoverScreen({ navigation }: any) {
     const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
     const [hideSuggestions, setHideSuggestions] = useState(false);
     const [placeholderCityIndex, setPlaceholderCityIndex] = useState(0);
+    const [greetingIndex, setGreetingIndex] = useState(() => Math.floor(Math.random() * DISCOVER_GREETINGS.length));
+    const [promptTick, setPromptTick] = useState(() => Math.floor(Math.random() * DISCOVER_GREETINGS.length));
+    const [activePlaces, setActivePlaces] = useState<DiscoverActivePlaces>({ cities: [], streets: [], neighborhoods: [] });
+    const greetingIndexRef = useRef(greetingIndex);
+    const promptTickRef = useRef(promptTick);
+    const hasFocusedDiscover = useRef(false);
     const [keyboardOpen, setKeyboardOpen] = useState(false);
     const [liveDropCount, setLiveDropCount] = useState(0);
     const inputRef = useRef<TextInput>(null);
-    const avatarDraw = useRef(new Animated.Value(0)).current;
-    const avatarDashOffset = avatarDraw.interpolate({
-        inputRange: [0, 1],
-        outputRange: [AVATAR_CIRCUMFERENCE, 0],
-    });
 
     const popularResults = useMemo(
         () => POPULAR.filter((name) => name.toLowerCase().includes(query.toLowerCase())),
@@ -81,29 +84,49 @@ export default function DiscoverScreen({ navigation }: any) {
     const hasSearchQuery = query.trim().length > 0;
     const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
     const keyboardLayout = keyboardOpen;
-    const placeholderCity = ROTATING_CITIES[placeholderCityIndex];
+
+    const displayName = discoverDisplayName(user?.handle, user?.name);
+    const greetingLine = discoverGreeting(greetingIndex, displayName);
+    const promptSuggestions = useMemo(
+        () => buildDiscoverPrompts(activePlaces, promptTick),
+        [activePlaces, promptTick],
+    );
+    const pillCities = useMemo(() => {
+        const blocked = new Set(promptSuggestions.map((item) => item.city.toLowerCase()));
+        const open = ROTATING_CITIES.filter((city) => !blocked.has(city.toLowerCase()));
+        return open.length > 0 ? open : ROTATING_CITIES;
+    }, [promptSuggestions]);
+    const placeholderCity = pillCities[placeholderCityIndex % pillCities.length];
 
     useFocusEffect(
         React.useCallback(() => {
-            avatarDraw.setValue(0);
-            const draw = Animated.timing(avatarDraw, {
-                toValue: 1,
-                duration: 2200,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: false,
+            let cancelled = false;
+            const returning = hasFocusedDiscover.current;
+            hasFocusedDiscover.current = true;
+            if (returning) {
+                const nextGreeting = (greetingIndexRef.current + 1) % DISCOVER_GREETINGS.length;
+                const nextTick = promptTickRef.current + 1;
+                greetingIndexRef.current = nextGreeting;
+                promptTickRef.current = nextTick;
+                setGreetingIndex(nextGreeting);
+                setPromptTick(nextTick);
+            }
+            void loadDiscoverActivePlaces().then((places) => {
+                if (!cancelled) setActivePlaces(places);
             });
-            draw.start();
-            return () => draw.stop();
-        }, [avatarDraw]),
+            return () => {
+                cancelled = true;
+            };
+        }, []),
     );
 
     useEffect(() => {
-        if (hasSearchQuery) return;
+        if (hasSearchQuery || pillCities.length === 0) return;
         const id = setInterval(() => {
-            setPlaceholderCityIndex((i) => (i + 1) % ROTATING_CITIES.length);
+            setPlaceholderCityIndex((i) => (i + 1) % pillCities.length);
         }, PLACEHOLDER_ROTATE_MS);
         return () => clearInterval(id);
-    }, [hasSearchQuery]);
+    }, [hasSearchQuery, pillCities.length]);
 
     useEffect(() => {
         const showSub = Keyboard.addListener(
@@ -283,26 +306,10 @@ export default function DiscoverScreen({ navigation }: any) {
     const regionalPlace = (user?.regional || '').trim();
     const nationalPlace = (user?.national || '').trim();
     const scopePills = [
-        { key: 'nearby', label: 'Nearby', place: nearbyPlace, scope: 'local' as const },
-        { key: 'regional', label: regionalPlace || 'Regional', place: regionalPlace, scope: 'regional' as const },
-        { key: 'national', label: nationalPlace || 'National', place: nationalPlace, scope: 'national' as const },
+        { key: 'nearby', label: 'Nearby', place: nearbyPlace, scope: 'local' as const, icon: 'locate-outline' },
+        { key: 'regional', label: regionalPlace || 'Regional', place: regionalPlace, scope: 'regional' as const, icon: 'business-outline' },
+        { key: 'national', label: nationalPlace || 'National', place: nationalPlace, scope: 'national' as const, icon: 'globe-outline' },
     ];
-
-    const rawName = user?.name || 'Friend';
-    const firstName = rawName.split('@')[0].trim().split(/\s+/)[0];
-    const username = (user?.handle || '').replace(/^@/, '').trim() || firstName;
-    const promptSuggestions = useMemo(() => {
-        const local = (user?.local || '').trim();
-        const third =
-            local && !/^paris|new york$/i.test(local)
-                ? { city: local, label: `Drop into ${local}` }
-                : { city: 'Dublin', label: 'Drop into Dublin' };
-        return [
-            { city: 'Paris', label: "Let's go to the Paris feed" },
-            { city: 'New York', label: "What's happening in New York" },
-            third,
-        ];
-    }, [user?.local]);
 
     const showApiRows = suggestions.length > 0;
     const showPopularFallback = !loading && suggestions.length === 0 && popularResults.length > 0;
@@ -315,28 +322,13 @@ export default function DiscoverScreen({ navigation }: any) {
             style={[
                 styles.ui,
                 keyboardLayout ? styles.uiKeyboard : null,
-                { paddingBottom: Math.max(insets.bottom, 16) },
+                { paddingBottom: Math.max(insets.bottom, 12) + 10 },
             ]}
             collapsable={false}
         >
             {!keyboardLayout ? (
                 <View style={styles.hero}>
                     <View style={styles.heroAvatarWrap}>
-                        <View pointerEvents="none" style={[styles.avatarRing, styles.avatarRingStart]}>
-                            <Svg width={AVATAR_RING} height={AVATAR_RING}>
-                                <AnimatedCircle
-                                    cx={AVATAR_RING / 2}
-                                    cy={AVATAR_RING / 2}
-                                    r={AVATAR_RADIUS}
-                                    stroke="#FFFFFF"
-                                    strokeWidth={AVATAR_STROKE}
-                                    fill="none"
-                                    strokeLinecap="round"
-                                    strokeDasharray={AVATAR_CIRCUMFERENCE}
-                                    strokeDashoffset={avatarDashOffset}
-                                />
-                            </Svg>
-                        </View>
                         <TouchableOpacity
                             onPress={() => navigatePassport(navigation, 'Home')}
                             accessibilityLabel="Open Passport"
@@ -347,11 +339,12 @@ export default function DiscoverScreen({ navigation }: any) {
                                 name={avatarName}
                                 handle={user?.handle}
                                 size={AVATAR}
+                                borderWidth={1.5}
+                                ringColor={AVATAR_RING_COLOR}
                             />
                         </TouchableOpacity>
                     </View>
-                    <Text style={styles.greetingText}>Let's go social traveling,</Text>
-                    <Text style={styles.greetingText}>{username}</Text>
+                    <Text style={styles.greetingText}>{greetingLine}</Text>
                 </View>
             ) : (
                 <View style={styles.heroSpacer} />
@@ -415,7 +408,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                 style={styles.promptRow}
                                 accessibilityLabel={item.label}
                             >
-                                <Icon name="return-down-forward-outline" size={ox(18)} color={UCL_TEXT_PRIMARY} style={styles.listIcon} />
+                                <Icon name={item.icon} size={ox(18)} color="#C4C7C5" style={styles.listIcon} />
                                 <Text style={styles.promptText}>{item.label}</Text>
                             </TouchableOpacity>
                         ))}
@@ -442,7 +435,9 @@ export default function DiscoverScreen({ navigation }: any) {
                 ) : null}
                 <View style={styles.searchPill}>
                     <Icon name="add" size={ox(22)} color={UCL_TEXT_PRIMARY} style={styles.searchIcon} />
-                    <Text style={styles.searchPrefix}>Discover ·</Text>
+                    <Text style={styles.searchPrefix} numberOfLines={1} ellipsizeMode="tail">
+                        Discover ·
+                    </Text>
                     <TextInput
                         ref={inputRef}
                         value={query}
@@ -459,6 +454,8 @@ export default function DiscoverScreen({ navigation }: any) {
                         returnKeyType="search"
                         autoCorrect={false}
                         autoCapitalize="none"
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
                         underlineColorAndroid="transparent"
                     />
                     {hasSearchQuery ? (
@@ -472,7 +469,7 @@ export default function DiscoverScreen({ navigation }: any) {
                         style={styles.goBtn}
                         accessibilityLabel="Search places"
                     >
-                        <Icon name="arrow-forward" size={ox(18)} color="#04110f" />
+                        <Icon name="arrow-forward" size={ox(18)} color="#D8B4FE" />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -481,12 +478,12 @@ export default function DiscoverScreen({ navigation }: any) {
 
     return (
         <>
-            {/* Page canvas only — UCL navy / purple wash. */}
+            {/* Page canvas only — black hero, soft violet glow behind the prompts. */}
             <LinearGradient
-                colors={[...UCL_SHEET_GRADIENT]}
-                locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
-                start={{ x: 0.12, y: 0 }}
-                end={{ x: 0.88, y: 1 }}
+                colors={[...DISCOVER_CANVAS_COLORS]}
+                locations={[...DISCOVER_CANVAS_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
                 style={styles.root}
             >
                 <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 8) + 32 }]}>
@@ -497,7 +494,7 @@ export default function DiscoverScreen({ navigation }: any) {
                             style={styles.scopePill}
                             accessibilityLabel={`Open ${pill.label} feed`}
                         >
-                            <Icon name="return-down-forward-outline" size={ox(16)} color={UCL_TEXT_PRIMARY} />
+                            <Icon name={pill.icon} size={ox(18)} color="#C4C7C5" />
                             <Text style={styles.scopePillText} numberOfLines={1}>
                                 {pill.label}
                             </Text>
@@ -533,7 +530,7 @@ const styles = StyleSheet.create({
     flex: { flex: 1 },
     root: {
         flex: 1,
-        backgroundColor: UCL_CANVAS_NAVY,
+        backgroundColor: '#000000',
     },
     ui: {
         flex: 1,
@@ -561,7 +558,7 @@ const styles = StyleSheet.create({
     scopePillText: {
         flex: 1,
         minWidth: 0,
-        color: UCL_TEXT_SECONDARY,
+        color: '#D2D5DA',
         fontSize: ox(15),
         lineHeight: ox(20),
         fontWeight: '400',
@@ -570,15 +567,15 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingBottom: ox(12),
+        paddingBottom: ox(36),
     },
     heroSpacer: {
         height: ox(8),
     },
     heroAvatarWrap: {
-        width: AVATAR_RING,
-        height: AVATAR_RING,
-        marginBottom: ox(18),
+        width: AVATAR,
+        height: AVATAR,
+        marginBottom: ox(22),
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -588,22 +585,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    avatarRing: {
-        position: 'absolute',
-        width: AVATAR_RING,
-        height: AVATAR_RING,
-        left: 0,
-        top: 0,
-    },
-    avatarRingStart: {
-        transform: [{ rotate: '-90deg' }],
-    },
     greetingText: {
-        color: UCL_TEXT_PRIMARY,
+        color: '#E8EAED',
         fontSize: ox(28),
-        lineHeight: ox(36),
-        fontWeight: '600',
+        lineHeight: ox(35),
+        fontWeight: '400',
+        letterSpacing: -0.4,
         textAlign: 'center',
+        alignSelf: 'stretch',
         includeFontPadding: false,
     },
     searchDock: {
@@ -625,9 +614,9 @@ const styles = StyleSheet.create({
     },
     promptText: {
         flex: 1,
-        color: UCL_TEXT_SECONDARY,
-        fontSize: ox(16),
-        lineHeight: ox(22),
+        color: '#C4C7C5',
+        fontSize: ox(15),
+        lineHeight: ox(21),
         fontWeight: '400',
         includeFontPadding: false,
     },
@@ -677,18 +666,21 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     searchPill: {
+        width: '100%',
+        minWidth: 0,
         flexDirection: 'row',
         alignItems: 'center',
-        borderRadius: ox(999),
-        backgroundColor: '#2A2A2E',
+        borderRadius: ox(30),
+        backgroundColor: 'rgba(139, 92, 246, 0.08)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.16)',
-        paddingLeft: ox(16),
+        borderColor: 'rgba(216, 180, 254, 0.12)',
+        paddingLeft: ox(18),
         paddingRight: ox(8),
-        minHeight: ox(54),
+        minHeight: ox(60),
     },
     searchIcon: { marginRight: ox(14) },
     searchPrefix: {
+        flexShrink: 0,
         color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(16),
         lineHeight: ox(22),
@@ -702,8 +694,8 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: ox(16),
         fontWeight: '600',
-        paddingVertical: ox(12),
-        marginRight: ox(6),
+        paddingVertical: 0,
+        marginRight: ox(12),
         backgroundColor: 'transparent',
         includeFontPadding: false,
         ...(Platform.OS === 'android' ? { textAlignVertical: 'center' as const } : null),
@@ -724,6 +716,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginLeft: ox(6),
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'rgba(139, 92, 246, 0.24)',
     },
 });

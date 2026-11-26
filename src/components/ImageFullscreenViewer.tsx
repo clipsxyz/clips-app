@@ -472,7 +472,7 @@ export default function ImageFullscreenViewer({
                       setFollowing((f) => !f);
                     });
                   }}
-                  className="mr-1 rounded-full border border-white/80 px-3.5 py-1.5 text-[13px] font-bold text-white"
+                  className="mr-1 shrink-0 rounded-lg border border-white/50 bg-transparent px-3.5 py-1.5 text-[13px] font-semibold leading-none text-white"
                 >
                   {following ? 'Following' : 'Follow'}
                 </button>

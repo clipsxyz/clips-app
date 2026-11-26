@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiUserMinus, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation, FiFlag, FiSlash, FiMaximize2, FiRefreshCw } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiUserMinus, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation, FiFlag, FiSlash, FiMaximize2, FiRefreshCw } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -58,7 +58,7 @@ import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addC
 import { emitFollowStatusChanged, onFollowStatusChanged, useFollowState } from './hooks/useFollowState';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe, updateAuthProfile } from './api/client';
-import { rewriteMediaUrlForClient } from './api/apiBaseUrl';
+import { getApiBaseUrl, rewriteMediaUrlForClient } from './api/apiBaseUrl';
 import { hasPendingFollowRequest } from './api/privacy';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
@@ -86,8 +86,6 @@ import {
   type PlaceMatchedPost,
 } from './utils/suggestedPlaces';
 import SuggestedPlacesFeedSection from './components/SuggestedPlacesFeedSection';
-import LocationPlaceSummaryCard from './components/LocationPlaceSummaryCard';
-import LocationPlaceSummaryModal from './components/LocationPlaceSummaryModal';
 import LocalBusinessSuggestionCard from './components/LocalBusinessSuggestionCard';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining, getBoostAnalytics, getBoostWindow } from './api/boost';
@@ -581,12 +579,7 @@ function PillTabs(props: {
   const [searchInputFocused, setSearchInputFocused] = React.useState(false);
   const [isInFullscreen, setIsInFullscreen] = React.useState(false);
   const [showGazetteerTitle, setShowGazetteerTitle] = React.useState(true);
-  const [placeInfoOpen, setPlaceInfoOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!props.customLocation) setPlaceInfoOpen(false);
-  }, [props.customLocation]);
   const searchHints = React.useMemo(
     () => ['Search any city', 'Search any country', 'Search any region'],
     []
@@ -1162,25 +1155,6 @@ function PillTabs(props: {
           </div>
 
           <div className="flex items-center justify-end gap-0.5">
-            {props.customLocation ? (
-              <>
-                <button
-                  type="button"
-                  aria-label={`About ${activeLabel}`}
-                  title={`About ${activeLabel}`}
-                  onClick={() => setPlaceInfoOpen(true)}
-                  className="h-10 w-10 inline-flex flex-col items-center justify-center gap-0.5 text-white focus:outline-none"
-                >
-                  <FiInfo className="h-5 w-5 text-white" aria-hidden />
-                </button>
-                <LocationPlaceSummaryModal
-                  open={placeInfoOpen}
-                  onClose={() => setPlaceInfoOpen(false)}
-                  locationLabel={props.customLocationLabel || props.customLocation}
-                  placeId={props.customLocationPlaceId}
-                />
-              </>
-            ) : null}
             <button
               type="button"
               aria-label="My Passport"
@@ -7052,8 +7026,6 @@ function FeedPageWrapper() {
   // When we clear Following feed after a follow, cursor stays 0 so the load effect doesn't re-run. This forces a refetch.
   const [discoverRefreshTrigger, setDiscoverRefreshTrigger] = React.useState(0);
 
-  // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
-  const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
   const feedScrollRef = React.useRef<HTMLDivElement | null>(null);
   const feedEndSentinelRef = React.useRef<HTMLDivElement | null>(null);
   const feedPagingRef = React.useRef(false);
@@ -7090,54 +7062,54 @@ function FeedPageWrapper() {
   const pullStartYRef = React.useRef<number | null>(null);
   const pullDistanceRef = React.useRef(0);
   const pullEligibleRef = React.useRef(false);
-  React.useEffect(() => {
-    try {
-      const raw = localStorage.getItem('locationNotifyOptIn');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setNotifyLocations(parsed);
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }, []);
-
-  const isVisitorInCustomLocation = React.useMemo(() => {
-    if (!customLocation || !user) return false;
-    const loc = customLocation.trim().toLowerCase();
-    const local = (user.local || '').trim().toLowerCase();
-    const regional = (user.regional || '').trim().toLowerCase();
-    const national = (user.national || '').trim().toLowerCase();
-    return loc !== '' && loc !== local && loc !== regional && loc !== national;
-  }, [customLocation, user?.local, user?.regional, user?.national]);
-
-  const customLocationDisplay = customLocationLabel || customLocation;
-
-  const isNotifyOnForCurrentLocation = React.useMemo(() => {
-    if (!customLocation) return false;
-    const key = customLocation.trim().toLowerCase();
-    if (!key) return false;
-    return notifyLocations.includes(key);
-  }, [customLocation, notifyLocations]);
-
-  const toggleNotifyForCurrentLocation = React.useCallback(() => {
-    if (!customLocation) return;
-    const key = customLocation.trim().toLowerCase();
-    if (!key) return;
-    setNotifyLocations(prev => {
-      const exists = prev.includes(key);
-      const next = exists ? prev.filter(k => k !== key) : [...prev, key];
-      try {
-        localStorage.setItem('locationNotifyOptIn', JSON.stringify(next));
-      } catch {
-        // ignore storage errors
-      }
-      return next;
-    });
-  }, [customLocation]);
-
   // Internal state for Following feed (separate from tabs)
   const [showFollowingFeed, setShowFollowingFeed] = React.useState(false);
+
+  const emptyFeedPlaceLabel = React.useMemo(() => {
+    const custom = String(customLocationLabel || customLocation || '')
+      .replace(/^(venue:|landmark:)/i, '')
+      .trim();
+    if (custom) return custom;
+    const tab = String(active || '').trim();
+    if (tab && tab.toLowerCase() !== 'following') return tab;
+    return user?.local || user?.regional || 'your area';
+  }, [active, customLocation, customLocationLabel, user?.local, user?.regional]);
+
+  const isLocalFeed = React.useMemo(() => {
+    if (showFollowingFeed || active === 'Following') return true;
+    const bare = String(customLocation || active || '')
+      .replace(/^(venue:|landmark:)/i, '')
+      .trim()
+      .toLowerCase();
+    if (!bare || bare === 'discover' || bare === 'following') return true;
+    const homes = [user?.local, user?.regional, user?.national]
+      .map((place) => String(place || '').trim().toLowerCase())
+      .filter(Boolean);
+    if (homes.length === 0) return !customLocation;
+    return homes.some((home) => bare === home);
+  }, [active, customLocation, showFollowingFeed, user?.local, user?.regional, user?.national]);
+
+  const shareGazetteer = React.useCallback(async () => {
+    const apiOrigin = getApiBaseUrl().replace(/\/api\/?$/, '');
+    const handle = String(user?.handle || '').replace(/^@/, '').trim();
+    const inviteUrl = handle
+      ? `${apiOrigin}/invite/${encodeURIComponent(handle)}`
+      : apiOrigin;
+    const message = `Join me on Gazetteer.\n\n${inviteUrl}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Share Gazetteer', text: message, url: inviteUrl });
+        return;
+      }
+    } catch {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(message);
+    } catch {
+      /* ignore */
+    }
+  }, [user?.handle]);
 
   /**
    * PillTabs tab selection: keep `active`, `showFollowingFeed`, pagination, and URL in sync in one gesture.
@@ -9641,54 +9613,22 @@ function FeedPageWrapper() {
               <div className="text-gray-600 text-sm">This feed shows posts from people you follow. You are not following anyone yet, so it is empty. Follow accounts and their posts will show up here.</div>
             </>
           ) : customLocation ? (
-            <>
-            {isVisitorInCustomLocation ? (
-              <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
-                <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
-                  Youâ€™re early to this feed
-                </div>
-                <div className="text-xl font-semibold mb-2 text-white">
-                  {`No locals are posting in ${customLocationDisplay} yet`}
-                </div>
-                <div className="text-sm text-gray-400 mb-5">
-                  {`Weâ€™ll light up this feed once people in ${customLocationDisplay} start sharing.`}
-                </div>
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 justify-center">
-                  <button
-                    type="button"
-                    onClick={toggleNotifyForCurrentLocation}
-                    className={`inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-semibold transition-all ${
-                      isNotifyOnForCurrentLocation
-                        ? 'bg-green-600 text-white hover:bg-green-500'
-                        : 'bg-gradient-to-r from-sky-500 via-indigo-500 to-purple-500 text-white hover:brightness-110'
-                    }`}
-                  >
-                    {isNotifyOnForCurrentLocation ? 'Youâ€™ll be notified' : `Notify me when ${customLocationDisplay} wakes up`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => goHomeFeed()}
-                    className="inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 border border-white/40 transition-colors"
-                  >
-                    Back to your home feed
-                  </button>
-                </div>
-                <div className="mt-4 text-[11px] text-gray-500">
-                  Feed warming up Â· weâ€™ll only ping you when real clips from {customLocationDisplay} start to appear.
-                </div>
+            <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
+              <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
+                {isLocalFeed ? 'Your home feed' : 'This feed'}
               </div>
-            ) : (
-              <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
-                <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
-                  Your home feed
-                </div>
-                <div className="text-xl font-semibold mb-2 text-white">
-                  {`No posts in your ${customLocationDisplay} feed yet`}
-                </div>
-                <div className="text-sm text-gray-400 mb-4">
-                  You can be the first to post here. Share whatâ€™s happening around you to start this feed.
-                </div>
-                <div className="flex items-center justify-center">
+              <div className="text-xl font-semibold mb-2 text-white">
+                {isLocalFeed
+                  ? `No posts in your ${emptyFeedPlaceLabel} feed yet`
+                  : `No posts in ${emptyFeedPlaceLabel} yet`}
+              </div>
+              <div className="text-sm text-gray-400 mb-4">
+                {isLocalFeed
+                  ? 'Pull down to refresh, or be the first to post here.'
+                  : 'Pull down to refresh, or share Gazetteer with friends.'}
+              </div>
+              <div className="flex flex-col items-center gap-3">
+                {isLocalFeed ? (
                   <button
                     type="button"
                     onClick={() => navigate('/create/instant')}
@@ -9696,24 +9636,36 @@ function FeedPageWrapper() {
                   >
                     Create a clip in this feed
                   </button>
-                </div>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => { void shareGazetteer(); }}
+                      className="inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-semibold bg-gradient-to-r from-red-500 via-yellow-400 to-red-500 text-black hover:brightness-110 transition-all"
+                    >
+                      Share Gazetteer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => goHomeFeed()}
+                      className="inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 border border-white/40 transition-colors"
+                    >
+                      Back to your home feed
+                    </button>
+                  </>
+                )}
               </div>
-            )}
-            <LocationPlaceSummaryCard
-              locationLabel={customLocationDisplay || customLocation || ''}
-              placeId={customLocationPlaceId}
-            />
-            </>
+            </div>
           ) : (
             <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
               <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
                 Your home feed
               </div>
               <div className="text-xl font-semibold mb-2 text-white">
-                {currentFilter ? `No posts in your ${currentFilter} feed yet` : 'No posts yet'}
+                {`No posts in your ${emptyFeedPlaceLabel} feed yet`}
               </div>
               <div className="text-sm text-gray-400 mb-4">
-                You can be the first to post here. Share whatâ€™s happening around you to start this feed.
+                Pull down to refresh, or be the first to post here.
               </div>
               <div className="flex items-center justify-center">
                 <button

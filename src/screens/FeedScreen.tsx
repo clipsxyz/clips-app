@@ -26,6 +26,7 @@ import {
     Animated,
     DeviceEventEmitter,
     InteractionManager,
+    Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -56,6 +57,7 @@ import {
 import type { HeaderFeedScope } from '../utils/headerGlassPalette';
 import { useAuth } from '../context/Auth';
 import HeaderPassportButton from '../components/HeaderPassportButton.native';
+import { getApiBaseUrl } from '../api/apiBaseUrl';
 import { describeFetchError } from '../api/httpClient';
 import { searchLocations } from '../api/locations';
 import {
@@ -164,7 +166,6 @@ import FeedPageLayout, {
     FEED_HEADER_DROPDOWN_SEARCH_WRAP,
     FEED_HEADER_DROPDOWN_SUGGESTION_ITEM,
     FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP,
-    FEED_HEADER_ICON_BUTTON,
     FEED_HEADER_LOCATION_PILL,
     FEED_HEADER_LOCATION_TITLE,
     FEED_HEADER_PASSPORT_AVATAR,
@@ -306,7 +307,6 @@ import {
     isLocationScopedFeedTab,
 } from '../utils/locationFeedGuard';
 import type { FeedScope } from '../utils/placeFeedLevels';
-import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import {
     closeFeedCommentsOverlay,
@@ -318,11 +318,6 @@ import {
     openFeedLocationPicker,
     openFeedShareOverlay,
 } from '../utils/feedOverlayStoreNative';
-import {
-    loadLocationNotifyPrefs,
-    locationNotifyKey,
-    saveLocationNotifyPrefs,
-} from '../utils/locationNotifyPrefNative';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { onFollowStatusChanged } from '../hooks/useFollowState';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
@@ -354,7 +349,6 @@ async function shouldSendFollow(handle, viewerHandle, isFollowing, alreadyReques
     if (!handle || !isProfilePrivate(handle)) return true;
     return confirmPrivateAccountFollow();
 }
-import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard.native';
 import SuggestedPlacesFeedSection from '../components/SuggestedPlacesFeedSection.native';
 import LocalBusinessSuggestionCard from '../components/LocalBusinessSuggestionCard.native';
 import FeedAdCard from '../components/FeedAdCard.native';
@@ -621,12 +615,8 @@ function PillTabs({
     const [loadingSuggestions, setLoadingSuggestions] = useState(false);
     const [searchHintIndex, setSearchHintIndex] = useState(0);
     const [searchInputFocused, setSearchInputFocused] = useState(false);
-    const [placeInfoOpen, setPlaceInfoOpen] = useState(false);
     const searchHints = useMemo(() => ['Search any city', 'Search any country', 'Search any region'], []);
 
-    useEffect(() => {
-        if (!customLocation) setPlaceInfoOpen(false);
-    }, [customLocation]);
     const fallbackPlaces = useMemo(
         () => [
             'Brazil', 'France', 'Germany', 'Italy', 'Spain', 'Portugal', 'Ireland', 'United Kingdom', 'USA',
@@ -1179,23 +1169,6 @@ function PillTabs({
                 </View>
 
                 <View style={FEED_HEADER_RIGHT_ACTIONS}>
-                    {customLocation ? (
-                        <View style={styles.feedHeaderIconGroup}>
-                            <TouchableOpacity
-                                onPress={() => setPlaceInfoOpen(true)}
-                                style={FEED_HEADER_ICON_BUTTON}
-                                accessibilityLabel={`About ${activeLabel}`}
-                            >
-                                <Icon name="information-circle-outline" size={ox(24)} color="#FFFFFF" />
-                            </TouchableOpacity>
-                            <LocationPlaceSummaryModal
-                                open={placeInfoOpen}
-                                onClose={() => setPlaceInfoOpen(false)}
-                                locationLabel={customLocationLabel || customLocation}
-                                placeId={customLocationPlaceId}
-                            />
-                        </View>
-                    ) : null}
                     <HeaderPassportButton onPress={onOpenPassport} />
                 </View>
             </View>
@@ -2163,7 +2136,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [boostSheetPost, setBoostSheetPost] = useState<Post | null>(null);
     const [likesSheetPost, setLikesSheetPost] = useState<Post | null>(null);
     const [taggedSheetPost, setTaggedSheetPost] = useState<Post | null>(null);
-    const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
     /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
     const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
     const savedByPostIdRef = useRef(savedByPostId);
@@ -2515,10 +2487,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setOnboardingDismissed(v === '1');
         });
     }, [user?.id]);
-
-    useEffect(() => {
-        void loadLocationNotifyPrefs().then(setNotifyLocations);
-    }, []);
 
     const feedAutoplayAllowedRef = useRef(feedAutoplayAllowed);
     feedAutoplayAllowedRef.current = feedAutoplayAllowed;
@@ -4885,34 +4853,54 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         return index;
     }, [videoPostsForScenes]);
 
-    const customLocationDisplay = customLocationLabel || customLocation;
+    const emptyFeedPlaceLabel = useMemo(() => {
+        const custom = String(customLocationLabel || customLocation || '')
+            .replace(/^(venue:|landmark:)/i, '')
+            .trim();
+        if (custom) return custom;
+        const tab = String(active || '').trim();
+        if (tab && tab.toLowerCase() !== 'following') return tab;
+        return user?.local || user?.regional || 'your area';
+    }, [active, customLocation, customLocationLabel, user?.local, user?.regional]);
 
-    const isNotifyOnForCurrentLocation = useMemo(() => {
-        if (!customLocation) return false;
-        const key = locationNotifyKey(customLocation);
-        return key !== '' && notifyLocations.includes(key);
-    }, [customLocation, notifyLocations]);
+    const isLocalFeed = useMemo(() => {
+        if (showFollowingFeed || active === 'Following') return true;
+        const bare = String(customLocation || active || '')
+            .replace(/^(venue:|landmark:)/i, '')
+            .trim()
+            .toLowerCase();
+        if (!bare || bare === 'discover' || bare === 'following') return true;
+        const homes = [user?.local, user?.regional, user?.national]
+            .map((place) => String(place || '').trim().toLowerCase())
+            .filter(Boolean);
+        if (homes.length === 0) return !customLocation;
+        return homes.some((home) => bare === home);
+    }, [
+        active,
+        customLocation,
+        showFollowingFeed,
+        user?.local,
+        user?.regional,
+        user?.national,
+    ]);
 
-    const toggleNotifyForCurrentLocation = useCallback(() => {
-        if (!customLocation) return;
-        const key = locationNotifyKey(customLocation);
-        if (!key) return;
-        setNotifyLocations((prev) => {
-            const exists = prev.includes(key);
-            const next = exists ? prev.filter((k) => k !== key) : [...prev, key];
-            void saveLocationNotifyPrefs(next);
-            return next;
-        });
-    }, [customLocation]);
-
-    const isVisitorInCustomLocation = useMemo(() => {
-        if (!customLocation || !user) return false;
-        const loc = customLocation.trim().toLowerCase();
-        const local = (user.local || '').trim().toLowerCase();
-        const regional = (user.regional || '').trim().toLowerCase();
-        const national = (user.national || '').trim().toLowerCase();
-        return loc !== '' && loc !== local && loc !== regional && loc !== national;
-    }, [customLocation, user?.local, user?.regional, user?.national]);
+    const shareEmptyFeed = useCallback(async () => {
+        const apiOrigin = getApiBaseUrl().replace(/\/api\/?$/, '');
+        const handle = String(user?.handle || '').replace(/^@/, '').trim();
+        const inviteUrl = handle
+            ? `${apiOrigin}/invite/${encodeURIComponent(handle)}`
+            : apiOrigin;
+        const message = `Join me on Gazetteer.\n\n${inviteUrl}`;
+        try {
+            await Share.share({
+                message,
+                url: inviteUrl,
+                title: 'Share Gazetteer',
+            });
+        } catch {
+            // Share sheet dismissed.
+        }
+    }, [user?.handle]);
 
     const scrollToFeedPost = React.useCallback(
         (postId: string) => {
@@ -6075,30 +6063,53 @@ onVisitProfile={() =>
                                     </View>
                                 ) : (
                                     <View style={FEED_EMPTY_CARD}>
-                                        <Text style={FEED_EMPTY_BADGE}>Your home feed</Text>
+                                        <Text style={FEED_EMPTY_BADGE}>
+                                            {isLocalFeed ? 'Your home feed' : 'This feed'}
+                                        </Text>
                                         <Text style={FEED_EMPTY_TITLE}>
-                                            {currentFilter
-                                                ? `No posts in your ${currentFilter} feed yet`
-                                                : 'No posts yet'}
+                                            {isLocalFeed
+                                                ? `No posts in your ${emptyFeedPlaceLabel} feed yet`
+                                                : `No posts in ${emptyFeedPlaceLabel} yet`}
                                         </Text>
                                         <Text style={FEED_EMPTY_SUBTITLE}>
-                                            Pull down to refresh, or be the first to post here.
+                                            {isLocalFeed
+                                                ? 'Pull down to refresh, or be the first to post here.'
+                                                : 'Pull down to refresh, or share Gazetteer with friends.'}
                                         </Text>
-                                        <TouchableOpacity
-                                            activeOpacity={0.85}
-                                            onPress={() => navigation.navigate('InstantCreate')}
-                                        >
-                                            <LinearGradient
-                                                colors={[...FEED_EMPTY_CREATE_GRADIENT]}
-                                                start={{ x: 0, y: 0.5 }}
-                                                end={{ x: 1, y: 0.5 }}
-                                                style={FEED_EMPTY_GRADIENT_BTN}
+                                        {isLocalFeed ? (
+                                            <TouchableOpacity
+                                                activeOpacity={0.85}
+                                                onPress={() => navigation.navigate('InstantCreate')}
                                             >
-                                                <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
-                                                    Create a clip in this feed
-                                                </Text>
-                                            </LinearGradient>
-                                        </TouchableOpacity>
+                                                <LinearGradient
+                                                    colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                    start={{ x: 0, y: 0.5 }}
+                                                    end={{ x: 1, y: 0.5 }}
+                                                    style={FEED_EMPTY_GRADIENT_BTN}
+                                                >
+                                                    <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                        Create a clip in this feed
+                                                    </Text>
+                                                </LinearGradient>
+                                            </TouchableOpacity>
+                                        ) : (
+                                            <TouchableOpacity
+                                                activeOpacity={0.85}
+                                                onPress={() => { void shareEmptyFeed(); }}
+                                                accessibilityLabel="Share Gazetteer"
+                                            >
+                                                <LinearGradient
+                                                    colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                    start={{ x: 0, y: 0.5 }}
+                                                    end={{ x: 1, y: 0.5 }}
+                                                    style={FEED_EMPTY_GRADIENT_BTN}
+                                                >
+                                                    <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                        Share Gazetteer
+                                                    </Text>
+                                                </LinearGradient>
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
                                 )}
                             </View>
@@ -6122,61 +6133,19 @@ onVisitProfile={() =>
                                 <View style={styles.emptyDefaultWrap}>
                                     <View style={FEED_EMPTY_CARD}>
                                         <Text style={FEED_EMPTY_BADGE}>
-                                            {isVisitorInCustomLocation ? "You're early to this feed" : 'Your home feed'}
+                                            {isLocalFeed ? 'Your home feed' : 'This feed'}
                                         </Text>
                                         <Text style={FEED_EMPTY_TITLE}>
-                                            {isVisitorInCustomLocation
-                                                ? `No locals are posting in ${customLocationDisplay} yet`
-                                                : `No posts in your ${customLocationDisplay} feed yet`}
+                                            {isLocalFeed
+                                                ? `No posts in your ${emptyFeedPlaceLabel} feed yet`
+                                                : `No posts in ${emptyFeedPlaceLabel} yet`}
                                         </Text>
                                         <Text style={FEED_EMPTY_SUBTITLE}>
-                                            {isVisitorInCustomLocation
-                                                ? `We'll light up this feed once people in ${customLocationDisplay} start sharing.`
-                                                : 'You can be the first to post here. Share what\'s happening around you to start this feed.'}
+                                            {isLocalFeed
+                                                ? 'Pull down to refresh, or be the first to post here.'
+                                                : 'Pull down to refresh, or share Gazetteer with friends.'}
                                         </Text>
-                                        {isVisitorInCustomLocation ? (
-                                            <View style={styles.emptyCustomActions}>
-                                                <TouchableOpacity
-                                                    activeOpacity={0.85}
-                                                    onPress={toggleNotifyForCurrentLocation}
-                                                    style={styles.emptyNotifyBtnWrap}
-                                                >
-                                                    {isNotifyOnForCurrentLocation ? (
-                                                        <View
-                                                            style={[
-                                                                FEED_EMPTY_GRADIENT_BTN,
-                                                                styles.emptyFeedNotifyBtnActive,
-                                                            ]}
-                                                        >
-                                                            <Text style={styles.emptyFeedNotifyBtnTextActive}>
-                                                                You&apos;ll be notified
-                                                            </Text>
-                                                        </View>
-                                                    ) : (
-                                                        <LinearGradient
-                                                            colors={[...FEED_EMPTY_NOTIFY_GRADIENT]}
-                                                            start={{ x: 0, y: 0.5 }}
-                                                            end={{ x: 1, y: 0.5 }}
-                                                            style={FEED_EMPTY_GRADIENT_BTN}
-                                                        >
-                                                            <Text style={styles.emptyFeedNotifyBtnText}>
-                                                                {`Notify me when ${customLocationDisplay} wakes up`}
-                                                            </Text>
-                                                        </LinearGradient>
-                                                    )}
-                                                </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    style={styles.emptyFeedSecondaryBtn}
-                                                    onPress={clearCustomLocation}
-                                                >
-                                                    <Text style={styles.emptyFeedSecondaryBtnText}>Back to your home feed</Text>
-                                                </TouchableOpacity>
-                                                <Text style={styles.emptyFeedNotifyHint}>
-                                                    Feed warming up · we&apos;ll only ping you when real clips from{' '}
-                                                    {customLocationDisplay} start to appear.
-                                                </Text>
-                                            </View>
-                                        ) : (
+                                        {isLocalFeed ? (
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
                                                 onPress={() => navigation.navigate('InstantCreate')}
@@ -6192,12 +6161,33 @@ onVisitProfile={() =>
                                                     </Text>
                                                 </LinearGradient>
                                             </TouchableOpacity>
+                                        ) : (
+                                            <View style={styles.emptyCustomActions}>
+                                                <TouchableOpacity
+                                                    activeOpacity={0.85}
+                                                    onPress={() => { void shareEmptyFeed(); }}
+                                                    accessibilityLabel="Share Gazetteer"
+                                                >
+                                                    <LinearGradient
+                                                        colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                        start={{ x: 0, y: 0.5 }}
+                                                        end={{ x: 1, y: 0.5 }}
+                                                        style={FEED_EMPTY_GRADIENT_BTN}
+                                                    >
+                                                        <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                            Share Gazetteer
+                                                        </Text>
+                                                    </LinearGradient>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    style={styles.emptyFeedSecondaryBtn}
+                                                    onPress={clearCustomLocation}
+                                                >
+                                                    <Text style={styles.emptyFeedSecondaryBtnText}>Back to your home feed</Text>
+                                                </TouchableOpacity>
+                                            </View>
                                         )}
                                     </View>
-                                    <LocationPlaceSummaryCard
-                                        locationLabel={customLocationDisplay || customLocation}
-                                        placeId={customLocationPlaceId}
-                                    />
                                 </View>
                             ) : (
                                 <View style={styles.emptyDefaultWrap}>
@@ -6214,13 +6204,10 @@ onVisitProfile={() =>
                                         <View style={FEED_EMPTY_CARD}>
                                             <Text style={FEED_EMPTY_BADGE}>Your home feed</Text>
                                             <Text style={FEED_EMPTY_TITLE}>
-                                                {currentFilter
-                                                    ? `No posts in your ${currentFilter} feed yet`
-                                                    : 'No posts yet'}
+                                                {`No posts in your ${emptyFeedPlaceLabel} feed yet`}
                                             </Text>
                                             <Text style={FEED_EMPTY_SUBTITLE}>
-                                                You can be the first to post here. Share what&apos;s happening
-                                                around you to start this feed.
+                                                Pull down to refresh, or be the first to post here.
                                             </Text>
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
@@ -6869,10 +6856,6 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.05)',
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.15)',
-    },
-    feedHeaderIconGroup: {
-        flexDirection: 'row',
-        alignItems: 'center',
     },
     feedHeaderPassportAvatarImage: {
         width: '100%',

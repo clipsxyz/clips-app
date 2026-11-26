@@ -557,16 +557,11 @@ export default function ImageFullscreenModal({
 
                 {!isOwn && onFollow ? (
                     <Pressable
-                        style={[styles.followBtn, isFollowing && styles.followBtnActive]}
+                        style={styles.followBtn}
                         onPress={() => void onFollow()}
                         hitSlop={6}
                     >
-                        <Text
-                            style={[
-                                styles.followBtnText,
-                                isFollowing && styles.followBtnTextActive,
-                            ]}
-                        >
+                        <Text style={styles.followBtnText}>
                             {isFollowing ? 'Following' : 'Follow'}
                         </Text>
                     </Pressable>
@@ -907,23 +902,20 @@ const styles = StyleSheet.create({
         marginTop: 1,
     },
     followBtn: {
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.85)',
-        borderRadius: 999,
+        minHeight: 32,
         paddingHorizontal: 14,
-        paddingVertical: 6,
+        borderRadius: 8,
+        backgroundColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.5)',
         marginRight: 2,
-    },
-    followBtnActive: {
-        borderColor: 'rgba(255,255,255,0.45)',
     },
     followBtnText: {
         color: '#FFFFFF',
-        fontSize: 13,
-        fontWeight: '700',
-    },
-    followBtnTextActive: {
-        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
     },
     followSpacer: {
         width: 8,

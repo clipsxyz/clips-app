@@ -1,11 +1,15 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     IoAdd,
     IoArrowForward,
+    IoBusinessOutline,
     IoClose,
+    IoCompassOutline,
+    IoGlobeOutline,
+    IoLocateOutline,
     IoLocationOutline,
-    IoReturnDownForwardOutline,
+    IoPulseOutline,
     IoSparklesOutline,
 } from 'react-icons/io5';
 import { useAuth } from '../context/Auth';
@@ -15,6 +19,15 @@ import Avatar from '../components/Avatar';
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import { connectSocket, joinLocationFeed, leaveLocationFeed } from '../services/socketio';
+import {
+    buildDiscoverPrompts,
+    discoverDisplayName,
+    discoverGreeting,
+    DISCOVER_GREETINGS,
+    loadDiscoverActivePlaces,
+    type DiscoverActivePlaces,
+    type DiscoverPromptIcon,
+} from '../utils/discoverHomeRotation';
 
 const POPULAR = [
     'Dublin', 'Cork', 'London', 'Paris', 'Berlin', 'New York', 'Tokyo', 'Sydney',
@@ -25,75 +38,22 @@ const ROTATING_CITIES = [
     'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam',
 ];
 const PLACEHOLDER_ROTATE_MS = 2800;
-const AVATAR_RING = 84;
-const AVATAR_STROKE = 3;
-const AVATAR_RADIUS = (AVATAR_RING - AVATAR_STROKE) / 2;
-const AVATAR_CIRCUMFERENCE = 2 * Math.PI * AVATAR_RADIUS;
-
-/** Border grows from the top of the profile photo until the ring is complete. */
-function DiscoverAvatarRing({
-    settled,
-    onSettle,
-}: {
-    settled: boolean;
-    onSettle: () => void;
-}) {
-    const circleRef = React.useRef<SVGCircleElement>(null);
-
-    React.useEffect(() => {
-        const circle = circleRef.current;
-        if (!circle) return;
-        if (settled) {
-            circle.style.strokeDashoffset = '0';
-            return;
-        }
-        const started = performance.now();
-        let frame = 0;
-        const tick = (now: number) => {
-            const t = Math.min(1, (now - started) / 2200);
-            const eased = 1 - Math.pow(1 - t, 3);
-            circle.style.strokeDashoffset = String(AVATAR_CIRCUMFERENCE * (1 - eased));
-            if (t < 1) frame = requestAnimationFrame(tick);
-            else onSettle();
-        };
-        frame = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(frame);
-    }, [settled, onSettle]);
-
-    return (
-        <svg
-            aria-hidden
-            width={AVATAR_RING}
-            height={AVATAR_RING}
-            viewBox={`0 0 ${AVATAR_RING} ${AVATAR_RING}`}
-            className="pointer-events-none absolute left-1/2 top-1/2"
-            style={{ transform: 'translate(-50%, -50%)' }}
-        >
-            <circle
-                ref={circleRef}
-                cx={AVATAR_RING / 2}
-                cy={AVATAR_RING / 2}
-                r={AVATAR_RADIUS}
-                fill="none"
-                stroke="#FFFFFF"
-                strokeWidth={AVATAR_STROKE}
-                strokeLinecap="round"
-                strokeDasharray={AVATAR_CIRCUMFERENCE}
-                strokeDashoffset={settled ? 0 : AVATAR_CIRCUMFERENCE}
-                transform={`rotate(-90 ${AVATAR_RING / 2} ${AVATAR_RING / 2})`}
-            />
-        </svg>
-    );
-}
 const KEYBOARD_OPEN_THRESHOLD_PX = 100;
 
+const PROMPT_ICONS: Record<DiscoverPromptIcon, typeof IoCompassOutline> = {
+    'compass-outline': IoCompassOutline,
+    'pulse-outline': IoPulseOutline,
+    'location-outline': IoLocationOutline,
+};
+
 const CANVAS_STYLE: React.CSSProperties = {
-    backgroundColor: '#03091B',
-    backgroundImage: 'linear-gradient(160deg, #03091B 0%, #071330 42%, #160830 78%, #0A051C 100%)',
+    backgroundColor: '#000000',
+    backgroundImage: 'linear-gradient(180deg, #000000 0%, #060609 65%, #140D2E 84%, #1E1344 100%)',
 };
 
 export default function DiscoverPage() {
     const navigate = useNavigate();
+    const routeLocation = useLocation();
     const { user } = useAuth();
     const [query, setQuery] = React.useState('');
     const [suggestions, setSuggestions] = React.useState<LocationSuggestion[]>([]);
@@ -104,8 +64,12 @@ export default function DiscoverPage() {
     const [placeholderCityIndex, setPlaceholderCityIndex] = React.useState(0);
     const [keyboardOpen, setKeyboardOpen] = React.useState(false);
     const [liveDropCount, setLiveDropCount] = React.useState(0);
-    const [avatarRingSettled, setAvatarRingSettled] = React.useState(false);
-    const settleAvatarRing = React.useCallback(() => setAvatarRingSettled(true), []);
+    const [greetingIndex, setGreetingIndex] = React.useState(() => Math.floor(Math.random() * DISCOVER_GREETINGS.length));
+    const [promptTick, setPromptTick] = React.useState(() => Math.floor(Math.random() * DISCOVER_GREETINGS.length));
+    const [activePlaces, setActivePlaces] = React.useState<DiscoverActivePlaces>({ cities: [], streets: [], neighborhoods: [] });
+    const greetingIndexRef = React.useRef(greetingIndex);
+    const promptTickRef = React.useRef(promptTick);
+    const hasOpenedDiscover = React.useRef(false);
     const [visibleViewport, setVisibleViewport] = React.useState(() => ({
         top: 0,
         height: typeof window !== 'undefined' ? window.innerHeight : 800,
@@ -119,24 +83,18 @@ export default function DiscoverPage() {
 
     const hasSearchQuery = query.trim().length > 0;
     const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
-    const placeholderCity = ROTATING_CITIES[placeholderCityIndex];
-
-    const promptSuggestions = React.useMemo(() => {
-        const local = (user?.local || '').trim();
-        const third =
-            local && !/^paris|new york$/i.test(local)
-                ? { city: local, label: `Drop into ${local}` }
-                : { city: 'Dublin', label: 'Drop into Dublin' };
-        return [
-            { city: 'Paris', label: "Let's go to the Paris feed" },
-            { city: 'New York', label: "What's happening in New York" },
-            third,
-        ];
-    }, [user?.local]);
-
-    const rawName = user?.name || 'Friend';
-    const firstName = rawName.split('@')[0].trim().split(/\s+/)[0];
-    const username = (user?.handle || '').replace(/^@/, '').trim() || firstName;
+    const displayName = discoverDisplayName(user?.handle, user?.name);
+    const greetingLine = discoverGreeting(greetingIndex, displayName);
+    const promptSuggestions = React.useMemo(
+        () => buildDiscoverPrompts(activePlaces, promptTick),
+        [activePlaces, promptTick],
+    );
+    const pillCities = React.useMemo(() => {
+        const blocked = new Set(promptSuggestions.map((item) => item.city.toLowerCase()));
+        const open = ROTATING_CITIES.filter((city) => !blocked.has(city.toLowerCase()));
+        return open.length > 0 ? open : ROTATING_CITIES;
+    }, [promptSuggestions]);
+    const placeholderCity = pillCities[placeholderCityIndex % pillCities.length];
     const avatarName = (user?.handle || user?.name || 'User').split('@')[0];
     const avatarSrc = user?.avatarUrl ? rewriteMediaUrlForClient(user.avatarUrl) : undefined;
 
@@ -145,12 +103,32 @@ export default function DiscoverPage() {
     const showEmpty = !loading && suggestions.length === 0 && popularResults.length === 0;
 
     React.useEffect(() => {
-        if (hasSearchQuery) return;
+        let cancelled = false;
+        const returning = hasOpenedDiscover.current;
+        hasOpenedDiscover.current = true;
+        if (returning) {
+            const nextGreeting = (greetingIndexRef.current + 1) % DISCOVER_GREETINGS.length;
+            const nextTick = promptTickRef.current + 1;
+            greetingIndexRef.current = nextGreeting;
+            promptTickRef.current = nextTick;
+            setGreetingIndex(nextGreeting);
+            setPromptTick(nextTick);
+        }
+        void loadDiscoverActivePlaces().then((places) => {
+            if (!cancelled) setActivePlaces(places);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [routeLocation.key]);
+
+    React.useEffect(() => {
+        if (hasSearchQuery || pillCities.length === 0) return;
         const id = window.setInterval(() => {
-            setPlaceholderCityIndex((i) => (i + 1) % ROTATING_CITIES.length);
+            setPlaceholderCityIndex((i) => (i + 1) % pillCities.length);
         }, PLACEHOLDER_ROTATE_MS);
         return () => window.clearInterval(id);
-    }, [hasSearchQuery]);
+    }, [hasSearchQuery, pillCities.length]);
 
     React.useEffect(() => {
         const vv = window.visualViewport;
@@ -284,9 +262,9 @@ export default function DiscoverPage() {
     const regionalPlace = (user?.regional || '').trim();
     const nationalPlace = (user?.national || '').trim();
     const scopePills = [
-        { key: 'nearby', label: 'Nearby', place: nearbyPlace, scope: 'local' as const },
-        { key: 'regional', label: regionalPlace || 'Regional', place: regionalPlace, scope: 'regional' as const },
-        { key: 'national', label: nationalPlace || 'National', place: nationalPlace, scope: 'national' as const },
+        { key: 'nearby', label: 'Nearby', place: nearbyPlace, scope: 'local' as const, Icon: IoLocateOutline },
+        { key: 'regional', label: regionalPlace || 'Regional', place: regionalPlace, scope: 'regional' as const, Icon: IoBusinessOutline },
+        { key: 'national', label: nationalPlace || 'National', place: nationalPlace, scope: 'national' as const, Icon: IoGlobeOutline },
     ];
 
     function dismissSuggestionList() {
@@ -345,7 +323,7 @@ export default function DiscoverPage() {
         <div className="relative flex h-full min-h-0 flex-col overflow-hidden" style={shellStyle}>
             <div
                 className={`flex min-h-0 flex-1 flex-col px-5 ${keyboardOpen ? 'justify-start' : 'justify-between'}`}
-                style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}
+                style={{ paddingBottom: 'max(22px, calc(env(safe-area-inset-bottom) + 10px))' }}
             >
                 <div className="flex min-h-11 shrink-0 items-center gap-2 pt-10">
                     {scopePills.map((pill) => (
@@ -356,8 +334,8 @@ export default function DiscoverPage() {
                             className="flex min-w-0 flex-1 items-center gap-1 text-left"
                             aria-label={`Open ${pill.label} feed`}
                         >
-                            <IoReturnDownForwardOutline size={16} className="shrink-0 text-white" />
-                            <span className="truncate text-[15px] leading-5 text-[#D1E4FF]">{pill.label}</span>
+                            <pill.Icon size={18} className="shrink-0 text-[#C4C7C5]" />
+                            <span className="truncate text-[15px] font-normal leading-5 text-[#D2D5DA]">{pill.label}</span>
                         </button>
                     ))}
                 </div>
@@ -365,20 +343,19 @@ export default function DiscoverPage() {
                 {keyboardOpen ? (
                     <div className="h-2 shrink-0" />
                 ) : (
-                    <div className="flex flex-1 flex-col items-center justify-center pb-3">
+                    <div className="flex flex-1 flex-col items-center justify-center pb-9">
                         <button
                             type="button"
                             onClick={() => navigate('/profile')}
-                            className="relative mb-[18px] flex h-[84px] w-[84px] items-center justify-center"
+                            className="mb-[22px] flex h-[68px] w-[68px] items-center justify-center rounded-full"
+                            style={{ boxShadow: 'inset 0 0 0 1.5px rgba(255, 255, 255, 0.22)' }}
                             aria-label="Open Passport"
                         >
-                            <DiscoverAvatarRing settled={avatarRingSettled} onSettle={settleAvatarRing} />
-                            <Avatar src={avatarSrc} name={avatarName} handle={user?.handle} size={72} />
+                            <Avatar src={avatarSrc} name={avatarName} handle={user?.handle} size={68} hideBorder />
                         </button>
-                        <p className="text-center text-[28px] font-semibold leading-9 text-white">
-                            Let&apos;s go social traveling,
+                        <p className="w-full text-center text-[28px] font-normal leading-[35px] tracking-[-0.4px] text-[#E8EAED]">
+                            {greetingLine}
                         </p>
-                        <p className="text-center text-[28px] font-semibold leading-9 text-white">{username}</p>
                     </div>
                 )}
 
@@ -444,8 +421,8 @@ export default function DiscoverPage() {
                                     className="flex items-center gap-3.5 py-0.5 text-left"
                                     aria-label={item.label}
                                 >
-                                    <IoReturnDownForwardOutline size={18} className="shrink-0 text-white" />
-                                    <span className="text-base font-normal leading-[22px] text-[#D1E4FF]">{item.label}</span>
+                                    {React.createElement(PROMPT_ICONS[item.icon], { size: 18, className: 'shrink-0 text-[#C4C7C5]' })}
+                                    <span className="text-[15px] font-normal leading-[21px] text-[#C4C7C5]">{item.label}</span>
                                 </button>
                             ))}
                         </div>
@@ -466,9 +443,9 @@ export default function DiscoverPage() {
                         </button>
                     ) : null}
 
-                    <div className="flex min-h-[54px] items-center rounded-full border border-white/15 bg-[#2A2A2E] pl-4 pr-2">
+                    <div className="flex min-h-[60px] w-full min-w-0 items-center rounded-[30px] border border-[rgba(216,180,254,0.12)] bg-[rgba(139,92,246,0.08)] pl-[18px] pr-2">
                         <IoAdd size={22} className="mr-3.5 shrink-0 text-white" aria-hidden />
-                        <span className="mr-2 shrink-0 text-base font-normal text-[#94A3B8]">Discover ·</span>
+                        <span className="mr-2 shrink-0 whitespace-nowrap text-base font-normal text-[#94A3B8]">Discover ·</span>
                         <input
                             ref={searchInputRef}
                             value={query}
@@ -494,7 +471,7 @@ export default function DiscoverPage() {
                             aria-label="Discover locations"
                             autoCorrect="off"
                             autoCapitalize="none"
-                            className="mr-1.5 min-w-0 flex-1 bg-transparent py-3 text-base font-semibold text-white placeholder:font-normal placeholder:text-[#94A3B8] focus:outline-none"
+                            className="search-field mr-3 min-w-0 flex-1 truncate border-0 bg-transparent py-0 text-base font-semibold text-white placeholder:font-normal placeholder:text-[#94A3B8] outline-none focus:outline-none focus:ring-0"
                         />
                         {hasSearchQuery ? (
                             <button
@@ -512,7 +489,7 @@ export default function DiscoverPage() {
                         <button
                             type="button"
                             onClick={chooseFromQuery}
-                            className="ml-1.5 flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#04110f]"
+                            className="ml-1.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[rgba(139,92,246,0.24)] text-[#D8B4FE]"
                             aria-label="Search places"
                         >
                             <IoArrowForward size={18} />
