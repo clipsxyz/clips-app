@@ -26,6 +26,7 @@ function throwMockConnectionRefused(): never {
  */
 const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/posts',
+    '/posts/mark-seen',
     '/stories',
     '/upload/single',
     '/locations/search',
@@ -1087,6 +1088,13 @@ export async function deletePost(postId: string) {
 export async function incrementView(postId: string) {
     return apiRequest(`/posts/${postId}/view`, {
         method: 'POST',
+    });
+}
+
+export async function markPostsSeen(postIds: string[]) {
+    return apiRequest('/posts/mark-seen', {
+        method: 'POST',
+        body: JSON.stringify({ post_ids: postIds }),
     });
 }
 

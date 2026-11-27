@@ -11,7 +11,7 @@ use App\Services\BoostAnalyticsService;
 use App\Services\PublishScheduledContent;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
-use App\Services\LinkPreviewService;
+use App\Services\LocationFeedRanker;
 use App\Services\VideoThumbnailService;
 use App\Support\DominantColor;
 use App\Support\LocationHierarchy;
@@ -405,7 +405,7 @@ class PostController extends Controller
 
         try {
             $cursor = (string) $request->get('cursor', '');
-            $limit = $request->get('limit', 10);
+            $limit = (int) $request->get('limit', 10);
             $filter = $request->get('filter', 'Dublin');
             $userId = $request->get('userId');
             if ($userId === null && Auth::check()) {
@@ -421,7 +421,6 @@ class PostController extends Controller
                     // ignore
                 }
             }
-            $cursorState = $this->decodeFeedCursor($cursor);
 
             try {
                 app(PublishScheduledContent::class)->publishDue();
@@ -431,7 +430,13 @@ class PostController extends Controller
 
             // Do not cache feed pages: likes/views/comments/shares change constantly,
             // and Home refetches this endpoint. A 5-minute cache served stale zeros.
-            $response = $this->buildFeedResponse($cursorState, $limit, $filter, $userId);
+            $kind = $this->classifyFeedCursor($cursor);
+            // A pull-to-refresh sends cursor 0, which is a fresh score. Older
+            // created_at cursors are not a second chronological feed.
+            if ($kind['kind'] === 'legacy') {
+                $kind['kind'] = 'fresh';
+            }
+            $response = $this->buildBalancedFeedResponse($kind, $limit, $filter, $userId);
 
             return response()->json($response);
         } catch (\Throwable $e) {
@@ -450,57 +455,7 @@ class PostController extends Controller
      */
     private function buildFeedResponse(array $cursorState, int $limit, string $filter, ?string $userId): array
     {
-        $hasViewer = ! empty($userId);
-        // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
-        // Location feeds: only original posts from that location.
-        $query = Post::query()
-            ->published()
-            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,account_type,allow_comments,comment_audience,is_private', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url,is_private'])
-            ->withCount(Post::engagementWithCounts());
-
-        if ($filter === 'Following' && $userId) {
-            $query->following($userId);
-            // Include reclipped posts so "when you reclip it gets shared to people who follow you"
-        } elseif ($filter !== 'Following') {
-            $query->notReclipped()->byLocation($filter);
-        } else {
-            // Following but no userId (e.g. guest): only original posts
-            $query->notReclipped();
-        }
-
-        if ($hasViewer) {
-            $query->withExists([
-                'likes as user_liked' => function ($q) use ($userId) {
-                    $q->where('users.id', $userId);
-                },
-                'bookmarks as is_bookmarked' => function ($q) use ($userId) {
-                    $q->where('users.id', $userId);
-                },
-                'reclips as user_reclipped' => function ($q) use ($userId) {
-                    $q->where('users.id', $userId);
-                },
-            ])
-                ->selectRaw(
-                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'accepted') as is_following",
-                    [$userId]
-                )
-                ->selectRaw(
-                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'pending') as has_pending_follow",
-                    [$userId]
-                )
-                ->selectRaw(
-                    "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
-                    [$userId]
-                )
-                ->selectRaw(
-                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'accepted') as original_author_is_following",
-                    [$userId]
-                )
-                ->selectRaw(
-                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'pending') as original_author_has_pending_follow",
-                    [$userId]
-                );
-        }
+        $query = $this->scopedFeedQuery($filter, $userId);
 
         if ($cursorState['created_at'] && $cursorState['id']) {
             $query->where(function ($q) use ($cursorState) {
@@ -522,7 +477,7 @@ class PostController extends Controller
             ->unique('id')
             ->values();
 
-        $userModel = $hasViewer ? User::find($userId) : null;
+        $userModel = ! empty($userId) ? User::find($userId) : null;
         $transformedPosts = $posts->map(fn (Post $post) => self::toApiArray($post, $userModel));
 
         $lastPost = $posts->last();
@@ -580,6 +535,294 @@ class PostController extends Controller
             : Carbon::parse((string) $createdAt)->format('Y-m-d H:i:s');
 
         return rtrim(strtr(base64_encode($createdAtString.'|'.$id), '+/', '-_'), '=');
+    }
+
+    /**
+     * Same location / Following filters the chronological feed already used.
+     */
+    private function scopedFeedQuery(string $filter, ?string $userId)
+    {
+        $hasViewer = ! empty($userId);
+        // Following feed: include both original and reclipped posts from people you follow.
+        // Location feeds: only original posts from that location.
+        $query = Post::query()
+            ->published()
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national,account_type,allow_comments,comment_audience,is_private', 'taggedUsers:id,handle,display_name,avatar_url', 'originalPost.user:id,handle,avatar_url,is_private'])
+            ->withCount(Post::engagementWithCounts());
+
+        if ($filter === 'Following' && $userId) {
+            $query->following($userId);
+        } elseif ($filter !== 'Following') {
+            $query->notReclipped()->byLocation($filter);
+        } else {
+            $query->notReclipped();
+        }
+
+        if ($hasViewer) {
+            $query->withExists([
+                'likes as user_liked' => function ($q) use ($userId) {
+                    $q->where('users.id', $userId);
+                },
+                'bookmarks as is_bookmarked' => function ($q) use ($userId) {
+                    $q->where('users.id', $userId);
+                },
+                'reclips as user_reclipped' => function ($q) use ($userId) {
+                    $q->where('users.id', $userId);
+                },
+            ])
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'accepted') as is_following",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'pending') as has_pending_follow",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'accepted') as original_author_is_following",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf inner join posts op on op.id = posts.original_post_id where uf.following_id = op.user_id and uf.follower_id = ? and uf.status = 'pending') as original_author_has_pending_follow",
+                    [$userId]
+                );
+        }
+
+        return $query;
+    }
+
+    /**
+     * @return array{kind: string, rank: ?int, id: ?string, created_at: ?string, scored_at: ?int}
+     */
+    private function classifyFeedCursor(string $cursor): array
+    {
+        $cursor = trim($cursor);
+        $empty = ['kind' => 'fresh', 'rank' => null, 'id' => null, 'created_at' => null, 'scored_at' => null];
+        if ($cursor === '' || $cursor === '0') {
+            return $empty;
+        }
+        if (str_starts_with($cursor, 'rank|')) {
+            $parts = explode('|', $cursor, 4);
+            $scoredAt = isset($parts[1]) && ctype_digit($parts[1]) ? (int) $parts[1] : null;
+            $rank = isset($parts[2]) && is_numeric($parts[2]) ? (int) $parts[2] : null;
+            $id = $parts[3] ?? '';
+            if ($scoredAt === null || $rank === null || ! Str::isUuid($id)) {
+                return $empty;
+            }
+
+            return [
+                'kind' => 'rank',
+                'rank' => $rank,
+                'id' => $id,
+                'created_at' => null,
+                'scored_at' => $scoredAt,
+            ];
+        }
+        if (str_starts_with($cursor, 'tail|')) {
+            $parts = explode('|', $cursor, 3);
+            $createdAt = $parts[1] ?? '';
+            $id = $parts[2] ?? '';
+            try {
+                $createdAt = $createdAt !== '' ? Carbon::parse($createdAt)->toDateTimeString() : null;
+            } catch (\Throwable $e) {
+                $createdAt = null;
+            }
+
+            return [
+                'kind' => 'tail',
+                'rank' => null,
+                'id' => Str::isUuid($id) ? $id : null,
+                'created_at' => $createdAt,
+                'scored_at' => null,
+            ];
+        }
+
+        return ['kind' => 'legacy', 'rank' => null, 'id' => null, 'created_at' => null, 'scored_at' => null];
+    }
+
+    /**
+     * Rank the last five days of the already-scoped feed, then continue older
+     * posts in chronological order so a quiet day does not wipe the location.
+     *
+     * @param  array{kind: string, rank: ?int, id: ?string, created_at: ?string, scored_at: ?int}  $cursor
+     */
+    private function buildBalancedFeedResponse(array $cursor, int $limit, string $filter, ?string $userId): array
+    {
+        $ranker = app(LocationFeedRanker::class);
+        $userModel = ! empty($userId) ? User::find($userId) : null;
+        $scoredAt = $cursor['kind'] === 'rank' && $cursor['scored_at']
+            ? (int) $cursor['scored_at']
+            : now()->getTimestamp();
+        $windowStart = Carbon::createFromTimestamp($scoredAt)->subDays(LocationFeedRanker::WINDOW_DAYS);
+        $rankedPosts = collect();
+
+        if ($cursor['kind'] !== 'tail') {
+            $candidates = $this->scopedFeedQuery($filter, $userId)
+                ->withCount(['bookmarks as saves_rel_count'])
+                ->where('created_at', '>=', $windowStart)
+                ->orderBy('created_at', 'desc')
+                ->orderBy('id', 'desc')
+                ->limit(800)
+                ->get()
+                ->unique('id')
+                ->values();
+
+            $seen = [];
+            if ($userId && $candidates->isNotEmpty()) {
+                $seen = DB::table('post_views')
+                    ->where('user_id', $userId)
+                    ->whereIn('post_id', $candidates->pluck('id')->all())
+                    ->pluck('post_id')
+                    ->flip()
+                    ->all();
+            }
+
+            $rankedPosts = $candidates
+                ->each(function (Post $post) use ($ranker, $seen, $scoredAt) {
+                    $followed = (int) ($post->getAttribute('is_following') ?? 0) === 1;
+                    $post->setAttribute(
+                        'feed_rank_key',
+                        $ranker->rankKey($post, isset($seen[$post->id]), $followed, $scoredAt)
+                    );
+                })
+                ->sort(function (Post $a, Post $b) {
+                    $rank = ((int) $b->getAttribute('feed_rank_key')) <=> ((int) $a->getAttribute('feed_rank_key'));
+                    if ($rank !== 0) {
+                        return $rank;
+                    }
+
+                    return strcmp((string) $b->id, (string) $a->id);
+                })
+                ->values();
+
+            if ($cursor['kind'] === 'fresh' && preg_match('/^(dublin|ireland)$/i', trim((string) $filter))) {
+                $summary = $rankedPosts->take(10)->values()->map(function (Post $post, int $index) use ($scoredAt, $seen) {
+                    $created = $post->created_at instanceof \Carbon\Carbon
+                        ? $post->created_at
+                        : \Carbon\Carbon::parse((string) $post->created_at);
+                    $hours = round(max(0, ($scoredAt - $created->getTimestamp()) / 3600), 1);
+
+                    return sprintf(
+                        '#%d %s age_h=%s %s likes=%d comments=%d saves=%d views=%d score=%s',
+                        $index + 1,
+                        $post->id,
+                        $hours,
+                        isset($seen[$post->id]) ? 'seen' : 'unseen',
+                        (int) $post->likes_count,
+                        (int) $post->comments_count,
+                        (int) ($post->saves_rel_count ?? 0),
+                        (int) $post->views_count,
+                        number_format(((int) $post->getAttribute('feed_rank_key')) / LocationFeedRanker::RANK_SCALE, 3, '.', '')
+                    );
+                })->all();
+                \Log::info('feed-rank '.$filter.' viewer='.($userId ?: 'guest'), $summary);
+            }
+
+            if ($cursor['kind'] === 'rank' && $cursor['rank'] !== null && $cursor['id']) {
+                $cursorRank = (int) $cursor['rank'];
+                $cursorId = (string) $cursor['id'];
+                $rankedPosts = $rankedPosts
+                    ->filter(function (Post $post) use ($cursorRank, $cursorId) {
+                        $rank = (int) $post->getAttribute('feed_rank_key');
+                        if ($rank < $cursorRank) {
+                            return true;
+                        }
+
+                        return $rank === $cursorRank && strcmp((string) $post->id, $cursorId) < 0;
+                    })
+                    ->values();
+            }
+        }
+
+        $page = $rankedPosts->take($limit)->values();
+        $moreRanked = $rankedPosts->count() > $page->count();
+
+        if ($page->count() < $limit) {
+            $need = $limit - $page->count();
+            $tail = $this->scopedFeedQuery($filter, $userId)
+                ->where('created_at', '<', $windowStart);
+            if ($cursor['kind'] === 'tail' && $cursor['created_at'] && $cursor['id']) {
+                $tail->where(function ($q) use ($cursor) {
+                    $q->where('created_at', '<', $cursor['created_at'])
+                        ->orWhere(function ($q2) use ($cursor) {
+                            $q2->where('created_at', '=', $cursor['created_at'])
+                                ->where('id', '<', $cursor['id']);
+                        });
+                });
+            }
+            $tailPosts = $tail->orderBy('created_at', 'desc')
+                ->orderBy('id', 'desc')
+                ->limit($need)
+                ->get()
+                ->unique('id')
+                ->values();
+            $page = $page->concat($tailPosts)->unique('id')->values();
+            $tailFilled = $tailPosts->count() === $need;
+            $lastTail = $tailPosts->last();
+            $nextCursor = ($tailFilled && $lastTail)
+                ? 'tail|'.$lastTail->created_at->format('Y-m-d H:i:s').'|'.$lastTail->id
+                : null;
+        } elseif ($moreRanked) {
+            $last = $page->last();
+            $nextCursor = 'rank|'.$scoredAt.'|'.((int) $last->getAttribute('feed_rank_key')).'|'.$last->id;
+        } else {
+            $tailExists = $this->scopedFeedQuery($filter, $userId)
+                ->where('created_at', '<', $windowStart)
+                ->exists();
+            $nextCursor = $tailExists
+                ? 'tail|'.$windowStart->format('Y-m-d H:i:s').'|'
+                : null;
+        }
+
+        return [
+            'items' => $page->map(function (Post $post) use ($userModel) {
+                $post->offsetUnset('feed_rank_key');
+                $post->offsetUnset('saves_rel_count');
+
+                return self::toApiArray($post, $userModel);
+            })->values(),
+            'nextCursor' => $nextCursor,
+            'hasMore' => $nextCursor !== null,
+        ];
+    }
+
+    /**
+     * Remember posts the signed-in user has actually watched.
+     * Uses post_views (user_id, post_id, created_at). Does not change the public view counter.
+     */
+    public function markSeen(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'post_ids' => 'required|array|min:1|max:40',
+            'post_ids.*' => 'uuid',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = $request->user();
+        $ids = Post::query()
+            ->whereIn('id', array_values(array_unique($request->input('post_ids', []))))
+            ->pluck('id');
+        $now = now();
+        foreach ($ids as $postId) {
+            DB::table('post_views')->insertOrIgnore([
+                'user_id' => $user->id,
+                'post_id' => $postId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'marked' => $ids->count(),
+        ]);
     }
 
     /**
@@ -1381,28 +1624,8 @@ class PostController extends Controller
                 ]);
             }
 
-            $user = Auth::user();
-
-            // If user is authenticated, track the view
-            if ($user) {
-                try {
-                    DB::transaction(function () use ($user, $post) {
-                        try {
-                            if (! $user->views()->where('post_id', $post->id)->exists()) {
-                                $user->views()->attach($post->id, [], false);
-                            }
-                        } catch (\Illuminate\Database\QueryException $e) {
-                            if ($e->getCode() !== '23000' && $e->getCode() !== 23000) {
-                                throw $e;
-                            }
-                        } catch (\Exception $e) {
-                            \Log::debug('View tracking error: '.$e->getMessage());
-                        }
-                    });
-                } catch (\Exception $e) {
-                    \Log::debug('View tracking transaction error: '.$e->getMessage());
-                }
-            }
+            // Seen-for-ranking is written by POST /posts/mark-seen after the card
+            // has been on screen, not by this public counter.
 
             try {
                 $post->increment('views_count');

@@ -2944,6 +2944,15 @@ export async function toggleFollowForPost(
   return applyFollowState(nextFollowing);
 }
 
+const SEEN_POST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Ranking memory only. A glance does not count; the feed calls this after a real look or playback. */
+export async function markPostsSeen(postIds: string[]): Promise<void> {
+  const ids = [...new Set(postIds.map((id) => String(id || '').trim()))].filter((id) => SEEN_POST_ID.test(id));
+  if (!ids.length || !ids.some((id) => shouldUseLivePostApi(id))) return;
+  await apiClient.markPostsSeen(ids);
+}
+
 export async function incrementViews(userId: string, id: string): Promise<Post> {
   // Frontend-only mock posts (e.g. mock-scenes-*) don't exist in the API – skip to avoid 500
   if (id.startsWith('mock-scenes-')) {

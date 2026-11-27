@@ -65,6 +65,7 @@ import {
     toggleFollowForPost,
     toggleLike,
     incrementViews,
+    markPostsSeen,
     reclipPost,
     deletePost,
     setReclipState,
@@ -2765,6 +2766,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 if (!token.isViewable || !token.item || token.item.kind !== 'post') continue;
                 recordFeedViewRef.current(String(token.item.post.id));
             }
+            const visiblePostIds: string[] = [];
+            for (const token of viewableItems) {
+                if (!token.isViewable || !token.item || token.item.kind !== 'post') continue;
+                visiblePostIds.push(String(token.item.post.id));
+            }
+            syncSeenDwellRef.current(visiblePostIds);
             if (!feedAutoplayAllowedRef.current || feedAutoplayOverlayBlocks()) {
                 setFeedAudioFocusPostId(null);
                 setFeedPreloadPostIds([]);
@@ -2812,6 +2819,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             // While the finger is down or the list is flinging, only remember the
             // candidate. Mounting here creates and destroys ExoPlayer on every card.
             if (feedScrollingRef.current) return;
+            if (nextId) queueMarkSeenRef.current(nextId);
             scheduleActiveFeedVideoRef.current(nextId);
         }
     ).current;
@@ -3143,6 +3151,67 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [userId],
     );
     recordFeedViewRef.current = recordFeedView;
+
+    const seenDwellTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+    const seenQueuedRef = useRef(new Set<string>());
+    const seenMarkedRef = useRef(new Set<string>());
+    const seenFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const queueMarkSeenRef = useRef<(postId: string) => void>(() => {});
+    const syncSeenDwellRef = useRef<(visibleIds: string[]) => void>(() => {});
+
+    queueMarkSeenRef.current = (postId: string) => {
+        const id = String(postId || '');
+        if (!id || seenMarkedRef.current.has(id) || seenQueuedRef.current.has(id)) return;
+        const pending = seenDwellTimersRef.current.get(id);
+        if (pending) {
+            clearTimeout(pending);
+            seenDwellTimersRef.current.delete(id);
+        }
+        seenQueuedRef.current.add(id);
+        if (seenFlushTimerRef.current) return;
+        seenFlushTimerRef.current = setTimeout(() => {
+            seenFlushTimerRef.current = null;
+            const ids = [...seenQueuedRef.current];
+            seenQueuedRef.current.clear();
+            if (!ids.length) return;
+            ids.forEach((seenId) => seenMarkedRef.current.add(seenId));
+            void markPostsSeen(ids).catch(() => {
+                ids.forEach((seenId) => seenMarkedRef.current.delete(seenId));
+            });
+        }, 400);
+    };
+
+    syncSeenDwellRef.current = (visibleIds: string[]) => {
+        const visible = new Set(visibleIds);
+        for (const [id, timer] of seenDwellTimersRef.current) {
+            if (visible.has(id)) continue;
+            clearTimeout(timer);
+            seenDwellTimersRef.current.delete(id);
+        }
+        for (const id of visible) {
+            if (
+                seenMarkedRef.current.has(id) ||
+                seenQueuedRef.current.has(id) ||
+                seenDwellTimersRef.current.has(id)
+            ) {
+                continue;
+            }
+            const timer = setTimeout(() => {
+                seenDwellTimersRef.current.delete(id);
+                queueMarkSeenRef.current(id);
+            }, 1500);
+            seenDwellTimersRef.current.set(id, timer);
+        }
+    };
+
+    useEffect(() => {
+        const timers = seenDwellTimersRef.current;
+        return () => {
+            for (const timer of timers.values()) clearTimeout(timer);
+            timers.clear();
+            if (seenFlushTimerRef.current) clearTimeout(seenFlushTimerRef.current);
+        };
+    }, []);
 
 /** Follow is per-author — keep every visible post for that handle in sync. */
       const patchFollowForHandle = React.useCallback(
@@ -4361,7 +4430,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             ...flatPosts.map((p) => ({ type: 'post' as const, item: p, createdAt: p.createdAt || 0 })),
             ...ads.map((a) => ({ type: 'ad' as const, item: a, createdAt: a.createdAt || 0 })),
         ];
-        feedItems.sort((a, b) => b.createdAt - a.createdAt);
         return feedItems;
     }, [flatPosts, ads]);
 

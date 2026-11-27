@@ -275,6 +275,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
 
     // Posts routes (protected - require auth for actions)
     Route::prefix('posts')->group(function () {
+        Route::post('/mark-seen', [PostController::class, 'markSeen']);
         Route::post('/', [PostController::class, 'store']);
         Route::patch('/{id}/schedule', [PostController::class, 'reschedule']);
         Route::post('/{id}/publish-now', [PostController::class, 'publishNow']);
