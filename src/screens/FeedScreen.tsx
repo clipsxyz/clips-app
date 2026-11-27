@@ -1695,6 +1695,13 @@ const FeedCard = React.memo(function FeedCard({
                                 holdNativeVideo={holdNativeVideo}
                                 muted={feedVideoMuted}
                             />
+                            <LinearGradient
+                                pointerEvents="none"
+                                colors={['#000000', 'rgba(0, 0, 0, 0)']}
+                                start={{ x: 0.5, y: 0 }}
+                                end={{ x: 0.5, y: 1 }}
+                                style={styles.postcardHeaderFade}
+                            />
                             {isClientUploading ? (
                                 <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
                                     <ActivityIndicator size="large" color="#FFFFFF" />
@@ -6649,6 +6656,16 @@ onVisitProfile={() =>
 };
 
 const styles = StyleSheet.create({
+    /** Short black feather so the name bar dissolves into the photo. */
+    postcardHeaderFade: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 36,
+        zIndex: 6,
+        elevation: 6,
+    },
     /** Outside TextureView — sibling of FeedPostMedia so mute stays visible on Android. */
     feedMuteButton: {
         position: 'absolute',

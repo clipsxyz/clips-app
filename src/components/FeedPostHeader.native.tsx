@@ -14,7 +14,6 @@ import { getPostSocialSourceLabel, getReclipDisplay } from '../utils/feedPostMet
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
-import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 
 /** Circular profile photo: 32×32, fully round. */
 const FEED_HEADER_AVATAR_SIZE = 32;
@@ -247,13 +246,15 @@ export default function FeedPostHeader({
             style={[styles.wrap, isOverlaid && styles.wrapOverlaid]}
             pointerEvents="box-none"
         >
-            {!isOverlaid ? null : (
+            {isOverlaid ? (
                 <LinearGradient
                     colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)', 'transparent']}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
                     style={StyleSheet.absoluteFill}
                     pointerEvents="none"
                 />
-            )}
+            ) : null}
             <View style={styles.content}>{chrome}</View>
         </View>
     );
@@ -268,7 +269,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 8,
         justifyContent: 'center',
-        backgroundColor: FEED_CARD_CHROME_BG,
+        backgroundColor: '#000000',
         overflow: 'hidden',
     },
     wrapOverlaid: {
