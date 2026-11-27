@@ -2160,6 +2160,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [deleteTarget, setDeleteTarget] = useState<{ id: string; handle: string } | null>(null);
     const [editPost, setEditPost] = useState<Post | null>(null);
     const [saveModalPost, setSaveModalPost] = useState<Post | null>(null);
+    const [removeSavedPost, setRemoveSavedPost] = useState<Post | null>(null);
     const [qrPost, setQrPost] = useState<Post | null>(null);
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [inviteGroupHandle, setInviteGroupHandle] = useState<string | null>(null);
@@ -5604,6 +5605,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                     onBookmark={async () => {
                         if (isPendingUpload) return;
+                        const saved = savedByPostIdRef.current[mergedPost.id] ?? mergedPost.isBookmarked === true;
+                        if (saved) {
+                            setRemoveSavedPost(mergedPost);
+                            return;
+                        }
                         setSaveModalPost(mergedPost);
                     }}
                     onOverflowPress={() => {
@@ -6573,6 +6579,25 @@ onVisitProfile={() =>
                     })();
                 }}
             />
+
+            {removeSavedPost ? (
+                <GazetteerAlertSheet
+                    visible
+                    variant="card"
+                    showIcon={false}
+                    title="Remove from Saved and Collections?"
+                    message="Removing this will also remove it from all collections."
+                    confirmButtonText="Remove from saved"
+                    cancelButtonText="Cancel"
+                    showCancelButton
+                    onConfirm={() => {
+                        const target = removeSavedPost;
+                        setRemoveSavedPost(null);
+                        if (target) void toggleCollectionsSaveForPost(target);
+                    }}
+                    onDismiss={() => setRemoveSavedPost(null)}
+                />
+            ) : null}
 
             {saveModalPost ? (
                 <SavePostModal

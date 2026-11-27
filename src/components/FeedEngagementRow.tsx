@@ -85,7 +85,7 @@ export default function FeedEngagementRow({
     const reclipIdleColor = tone === 'feed' ? '#9CA3AF' : slate ? '#94A3B8' : '#D1D5DB';
     const reclipCountColor = tone === 'feed' ? '#D1D5DB' : slate ? '#94A3B8' : '#9CA3AF';
     const likeIconColor = slate && userLiked ? '#FFFFFF' : iconColor;
-    const saveColor = isSaved ? '#7A8AF0' : iconColor;
+    const saveColor = tone === 'muted' ? (isSaved ? '#7A8AF0' : iconColor) : '#FFFFFF';
     const pillStyle = pillChrome ? styles.itemPill : null;
     const iconSize = pillChrome ? PILL_ACTION_ICON : ACTION_ICON;
     const reclipInnerSize = pillChrome ? PILL_RECLIP_INNER : RECLIP_INNER_ICON;
@@ -158,7 +158,7 @@ export default function FeedEngagementRow({
                 >
                     {userReclipped ? (
                         <LinearGradient
-                            colors={['#22d3ee', '#06b6d4']}
+                            colors={['#22C55E', '#FFD400', '#FF4D9A']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
                             style={styles.reclipGradientRing}

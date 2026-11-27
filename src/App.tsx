@@ -4709,7 +4709,7 @@ function EngagementBar({
             {userReclipped ? (
               <div
                 className="p-[1.5px] rounded-full"
-                style={{ background: 'linear-gradient(135deg,#22d3ee,#06b6d4)' }}
+                style={{ background: 'linear-gradient(135deg,#22C55E,#FFD400,#FF4D9A)' }}
               >
                 <div className="w-6 h-6 rounded-full bg-black flex items-center justify-center">
                   <FiRepeat className="w-3.5 h-3.5 text-white" />
@@ -4731,7 +4731,7 @@ function EngagementBar({
             aria-label={isSaved ? 'Saved' : 'Save post'}
             title={isSaved ? 'Saved' : 'Save post'}
           >
-            <FiBookmark className={`${iconSize} ${isSaved ? 'text-[#7A8AF0] fill-[#7A8AF0]' : 'text-white'}`} />
+            <FiBookmark className={`${iconSize} ${isSaved ? 'fill-white text-white' : 'text-white'}`} />
             <span className="text-xs text-white tabular-nums">{isSaved ? 'Saved' : 'Save'}</span>
           </button>
 
