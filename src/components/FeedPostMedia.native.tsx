@@ -65,6 +65,7 @@ import {
 import { FEED_CARD_MEDIA_SCRIM, FEED_CARD_MEDIA_TAP_LAYER } from './FeedPageLayout.native';
 import LinearGradient from 'react-native-linear-gradient';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
+import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 import { getAvatarForHandle } from '../api/users';
 
 function clipPassportPlace(post: Post): string {

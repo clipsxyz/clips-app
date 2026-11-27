@@ -11,6 +11,7 @@ use App\Services\BoostAnalyticsService;
 use App\Services\PublishScheduledContent;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
+use App\Services\LinkPreviewService;
 use App\Services\LocationFeedRanker;
 use App\Services\VideoThumbnailService;
 use App\Support\DominantColor;
@@ -1091,9 +1092,8 @@ class PostController extends Controller
      */
     private function resolveLinkPreview(Request $request): ?array
     {
-        $previews = app(LinkPreviewService::class);
-
         try {
+            $previews = app(LinkPreviewService::class);
             $fromClient = $request->input('link_preview');
             if (is_array($fromClient) && $fromClient !== []) {
                 $normalized = $previews->normalizeClientPayload($fromClient);
