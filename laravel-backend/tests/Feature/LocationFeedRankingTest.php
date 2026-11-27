@@ -169,4 +169,116 @@ class LocationFeedRankingTest extends TestCase
 
         $this->assertSame(1, DB::table('post_views')->where('user_id', $viewer->id)->where('post_id', $post->id)->count());
     }
+
+    public function test_following_feed_collapses_reclips_of_the_same_post(): void
+    {
+        $viewer = $this->placeUser('Rankville');
+        $author = $this->placeUser('Elsewhere', 'Farshire', 'Spain');
+        $ada = $this->placeUser('Rankville');
+        $ada->handle = '@Ada';
+        $ada->save();
+        $ben = $this->placeUser('Rankville');
+        $ben->handle = '@Ben';
+        $ben->save();
+        $cara = $this->placeUser('Rankville');
+        $cara->handle = '@Cara';
+        $cara->save();
+        foreach ([$ada, $ben, $cara] as $followed) {
+            $viewer->following()->attach($followed->id, ['status' => 'accepted']);
+        }
+
+        $original = Post::factory()->forUser($author)->create([
+            'created_at' => now()->subDays(2),
+        ]);
+        $this->reclipBy($ada, $original, now()->subHours(5));
+        $middle = $this->reclipBy($ben, $original, now()->subHours(3));
+        $newest = $this->reclipBy($cara, $original, now()->subHours(1));
+        $other = Post::factory()->forUser($ada)->create([
+            'created_at' => now()->subHours(2),
+        ]);
+
+        $first = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts?filter=Following&limit=1');
+        $first->assertOk();
+        $second = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts?filter=Following&limit=1&cursor='.urlencode((string) $first->json('nextCursor')));
+        $second->assertOk();
+
+        $ids = [
+            ...collect($first->json('items'))->pluck('id')->all(),
+            ...collect($second->json('items'))->pluck('id')->all(),
+        ];
+        $this->assertSame([$newest->id, $other->id], $ids);
+        $this->assertNotContains($middle->id, $ids);
+        $this->assertSame(['Cara', 'Ben', 'Ada'], $first->json('items.0.reclip_attribution_handles'));
+        $this->assertNull($second->json('items.0.reclip_attribution_handles'));
+    }
+
+    public function test_a_seen_reclip_copy_counts_as_seen_for_the_collapsed_card(): void
+    {
+        $viewer = $this->placeUser('Rankville');
+        $author = $this->placeUser('Elsewhere', 'Farshire', 'Spain');
+        $ada = $this->placeUser('Rankville');
+        $ben = $this->placeUser('Rankville');
+        $controlAuthor = $this->placeUser('Rankville');
+        foreach ([$ada, $ben, $controlAuthor] as $followed) {
+            $viewer->following()->attach($followed->id, ['status' => 'accepted']);
+        }
+
+        $when = now()->subHours(4);
+        $original = Post::factory()->forUser($author)->create(['created_at' => now()->subDays(3)]);
+        $seenCopy = $this->reclipBy($ada, $original, $when->copy()->subHour());
+        $survivor = $this->reclipBy($ben, $original, $when->copy());
+        $survivor->likes_count = 4;
+        $survivor->save();
+        $control = Post::factory()->forUser($controlAuthor)->create([
+            'likes_count' => 4,
+            'created_at' => $when->copy(),
+        ]);
+        DB::table('post_views')->insert([
+            'user_id' => $viewer->id,
+            'post_id' => $seenCopy->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $ids = collect(
+            $this->actingAs($viewer, 'sanctum')->getJson('/api/posts?filter=Following&limit=10')->json('items')
+        )->pluck('id')->all();
+
+        $this->assertSame([$control->id, $survivor->id], $ids);
+    }
+
+    public function test_location_feed_still_ignores_reclip_copies(): void
+    {
+        $viewer = $this->placeUser('Rankville');
+        $author = $this->placeUser('Rankville');
+        $reclipper = $this->placeUser('Rankville');
+        $viewer->following()->attach($reclipper->id, ['status' => 'accepted']);
+
+        $original = Post::factory()->forUser($author)->create([
+            'likes_count' => 2,
+            'created_at' => now()->subHours(3),
+        ]);
+        $this->reclipBy($reclipper, $original, now()->subHour());
+
+        $ids = collect(
+            $this->actingAs($viewer, 'sanctum')->getJson('/api/posts?filter=Rankville&limit=10')->json('items')
+        )->pluck('id')->all();
+
+        $this->assertSame([$original->id], $ids);
+    }
+
+    private function reclipBy(User $user, Post $original, \Carbon\Carbon $when): Post
+    {
+        return Post::factory()->forUser($user)->create([
+            'is_reclipped' => true,
+            'original_post_id' => $original->id,
+            'original_user_handle' => $original->user_handle,
+            'reclipped_by' => $user->handle,
+            'text_content' => $original->text_content,
+            'likes_count' => 1,
+            'created_at' => $when,
+        ]);
+    }
 }

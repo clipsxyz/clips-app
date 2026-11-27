@@ -41,6 +41,37 @@ export function getPostSocialSourceLabel(post: Post): string | null {
     }
 }
 
+function uniqueReclipNames(handles: string[] | undefined | null): string[] {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of handles ?? []) {
+        const name = String(raw || '').replace(/^@/, '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        names.push(name);
+    }
+    return names;
+}
+
+/** First two followed reclippers on the line. Everyone after that is the More list. */
+export function reclipAttributionParts(handles: string[] | undefined | null): {
+    label: string | null;
+    rest: string[];
+} {
+    const names = uniqueReclipNames(handles);
+    if (names.length < 2) return { label: null, rest: [] };
+    return {
+        label: `${names[0]} & ${names[1]} reclipped`,
+        rest: names.slice(2),
+    };
+}
+
+export function formatReclipAttribution(handles: string[] | undefined | null): string | null {
+    return reclipAttributionParts(handles).label;
+}
+
 export function getReclipDisplay(post: Post, _viewerHandle?: string | null): {
     isReclip: boolean;
     displayHandle: string;

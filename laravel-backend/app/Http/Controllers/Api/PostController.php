@@ -260,6 +260,11 @@ class PostController extends Controller
 
     public static function toApiArray(Post $post, ?User $viewer): array
     {
+        $reclipAttribution = $post->getAttribute('reclip_attribution_handles');
+        if ($post->offsetExists('reclip_attribution_handles')) {
+            $post->offsetUnset('reclip_attribution_handles');
+        }
+
         $postData = $post->toArray();
         $attrs = $post->getAttributes();
         $postData['status'] = $post->status ?: 'published';
@@ -370,6 +375,9 @@ class PostController extends Controller
             }
             if (array_key_exists('original_author_has_pending_follow', $attrs)) {
                 $postData['original_author_has_pending_follow'] = (bool) $attrs['original_author_has_pending_follow'];
+            }
+            if (is_array($reclipAttribution) && count($reclipAttribution) >= 2) {
+                $postData['reclip_attribution_handles'] = array_values($reclipAttribution);
             }
             if (array_key_exists('original_author_is_following', $attrs)) {
                 $postData['original_author_is_following'] = (bool) $attrs['original_author_is_following'];
@@ -538,6 +546,120 @@ class PostController extends Controller
     }
 
     /**
+     * Following keeps the newest copy of a reclipped post and drops the rest,
+     * so the same post cannot show twice in the ranked window or the older tail.
+     */
+    private function whereNewestFollowingCopy($query, string $userId): void
+    {
+        $query->whereRaw(
+            'posts.id = (
+                select p2.id from posts as p2
+                where p2.status = ?
+                  and exists (
+                    select 1 from user_follows as uf
+                    where uf.following_id = p2.user_id
+                      and uf.follower_id = ?
+                      and uf.status = ?
+                  )
+                  and (
+                    case
+                      when p2.is_reclipped = 1 and p2.original_post_id is not null then p2.original_post_id
+                      else p2.id
+                    end
+                  ) = (
+                    case
+                      when posts.is_reclipped = 1 and posts.original_post_id is not null then posts.original_post_id
+                      else posts.id
+                    end
+                  )
+                order by p2.created_at desc, p2.id desc
+                limit 1
+            )',
+            ['published', $userId, 'accepted']
+        );
+    }
+
+    /**
+     * Every followed reclip of the originals already on this page, newest first.
+     *
+     * @param  \Illuminate\Support\Collection<int, Post>  $posts
+     */
+    private function followedReclipCopies($posts, string $userId)
+    {
+        $originalIds = collect($posts)
+            ->filter(fn (Post $post) => $post->is_reclipped && $post->original_post_id)
+            ->pluck('original_post_id')
+            ->unique()
+            ->values();
+        if ($originalIds->isEmpty()) {
+            return collect();
+        }
+
+        return Post::query()
+            ->published()
+            ->following($userId)
+            ->where('is_reclipped', true)
+            ->whereIn('original_post_id', $originalIds->all())
+            ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc')
+            ->get(['id', 'original_post_id', 'user_handle', 'reclipped_by']);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, Post>  $copies
+     * @param  array<string, mixed>  $seen
+     * @return array<string, true>
+     */
+    private function underlyingIdsWithASeenCopy($copies, array $seen): array
+    {
+        $seenUnderlying = [];
+        foreach ($copies as $copy) {
+            $originalId = (string) $copy->original_post_id;
+            if (isset($seen[$copy->id]) || isset($seen[$originalId])) {
+                $seenUnderlying[$originalId] = true;
+            }
+        }
+
+        return $seenUnderlying;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, Post>  $posts
+     */
+    private function attachFollowingReclipAttribution($posts, string $userId): void
+    {
+        $copies = $this->followedReclipCopies($posts, $userId);
+        if ($copies->isEmpty()) {
+            return;
+        }
+
+        $byOriginal = $copies->groupBy(fn (Post $copy) => (string) $copy->original_post_id);
+        foreach ($posts as $post) {
+            if (! $post->is_reclipped || ! $post->original_post_id) {
+                continue;
+            }
+            $group = $byOriginal->get((string) $post->original_post_id);
+            if ($group === null || $group->count() < 2) {
+                continue;
+            }
+            $handles = [];
+            $seenHandles = [];
+            foreach ($group as $copy) {
+                $name = ltrim(trim((string) ($copy->reclipped_by ?: $copy->user_handle)), '@');
+                $key = mb_strtolower($name);
+                if ($name === '' || isset($seenHandles[$key])) {
+                    continue;
+                }
+                $seenHandles[$key] = true;
+                $handles[] = $name;
+            }
+            if (count($handles) >= 2) {
+                $post->setAttribute('reclip_attribution_handles', $handles);
+            }
+        }
+    }
+
+    /**
      * Same location / Following filters the chronological feed already used.
      */
     private function scopedFeedQuery(string $filter, ?string $userId)
@@ -552,6 +674,8 @@ class PostController extends Controller
 
         if ($filter === 'Following' && $userId) {
             $query->following($userId);
+            // One card per underlying post. Location feeds never include reclips.
+            $this->whereNewestFollowingCopy($query, $userId);
         } elseif ($filter !== 'Following') {
             $query->notReclipped()->byLocation($filter);
         } else {
@@ -671,22 +795,39 @@ class PostController extends Controller
                 ->unique('id')
                 ->values();
 
+            $reclipCopies = ($filter === 'Following' && $userId)
+                ? $this->followedReclipCopies($candidates, $userId)
+                : collect();
+            $seenProbeIds = $candidates->pluck('id')->all();
+            if ($reclipCopies->isNotEmpty()) {
+                $seenProbeIds = array_merge(
+                    $seenProbeIds,
+                    $reclipCopies->pluck('id')->all(),
+                    $reclipCopies->pluck('original_post_id')->all()
+                );
+            }
+
             $seen = [];
-            if ($userId && $candidates->isNotEmpty()) {
+            if ($userId && $seenProbeIds !== []) {
                 $seen = DB::table('post_views')
                     ->where('user_id', $userId)
-                    ->whereIn('post_id', $candidates->pluck('id')->all())
+                    ->whereIn('post_id', array_values(array_unique($seenProbeIds)))
                     ->pluck('post_id')
                     ->flip()
                     ->all();
             }
+            $reclipGroupSeen = $this->underlyingIdsWithASeenCopy($reclipCopies, $seen);
 
             $rankedPosts = $candidates
-                ->each(function (Post $post) use ($ranker, $seen, $scoredAt) {
+                ->each(function (Post $post) use ($ranker, $seen, $reclipGroupSeen, $scoredAt) {
                     $followed = (int) ($post->getAttribute('is_following') ?? 0) === 1;
+                    $underlying = ($post->is_reclipped && $post->original_post_id)
+                        ? (string) $post->original_post_id
+                        : (string) $post->id;
+                    $postSeen = isset($seen[$post->id]) || isset($reclipGroupSeen[$underlying]);
                     $post->setAttribute(
                         'feed_rank_key',
-                        $ranker->rankKey($post, isset($seen[$post->id]), $followed, $scoredAt)
+                        $ranker->rankKey($post, $postSeen, $followed, $scoredAt)
                     );
                 })
                 ->sort(function (Post $a, Post $b) {
@@ -776,6 +917,10 @@ class PostController extends Controller
             $nextCursor = $tailExists
                 ? 'tail|'.$windowStart->format('Y-m-d H:i:s').'|'
                 : null;
+        }
+
+        if ($filter === 'Following' && $userId && $page->isNotEmpty()) {
+            $this->attachFollowingReclipAttribution($page, $userId);
         }
 
         return [

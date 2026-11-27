@@ -10,7 +10,7 @@ import { useMutualFollow } from '../hooks/useMutualFollow';
 import { useFollowState } from '../hooks/useFollowState';
 import StoryRingAvatar from './StoryRingAvatar.native';
 import VerifiedBadge from './VerifiedBadge.native';
-import { getPostSocialSourceLabel, getReclipDisplay } from '../utils/feedPostMeta';
+import { getPostSocialSourceLabel, getReclipDisplay, reclipAttributionParts } from '../utils/feedPostMeta';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
@@ -57,11 +57,16 @@ export default function FeedPostHeader({
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
     const [followBusy, setFollowBusy] = useState(false);
+    const [reclipMorePostId, setReclipMorePostId] = useState<string | null>(null);
 
     const { isReclip, displayHandle, profileHandle, reclipperHandle, authorFollowing } = getReclipDisplay(post, viewerHandle ?? user?.handle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
     const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
     const reclipperLabel = String(reclipperHandle || '').replace(/^@/, '').trim();
+    const reclipParts = reclipAttributionParts(post.reclipAttributionHandles);
+    const combinedReclipLabel = reclipParts.label;
+    const reclipMoreNames = reclipParts.rest;
+    const reclipMoreOpen = reclipMorePostId === post.id && reclipMoreNames.length > 0;
     const reclipperAvatar = post.avatarUrl || getAvatarForHandle(reclipperHandle);
     const socialSourceLabel = getPostSocialSourceLabel(post);
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
@@ -167,14 +172,35 @@ export default function FeedPostHeader({
         <View style={[styles.row, variant === 'textOnlyChrome' && styles.textOnlyRow]}>
             <View style={styles.left}>
                 {isReclip ? (
-                    <View style={styles.reclipRow}>
-                        {reclipperAvatar ? (
-                            <Image source={{ uri: reclipperAvatar }} style={styles.reclipAvatar} />
+                    <View style={styles.reclipBlock}>
+                        <View style={styles.reclipRow}>
+                            {reclipperAvatar ? (
+                                <Image source={{ uri: reclipperAvatar }} style={styles.reclipAvatar} />
+                            ) : null}
+                            <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
+                            <Text style={[styles.reclipText, styles.reclipTextShrink, { color: reclipColor }]} numberOfLines={1}>
+                                {combinedReclipLabel || `${reclipperLabel || 'User'} reclipped`}
+                            </Text>
+                            {reclipMoreNames.length > 0 ? (
+                                <TouchableOpacity
+                                    onPress={() => setReclipMorePostId(reclipMoreOpen ? null : post.id)}
+                                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="More people who reclipped"
+                                >
+                                    <Text style={[styles.reclipText, { color: reclipColor }]}>more</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
+                        {reclipMoreOpen ? (
+                            <View style={styles.reclipMoreList}>
+                                {reclipMoreNames.map((name) => (
+                                    <Text key={name} style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
+                                        {name}
+                                    </Text>
+                                ))}
+                            </View>
                         ) : null}
-                        <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
-                        <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
-                            {reclipperLabel || 'User'} reclipped
-                        </Text>
                     </View>
                 ) : null}
                 <View style={styles.identityRow}>
@@ -361,12 +387,23 @@ const styles = StyleSheet.create({
         zIndex: 30,
         elevation: 4,
     },
+    reclipBlock: {
+        maxWidth: '100%',
+        marginBottom: 4,
+    },
     reclipRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
-        marginBottom: 4,
         maxWidth: '100%',
+    },
+    reclipTextShrink: {
+        flexShrink: 1,
+    },
+    reclipMoreList: {
+        marginTop: 4,
+        marginLeft: 35,
+        gap: 2,
     },
     reclipAvatar: {
         width: 16,

@@ -79,6 +79,7 @@ import {
 } from './utils/feedContentPrefsWeb';
 import { normalizeFeedHandle } from './utils/feedContentPrefsCore';
 import { timeAgo } from './utils/timeAgo';
+import { reclipAttributionParts } from './utils/feedPostMeta';
 import {
   findPlaceMatchedPosts,
   suggestedPlacesBundleKey,
@@ -1904,7 +1905,17 @@ function PostHeader({
                 <img src={reclipperAvatar} alt="" className="h-4 w-4 rounded-full object-cover" />
               ) : null}
               <FiRepeat className="h-3 w-3 shrink-0" />
-              <span className="truncate">{reclipperLabel} reclipped</span>
+              <span className="truncate">{reclipAttributionParts(post.reclipAttributionHandles).label || `${reclipperLabel} reclipped`}</span>
+              {reclipAttributionParts(post.reclipAttributionHandles).rest.length > 0 ? (
+                <details className="relative shrink-0">
+                  <summary className="cursor-pointer list-none">more</summary>
+                  <div className="absolute left-0 top-full z-50 mt-1 min-w-[8rem] rounded-md bg-black px-2 py-1 shadow-lg">
+                    {reclipAttributionParts(post.reclipAttributionHandles).rest.map((name) => (
+                      <div key={name} className="truncate py-0.5">{name}</div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </div>
           )}
           <div className="flex items-center justify-between gap-2">
@@ -2022,7 +2033,17 @@ function PostHeader({
                   <img src={reclipperAvatar} alt="" className="h-4 w-4 rounded-full object-cover" />
                 ) : null}
                 <FiRepeat className="h-3 w-3 shrink-0" />
-                <span className="truncate">{reclipperLabel} reclipped</span>
+                <span className="truncate">{reclipAttributionParts(post.reclipAttributionHandles).label || `${reclipperLabel} reclipped`}</span>
+                {reclipAttributionParts(post.reclipAttributionHandles).rest.length > 0 ? (
+                  <details className="relative shrink-0">
+                    <summary className="cursor-pointer list-none">more</summary>
+                    <div className="absolute left-0 top-full z-50 mt-1 min-w-[8rem] rounded-md bg-black px-2 py-1 shadow-lg">
+                      {reclipAttributionParts(post.reclipAttributionHandles).rest.map((name) => (
+                        <div key={name} className="truncate py-0.5">{name}</div>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
               </div>
             )}
             <button

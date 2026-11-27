@@ -194,6 +194,8 @@ export type Post = {
   originalAuthorIsFollowing?: boolean;
   reclippedBy?: string;
   reclipped_by?: string; // Backend field
+  /** Followed people who reclipped this post, newest first. Two or more collapse onto one card. */
+  reclipAttributionHandles?: string[];
   is_reclipped?: boolean; // Backend field
   // User location data for filtering
   userLocal?: string;

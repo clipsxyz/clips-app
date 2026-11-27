@@ -1731,6 +1731,11 @@ width: response.width ?? existing?.width,
       response.original_author_is_following ?? response.originalAuthorIsFollowing,
     ),
     reclippedBy: response.reclipped_by || response.reclippedBy || undefined,
+    reclipAttributionHandles: Array.isArray(response.reclip_attribution_handles)
+      ? response.reclip_attribution_handles.filter((name: unknown) => typeof name === 'string' && name.trim())
+      : Array.isArray(response.reclipAttributionHandles)
+        ? response.reclipAttributionHandles.filter((name: unknown) => typeof name === 'string' && name.trim())
+        : undefined,
     stickers: response.stickers,
     templateId: response.template_id || response.templateId,
     bannerText: response.banner_text || response.bannerText,
