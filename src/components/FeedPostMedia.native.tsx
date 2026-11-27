@@ -65,7 +65,7 @@ import {
 import { FEED_CARD_MEDIA_SCRIM, FEED_CARD_MEDIA_TAP_LAYER } from './FeedPageLayout.native';
 import LinearGradient from 'react-native-linear-gradient';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
-import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
+import { getAvatarForHandle } from '../api/users';
 
 function clipPassportPlace(post: Post): string {
     const clean = (value?: string | null) =>
@@ -81,6 +81,13 @@ function clipPassportPlace(post: Post): string {
         clean(post.locationLabel) ||
         'Gazetteer'
     );
+}
+
+function clipAuthorAvatar(post: Post): string | undefined {
+    const reclip = Boolean(post.isReclipped && post.originalUserHandle);
+    const handle = reclip ? post.originalUserHandle : post.userHandle;
+    const photo = reclip ? post.originalUserAvatarUrl : post.avatarUrl;
+    return (photo && photo.trim()) || getAvatarForHandle(handle);
 }
 
 function firstMediaUri(...vals: unknown[]): string | undefined {
@@ -1736,6 +1743,12 @@ const FeedPostMedia = React.memo(
                     >
                     <View style={styles.twoPlayCard}>
                         <View style={styles.twoPlayStamp}>
+                            {(() => {
+                                const authorPhoto = clipAuthorAvatar(post);
+                                return authorPhoto ? (
+                                    <Image source={{ uri: authorPhoto }} style={styles.twoPlayAuthor} />
+                                ) : null;
+                            })()}
                             <Icon name="location-outline" size={12} color="#FFFFFF" />
                             <Text style={styles.twoPlayStampText} numberOfLines={1}>
                                 {clipPassportPlace(post)}
@@ -1916,6 +1929,12 @@ const styles = StyleSheet.create({
         gap: 4,
         marginBottom: 8,
         maxWidth: '100%',
+    },
+    twoPlayAuthor: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#374151',
     },
     twoPlayStampText: {
         flexShrink: 1,

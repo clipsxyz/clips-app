@@ -2647,7 +2647,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel, postCreatedAt, postId, postUserAccountType, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; postUserAccountType?: string | null; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel, postAuthorAvatarUrl, postCreatedAt, postId, postUserAccountType, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postAuthorAvatarUrl?: string; postCreatedAt?: string; postId?: string; postUserAccountType?: string | null; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -4112,6 +4112,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             >
               <div className="rounded-[20.5px] bg-black px-3.5 pb-2 pt-2.5">
                 <div className="mb-2 flex items-center justify-center gap-1 text-[11px] font-semibold uppercase tracking-[1.2px] text-white">
+                  {postAuthorAvatarUrl ? (
+                    <img src={postAuthorAvatarUrl} alt="" className="h-4 w-4 shrink-0 rounded-full object-cover" />
+                  ) : null}
                   <FiMapPin className="h-3 w-3 shrink-0" />
                   <span className="truncate">{postLocationLabel || 'Gazetteer'}</span>
                 </div>
@@ -5614,6 +5617,11 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                 .map((value) => String(value || '').replace(/^(venue:|landmark:)/i, '').trim())
                 .find(Boolean) || 'Gazetteer'
             }
+            postAuthorAvatarUrl={(() => {
+              const reclip = Boolean(post.isReclipped && post.originalUserHandle);
+              const raw = (reclip ? post.originalUserAvatarUrl : post.avatarUrl) || getAvatarForHandle(reclip ? post.originalUserHandle : post.userHandle);
+              return raw ? rewriteMediaUrlForClient(raw) : undefined;
+            })()}
             postCreatedAt={post.createdAt?.toString()}
             postUserAccountType={post.userAccountType}
             videoPosterUrl={post.videoPosterUrl}
