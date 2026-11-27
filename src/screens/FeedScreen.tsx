@@ -3613,6 +3613,33 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     useEffect(() => {
         const scope = route?.params?.nativeHomeScope;
+        if (scope === 'following') {
+            setShowFollowingFeed(true);
+            setCustomLocation(null);
+            setCustomLocationLabel(null);
+            setCustomLocationPlaceId(null);
+            setCustomFilterType(null);
+            setCustomFeedScope(null);
+            setActive('Following');
+            setError(null);
+            setPages([]);
+            setCursor(0);
+            setEnd(false);
+            setReloadTick((t) => t + 1);
+            try {
+                navigation?.setParams?.({
+                    nativeHomeScope: null,
+                    location: null,
+                    locationLabel: null,
+                    locationScope: null,
+                    filterType: null,
+                    placeId: null,
+                });
+            } catch {
+                // ignore
+            }
+            return;
+        }
         if (scope !== 'local' && scope !== 'regional' && scope !== 'national') return;
         const tab =
             scope === 'local'
@@ -3660,7 +3687,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // A Discover home-scope pill uses the native tab, not a searched place.
         if (route?.params?.resetHomeFeedAt != null) return;
         const nativeHomeScope = route?.params?.nativeHomeScope;
-        if (nativeHomeScope === 'local' || nativeHomeScope === 'regional' || nativeHomeScope === 'national') return;
+        if (nativeHomeScope === 'local' || nativeHomeScope === 'regional' || nativeHomeScope === 'national' || nativeHomeScope === 'following') return;
         const requestedLocation = route?.params?.location;
         const requestedLabel = route?.params?.locationLabel;
         const requestedPlaceId = route?.params?.placeId;

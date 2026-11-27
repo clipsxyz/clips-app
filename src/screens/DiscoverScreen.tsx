@@ -302,6 +302,24 @@ export default function DiscoverScreen({ navigation }: any) {
         })();
     };
 
+    const openFollowingFeed = () => {
+        void (async () => {
+            await clearPendingLocationFeed();
+            navigateMainTab(navigation, 'Home', {
+                screen: 'Feed',
+                params: {
+                    nativeHomeScope: 'following',
+                    location: null,
+                    locationLabel: null,
+                    locationScope: null,
+                    filterType: null,
+                    placeId: null,
+                    resetHomeFeedAt: null,
+                },
+            });
+        })();
+    };
+
     const nearbyPlace = (user?.local || 'Finglas').trim();
     const regionalPlace = (user?.regional || '').trim();
     const nationalPlace = (user?.national || '').trim();
@@ -404,7 +422,13 @@ export default function DiscoverScreen({ navigation }: any) {
                         {promptSuggestions.map((item) => (
                             <TouchableOpacity
                                 key={item.city}
-                                onPress={() => selectPopularCity(item.city)}
+                                onPress={() => {
+                                    if (item.action === 'following') {
+                                        openFollowingFeed();
+                                        return;
+                                    }
+                                    selectPopularCity(item.city);
+                                }}
                                 style={styles.promptRow}
                                 accessibilityLabel={item.label}
                             >

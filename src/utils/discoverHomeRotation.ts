@@ -27,12 +27,14 @@ const FALLBACK_STREETS = [
 
 const STREET_RE = /\b(road|street|st\.|avenue|ave\.?|lane|quay|drive|terrace|parade|square|row)\b/i;
 
-export type DiscoverPromptIcon = 'compass-outline' | 'pulse-outline' | 'location-outline';
+export type DiscoverPromptIcon = 'compass-outline' | 'pulse-outline' | 'location-outline' | 'people-outline';
 
 export type DiscoverPrompt = {
     city: string;
     label: string;
     icon: DiscoverPromptIcon;
+    /** Following opens the people-you-follow feed. Everything else opens that place. */
+    action?: 'following';
 };
 
 export type DiscoverActivePlaces = {
@@ -118,7 +120,7 @@ export async function loadDiscoverActivePlaces(): Promise<DiscoverActivePlaces> 
     }
 }
 
-/** Compass city, pulse hub, and pin street — three different places. */
+/** Compass city, pulse hub, pin street, then the Following feed. */
 export function buildDiscoverPrompts(places: DiscoverActivePlaces, tick: number): DiscoverPrompt[] {
     const blocked = new Set<string>();
     const city = pickPlace(places.cities, FALLBACK_CITIES, tick, blocked);
@@ -131,5 +133,6 @@ export function buildDiscoverPrompts(places: DiscoverActivePlaces, tick: number)
         { city, label: `Let's go to the ${city} feed`, icon: 'compass-outline' },
         { city: hub, label: `What's happening in ${hub}`, icon: 'pulse-outline' },
         { city: street, label: `Drop into ${street}`, icon: 'location-outline' },
+        { city: 'following', label: 'Check out people you follow', icon: 'people-outline', action: 'following' },
     ];
 }

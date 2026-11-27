@@ -9,6 +9,7 @@ import {
     IoGlobeOutline,
     IoLocateOutline,
     IoLocationOutline,
+    IoPeopleOutline,
     IoPulseOutline,
     IoReturnDownForwardOutline,
     IoSparklesOutline,
@@ -45,6 +46,7 @@ const PROMPT_ICONS: Record<DiscoverPromptIcon, typeof IoCompassOutline> = {
     'compass-outline': IoCompassOutline,
     'pulse-outline': IoPulseOutline,
     'location-outline': IoLocationOutline,
+    'people-outline': IoPeopleOutline,
 };
 
 const CANVAS_STYLE: React.CSSProperties = {
@@ -259,6 +261,20 @@ export default function DiscoverPage() {
         navigate(`/feed?home=${scope}`);
     }
 
+    function openFollowingFeed() {
+        try {
+            sessionStorage.removeItem('pendingLocation');
+            sessionStorage.removeItem('pendingLocationLabel');
+            sessionStorage.removeItem('pendingLocationScope');
+            sessionStorage.removeItem('pendingLocationPlaceId');
+            sessionStorage.removeItem('pendingFilterType');
+        } catch {
+            /* ignore */
+        }
+        navigate('/feed');
+        window.dispatchEvent(new CustomEvent('setFollowingTab'));
+    }
+
     const nearbyPlace = (user?.local || 'Finglas').trim();
     const regionalPlace = (user?.regional || '').trim();
     const nationalPlace = (user?.national || '').trim();
@@ -419,7 +435,13 @@ export default function DiscoverPage() {
                                 <button
                                     key={item.city}
                                     type="button"
-                                    onClick={() => selectPopularCity(item.city)}
+                                    onClick={() => {
+                                        if (item.action === 'following') {
+                                            openFollowingFeed();
+                                            return;
+                                        }
+                                        selectPopularCity(item.city);
+                                    }}
                                     className="flex items-center gap-3.5 py-0.5 text-left"
                                     aria-label={item.label}
                                 >
