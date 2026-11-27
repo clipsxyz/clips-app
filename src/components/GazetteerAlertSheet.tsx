@@ -9,9 +9,12 @@ type Props = {
     message?: string;
     icon?: 'success' | 'alert' | 'info';
     showIcon?: boolean;
+    /** Centered card, matching the phone dialog. The default stays the bottom sheet. */
+    variant?: 'sheet' | 'card';
     confirmButtonText?: string;
     cancelButtonText?: string;
     showCancelButton?: boolean;
+    confirmDestructive?: boolean;
     onConfirm: () => void;
     onDismiss: () => void;
 };
@@ -23,14 +26,59 @@ export default function GazetteerAlertSheet({
     message,
     icon = 'alert',
     showIcon = false,
+    variant = 'sheet',
     confirmButtonText = 'Done',
     cancelButtonText = 'Cancel',
     showCancelButton = false,
+    confirmDestructive = false,
     onConfirm,
     onDismiss,
 }: Props) {
     const Icon = icon === 'success' ? IoCheckmarkCircle : icon === 'info' ? IoInformationCircle : IoAlertCircle;
     if (!visible) return null;
+
+    if (variant === 'card') {
+        return createPortal(
+            <div className="fixed inset-0 z-[400] flex items-center justify-center px-6" role="presentation">
+                <button
+                    type="button"
+                    aria-label="Dismiss"
+                    className="absolute inset-0 bg-black/75"
+                    onClick={onDismiss}
+                />
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={title}
+                    className="relative w-full max-w-[360px] rounded-[18px] border border-[#2A2F3D] bg-[#161B22] px-5 pb-4 pt-[22px] text-center"
+                >
+                    <h2 className="text-[19px] font-bold text-white">{title}</h2>
+                    {message ? (
+                        <p className="mt-2 text-sm leading-5 text-[#8B949E]">{message}</p>
+                    ) : null}
+                    <button
+                        type="button"
+                        className={`mt-[18px] w-full rounded-xl py-[13px] text-[15px] font-bold ${
+                            confirmDestructive ? 'bg-[#E53935] text-white' : 'bg-white text-[#0B0E14]'
+                        }`}
+                        onClick={onConfirm}
+                    >
+                        {confirmButtonText}
+                    </button>
+                    {showCancelButton ? (
+                        <button
+                            type="button"
+                            className="mt-2 w-full rounded-xl bg-[#21262D] py-[13px] text-[15px] font-semibold text-white"
+                            onClick={onDismiss}
+                        >
+                            {cancelButtonText}
+                        </button>
+                    ) : null}
+                </div>
+            </div>,
+            document.body,
+        );
+    }
 
     return createPortal(
         <div className="fixed inset-0 z-[400] flex items-end justify-center" role="presentation">

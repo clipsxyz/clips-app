@@ -54,7 +54,7 @@ import { inboxBadgeFromEventPayload, inboxBadgeTotal, loadInboxUnreadParts } fro
 import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, unifyLoadedFeedFollow, getState, setFollowState, setReclipState, getFollowState, hasExplicitFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, markPostsSeen, incrementShares, reclipPost, decorateForUser, unifyLoadedFeedFollow, getState, setFollowState, setReclipState, getFollowState, hasExplicitFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isLocallyCachedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { emitFollowStatusChanged, onFollowStatusChanged, useFollowState } from './hooks/useFollowState';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe, updateAuthProfile } from './api/client';
@@ -94,6 +94,7 @@ import { boostReachProgress, boostTimeProgress, formatBoostRemaining, formatBoos
 import BoostSelectionModal from './components/BoostSelectionModal';
 import ActiveBoostStatusCard from './components/ActiveBoostStatusCard';
 import SavePostModal from './components/SavePostModal';
+import GazetteerAlertSheet from './components/GazetteerAlertSheet';
 import PostMenuModal from './components/PostMenuModal';
 import CreateGroupModal from './components/CreateGroupModal';
 import PickGroupToInviteFeedUserModal from './components/PickGroupToInviteFeedUserModal';
@@ -1660,18 +1661,16 @@ function PostHeader({
           : null;
 
   // Text colors based on whether header is overlaid on media
-  const textColorClass = isOverlaid
-    ? "text-white drop-shadow-md"
-    : "text-gray-900 dark:text-gray-100";
+  const textColorClass = "text-white drop-shadow-md";
   const subtextColorClass = isOverlaid
     ? "text-white/90 drop-shadow-md"
-    : "text-gray-600 dark:text-gray-300";
+    : "text-[#9CA3AF]";
   const separatorColorClass = isOverlaid
     ? "text-white/70"
-    : "text-gray-400";
+    : "text-[#9CA3AF]";
   const reclipColorClass = isOverlaid
     ? "text-white/90 drop-shadow-md"
-    : "text-gray-500 dark:text-gray-400";
+    : "text-[#9CA3AF]";
 
   React.useEffect(() => {
     if (!profileMenuOpen) {
@@ -1988,7 +1987,7 @@ function PostHeader({
   }
 
   return (
-    <div className="relative flex items-center justify-between px-2.5 py-2">
+    <div className="relative flex min-h-14 items-center justify-between bg-black px-2.5 py-2">
       {/* Scrim effect - only show when overlaid on media */}
       {isOverlaid && (
         <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
@@ -2090,10 +2089,7 @@ function PostHeader({
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
-              className={`relative z-50 flex min-h-[40px] min-w-[40px] items-center justify-center p-2 outline-none ring-0 transition-all focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 active:scale-[.98] ${isOverlaid
-                ? 'text-white hover:opacity-70'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
-              }`}
+              className="relative z-50 flex min-h-[40px] min-w-[40px] items-center justify-center p-2 text-[#9CA3AF] outline-none ring-0 transition-all hover:text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 active:scale-[.98]"
               aria-label="Post options"
               title="Post options"
             >
@@ -3349,6 +3345,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setIsPlaying(true);
     setIsPaused(false);
     setShowControls(false);
+    if (postId) {
+      window.dispatchEvent(new CustomEvent('feedVideoPlaying', { detail: { postId } }));
+    }
   };
 
   const handleVideoPause = () => {
@@ -4389,6 +4388,7 @@ function EngagementBar({
   onOpenComments,
   onReclip,
   onSave,
+  onUnsave,
   currentUserHandle,
   currentUserId,
   showMetricsIcon,
@@ -4407,6 +4407,7 @@ function EngagementBar({
   onOpenComments: () => void;
   onReclip: () => Promise<void>;
   onSave?: () => void;
+  onUnsave?: () => void;
   currentUserHandle?: string;
   currentUserId?: string;
   showMetricsIcon?: boolean;
@@ -4745,10 +4746,16 @@ function EngagementBar({
           {/* Save */}
           <button
             className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${
-              !onSave ? 'opacity-40 cursor-not-allowed' : ''
+              !onSave && !onUnsave ? 'opacity-40 cursor-not-allowed' : ''
             }`}
-            onClick={() => onSave?.()}
-            disabled={!onSave}
+            onClick={() => {
+              if (isSaved && onUnsave) {
+                onUnsave();
+                return;
+              }
+              onSave?.();
+            }}
+            disabled={!onSave && !onUnsave}
             aria-label={isSaved ? 'Saved' : 'Save post'}
             title={isSaved ? 'Saved' : 'Save post'}
           >
@@ -5145,10 +5152,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const { user } = useAuth();
   const navigate = useNavigate();
   const titleId = `post-title-${post.id}`;
-  const [hasBeenViewed, setHasBeenViewed] = React.useState(false);
   const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
   const [isBoosted, setIsBoosted] = React.useState(false);
   const [saveModalOpen, setSaveModalOpen] = React.useState(false);
+  const [removeSavedOpen, setRemoveSavedOpen] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
   const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
@@ -5340,37 +5347,60 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     return () => window.removeEventListener('postNotificationPrefChanged', onPref as EventListener);
   }, [post.id]);
 
-  // Track views when post comes into viewport (try/catch so mobile errors don't crash app)
+  // Public view count on first look. Ranking "seen" waits 1.5s, or starts when the video plays.
   React.useEffect(() => {
-    if (hasBeenViewed) return;
-
+    const el = articleRef.current;
+    if (!el) return;
+    let dwell: ReturnType<typeof setTimeout> | null = null;
+    let viewSent = false;
+    let seenSent = false;
+    const markSeen = () => {
+      if (seenSent) return;
+      seenSent = true;
+      if (dwell) {
+        clearTimeout(dwell);
+        dwell = null;
+      }
+      void markPostsSeen([post.id]).catch(() => {
+        seenSent = false;
+      });
+    };
+    const onPlaying = (event: Event) => {
+      const id = (event as CustomEvent<{ postId?: string }>).detail?.postId;
+      if (id === post.id) markSeen();
+    };
+    window.addEventListener('feedVideoPlaying', onPlaying);
     const observer = new IntersectionObserver(
       (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && !hasBeenViewed) {
-            setHasBeenViewed(true);
-            observer.disconnect();
-            try {
-              onView();
-            } catch (err) {
-              console.warn('onView error:', err);
-            }
+        const visible = entries.some((entry) => entry.isIntersecting);
+        if (visible && !viewSent) {
+          viewSent = true;
+          try {
+            onView();
+          } catch (err) {
+            console.warn('onView error:', err);
           }
-        });
+        }
+        if (visible && !seenSent && !dwell) {
+          dwell = setTimeout(markSeen, 1500);
+        } else if (!visible && dwell) {
+          clearTimeout(dwell);
+          dwell = null;
+        }
       },
       { threshold: 0.5 }
     );
-
-    if (articleRef.current) {
-      try {
-        observer.observe(articleRef.current);
-      } catch (err) {
-        console.warn('View observer observe error:', err);
-      }
+    try {
+      observer.observe(el);
+    } catch (err) {
+      console.warn('View observer observe error:', err);
     }
-
-    return () => observer.disconnect();
-  }, [hasBeenViewed]);
+    return () => {
+      if (dwell) clearTimeout(dwell);
+      window.removeEventListener('feedVideoPlaying', onPlaying);
+      observer.disconnect();
+    };
+  }, [post.id]);
 
   // Check if post has media
   const hasMedia = !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
@@ -5545,6 +5575,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           </PostHeader>
         )
         ) : (
+          <>
           <Media
             url={post.mediaUrl}
             mediaType={post.mediaType}
@@ -5590,6 +5621,13 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             tileMode={isTileBoostMode}
             activeCarouselIndex={carouselIndex}
           />
+          {hasMedia && !isTileBoostMode && !isTextOnly ? (
+            <div
+              className="pointer-events-none absolute left-0 right-0 top-0 z-[6] h-9"
+              style={{ background: 'linear-gradient(180deg, #000000 0%, rgba(0,0,0,0) 100%)' }}
+            />
+          ) : null}
+          </>
         )}
       </div>
       {!isTileBoostMode && (
@@ -5660,6 +5698,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             onOpenComments={onOpenComments}
             onReclip={onReclip}
             onSave={() => setSaveModalOpen(true)}
+            onUnsave={() => setRemoveSavedOpen(true)}
             currentUserHandle={user?.handle}
             currentUserId={user?.id}
             showMetricsIcon={showBoostIcon && isBoosted}
@@ -5835,6 +5874,29 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                 state: { communityCreated: true, communityCreatedName: g.name },
               });
             }}
+          />
+          <GazetteerAlertSheet
+            visible={removeSavedOpen}
+            variant="card"
+            showIcon={false}
+            title="Remove from Saved and Collections?"
+            message="Removing this will also remove it from all collections."
+            confirmButtonText="Remove from saved"
+            cancelButtonText="Cancel"
+            showCancelButton
+            onConfirm={() => {
+              setRemoveSavedOpen(false);
+              if (!user?.id) return;
+              void unsavePost(user.id, post.id)
+                .then(() => {
+                  setIsSaved(false);
+                  window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+                })
+                .catch((err) => {
+                  console.error('Unsave failed:', err);
+                });
+            }}
+            onDismiss={() => setRemoveSavedOpen(false)}
           />
           <SavePostModal
             post={post}
@@ -8200,14 +8262,11 @@ function FeedPageWrapper() {
       isProtectedDevMockVideo: isDevMockFeedVideoPost,
     });
 
-    // Merge posts and ads, sort by epoch time (createdAt) - newest first
+    // Keep the server's ranked order. Ads follow the posts.
     const feedItems: Array<{ type: 'post' | 'ad'; item: Post | Ad; createdAt: number }> = [
       ...visiblePosts.map(p => ({ type: 'post' as const, item: p, createdAt: p.createdAt || 0 })),
       ...ads.map(a => ({ type: 'ad' as const, item: a, createdAt: a.createdAt || 0 }))
     ];
-
-    // Sort by epoch time (createdAt) - descending (newest first)
-    feedItems.sort((a, b) => b.createdAt - a.createdAt);
 
     return feedItems;
   }, [pages, ads, userId, user?.handle, currentFilter, feedPrefsVersion]);
