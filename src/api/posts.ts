@@ -3434,6 +3434,24 @@ export type HiddenCommentReviewItem = {
   parentId?: string;
 };
 
+function readIsCreator(raw: any): boolean | undefined {
+  const value = raw?.is_creator ?? raw?.isCreator;
+  if (value === undefined || value === null) return undefined;
+  return Boolean(value);
+}
+
+/** True when this comment or reply was written by the post author. */
+export function commentWrittenByPostAuthor(
+  comment: { isCreator?: boolean; userHandle?: string },
+  postAuthorHandle?: string,
+): boolean {
+  if (comment.isCreator === true) return true;
+  if (comment.isCreator === false) return false;
+  const left = String(comment.userHandle || '').replace(/^@/, '').trim().toLowerCase();
+  const right = String(postAuthorHandle || '').replace(/^@/, '').trim().toLowerCase();
+  return left !== '' && left === right;
+}
+
 function commentAvatarFromRaw(raw: any): string | undefined {
   const url =
     raw?.avatar_url ||
@@ -3462,6 +3480,7 @@ function mapLaravelCommentToComment(raw: any): Comment {
         })(),
         likes: Number(r.likes_count ?? r.likes ?? 0) || 0,
         userLiked: !!(r.user_liked ?? r.userLiked),
+        isCreator: readIsCreator(r),
         parentId: r.parent_id || r.parentId || raw.id,
       };
       })
@@ -3484,6 +3503,7 @@ function mapLaravelCommentToComment(raw: any): Comment {
     })(),
     likes: Number(raw.likes_count ?? raw.likes ?? 0) || 0,
     userLiked: !!(raw.user_liked ?? raw.userLiked),
+    isCreator: readIsCreator(raw),
     replies: mappedReplies,
     replyCount: Number(raw.replies_count ?? raw.replyCount ?? mappedReplies.length) || 0,
   };
@@ -3696,6 +3716,7 @@ export async function addComment(postId: string, userHandle: string, text: strin
       userLiked: false,
       createdAt: Number.isFinite(createdAtMs) ? createdAtMs : Date.now(),
       likes: response.likes_count || response.likes || 0,
+      isCreator: readIsCreator(response),
       moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
       moderationReason: moderation.matched[0]
     };
@@ -3897,6 +3918,7 @@ export async function addReply(postId: string, parentId: string, userHandle: str
         return Number.isFinite(val) ? val : Date.now();
       })(),
       likes: Number(response.likes_count || response.likes || 0) || 0,
+      isCreator: readIsCreator(response),
       parentId: response.parent_id || response.parentId || parentId,
       moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
       moderationReason: moderation.matched[0],

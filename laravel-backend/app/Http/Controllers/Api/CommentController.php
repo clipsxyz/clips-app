@@ -44,6 +44,7 @@ class CommentController extends Controller
             ? $requestedViewer
             : (is_string($authId) ? $authId : null);
         $hasViewer = !empty($userId);
+        $postAuthorId = (string) (Post::query()->whereKey($postId)->value('user_id') ?? '');
         $limit = max(1, min((int) $request->get('limit', 30), 100));
         $repliesLimit = max(1, min((int) $request->get('repliesLimit', 5), 25));
         $cursorState = $this->decodeCommentCursor((string) $request->get('cursor', ''));
@@ -106,21 +107,23 @@ class CommentController extends Controller
         }]);
 
         // Transform comments using already eager-loaded relations
-        $transformedComments = $comments->map(function ($comment) use ($hasViewer) {
+        $transformedComments = $comments->map(function ($comment) use ($hasViewer, $postAuthorId) {
             $commentData = $comment->toArray();
             $attrs = $comment->getAttributes();
 
             $commentData['user_liked'] = $hasViewer
                 ? (array_key_exists('user_liked', $attrs) ? (bool) $attrs['user_liked'] : false)
                 : false;
+            $commentData['is_creator'] = $postAuthorId !== '' && (string) $comment->user_id === $postAuthorId;
 
             if ($comment->relationLoaded('replies')) {
-                $commentData['replies'] = $comment->replies->map(function ($reply) use ($hasViewer) {
+                $commentData['replies'] = $comment->replies->map(function ($reply) use ($hasViewer, $postAuthorId) {
                     $replyData = $reply->toArray();
                     $replyAttrs = $reply->getAttributes();
                     $replyData['user_liked'] = $hasViewer
                         ? (array_key_exists('user_liked', $replyAttrs) ? (bool) $replyAttrs['user_liked'] : false)
                         : false;
+                    $replyData['is_creator'] = $postAuthorId !== '' && (string) $reply->user_id === $postAuthorId;
                     return $replyData;
                 })->toArray();
             }
@@ -213,7 +216,10 @@ class CommentController extends Controller
             }
         }
 
-        return response()->json($comment, 201);
+        $payload = $comment->toArray();
+        $payload['is_creator'] = $post && (string) $user->id === (string) $post->user_id;
+
+        return response()->json($payload, 201);
     }
 
     /**
@@ -296,7 +302,10 @@ class CommentController extends Controller
             }
         }
 
-        return response()->json($reply, 201);
+        $payload = $reply->toArray();
+        $payload['is_creator'] = $post && (string) $user->id === (string) $post->user_id;
+
+        return response()->json($payload, 201);
     }
 
     /**

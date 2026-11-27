@@ -13,7 +13,7 @@ import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
 import CollectionCoverThumb from '../components/CollectionCoverThumb';
-import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, fetchPostsByUser, posts, renameUserHandleEverywhere, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
+import { addComment, addReply, approveHiddenComment, commentWrittenByPostAuthor, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, fetchPostsByUser, posts, renameUserHandleEverywhere, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
 import { resolvePostThumbnail } from '../api/collections';
 import { rewriteMediaUrlForClient } from '../api/apiBaseUrl';
 import { formatProfileStatCount } from '../utils/effectivePlacesTraveled';
@@ -3154,7 +3154,15 @@ export default function ProfilePage() {
                         <div className="space-y-3 max-h-[42vh] overflow-y-auto pr-1">
                           {myFeedComments.map((comment) => (
                             <div key={comment.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                              <p className="text-xs font-semibold text-gray-100">{comment.userHandle || 'User'}</p>
+                              <p className="text-xs font-semibold text-gray-100">
+                                {comment.userHandle || 'User'}
+                                {commentWrittenByPostAuthor(comment, myFeedCommentsPost?.userHandle) ? (
+                                  <>
+                                    <span className="font-normal text-gray-400"> · </span>
+                                    <span className="font-semibold text-[#FF4D9A]">Creator</span>
+                                  </>
+                                ) : null}
+                              </p>
                               <p className="text-sm text-gray-200 mt-1 whitespace-pre-wrap">{comment.text || ''}</p>
                               <div className="mt-2 flex items-center gap-3 text-xs">
                                 <button
@@ -3176,7 +3184,15 @@ export default function ProfilePage() {
                                 <div className="mt-2 pl-3 border-l border-white/10 space-y-2">
                                   {comment.replies.map((reply) => (
                                     <div key={reply.id}>
-                                      <p className="text-[11px] font-semibold text-gray-300">{reply.userHandle || 'User'}</p>
+                                      <p className="text-[11px] font-semibold text-gray-300">
+                                        {reply.userHandle || 'User'}
+                                        {commentWrittenByPostAuthor(reply, myFeedCommentsPost?.userHandle) ? (
+                                          <>
+                                            <span className="font-normal text-gray-400"> · </span>
+                                            <span className="font-semibold text-[#FF4D9A]">Creator</span>
+                                          </>
+                                        ) : null}
+                                      </p>
                                       <p className="text-xs text-gray-300">{reply.text || ''}</p>
                                       <button
                                         type="button"

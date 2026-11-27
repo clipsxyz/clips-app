@@ -268,6 +268,8 @@ export type Comment = {
   replies_count?: number; // Backend field
   moderationState?: 'visible' | 'hidden_by_filter';
   moderationReason?: string;
+  /** True when this comment or reply was written by the post's author. */
+  isCreator?: boolean;
 };
 
 export type StoryReaction = {

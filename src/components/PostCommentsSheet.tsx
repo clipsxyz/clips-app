@@ -17,6 +17,7 @@ import {
     type ListRenderItem,
     type NativeSyntheticEvent,
     type NativeScrollEvent,
+    type TextStyle,
 } from 'react-native';
 import {
     BottomSheetTextInput,
@@ -44,6 +45,7 @@ import { isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import {
     addComment,
     addReply,
+    commentWrittenByPostAuthor,
     deleteCommentById,
     commentThreadPostId,
     fetchCommentsPage,
@@ -178,9 +180,32 @@ function CommentAvatarRing({
     );
 }
 
+function CommenterName({
+    name,
+    isCreator,
+    style,
+}: {
+    name: string;
+    isCreator: boolean;
+    style: TextStyle;
+}) {
+    return (
+        <Text style={style}>
+            {name}
+            {isCreator ? (
+                <Text style={styles.creatorDot}>
+                    {' · '}
+                    <Text style={styles.creatorLabel}>Creator</Text>
+                </Text>
+            ) : null}
+        </Text>
+    );
+}
+
 function CommentItem({
     comment,
     viewerHandle,
+    postAuthorHandle,
     isPostOwner,
     onLikeComment,
     onLikeReply,
@@ -191,6 +216,7 @@ function CommentItem({
 }: {
     comment: Comment;
     viewerHandle: string;
+    postAuthorHandle: string;
     isPostOwner: boolean;
     onLikeComment: (commentId: string) => Promise<void>;
     onLikeReply: (parentCommentId: string, replyId: string) => Promise<void>;
@@ -230,7 +256,11 @@ function CommentItem({
             </CommentAvatarRing>
             <View style={styles.commentContent}>
                 <View style={styles.commentHeaderRow}>
-                    <Text style={styles.commentUser}>{comment.userHandle}</Text>
+                    <CommenterName
+                        name={comment.userHandle}
+                        isCreator={commentWrittenByPostAuthor(comment, postAuthorHandle)}
+                        style={styles.commentUser}
+                    />
                     <Text style={styles.commentTime}>{formatTime(comment.createdAt)}</Text>
                 </View>
                 {isHiddenForViewer ? (
@@ -325,7 +355,11 @@ function CommentItem({
                                             </CommentAvatarRing>
                                             <View style={styles.replyContent}>
                                                 <View style={styles.replyHeaderRow}>
-                                                    <Text style={styles.replyUser}>{reply.userHandle}</Text>
+                                                    <CommenterName
+                                                        name={reply.userHandle}
+                                                        isCreator={commentWrittenByPostAuthor(reply, postAuthorHandle)}
+                                                        style={styles.replyUser}
+                                                    />
                                                     <Text style={styles.replyTime}>
                                                         {formatTime(reply.createdAt)}
                                                     </Text>
@@ -835,6 +869,7 @@ export default function PostCommentsSheet({
             createdAt: Date.now(),
             likes: 0,
             userLiked: false,
+            isCreator: commentWrittenByPostAuthor({ userHandle: handle }, post?.userHandle),
             moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
             moderationReason: moderation.matched[0],
         };
@@ -974,6 +1009,7 @@ export default function PostCommentsSheet({
             createdAt: Date.now(),
             likes: 0,
             userLiked: false,
+            isCreator: commentWrittenByPostAuthor({ userHandle: handle }, post?.userHandle),
             parentId,
             moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
             moderationReason: moderation.matched[0],
@@ -1145,6 +1181,7 @@ export default function PostCommentsSheet({
         <CommentItem
             comment={item}
             viewerHandle={viewerHandle}
+            postAuthorHandle={authorHandle}
             isPostOwner={isPostOwner}
             onLikeComment={handleLikeComment}
             onLikeReply={handleLikeReply}
@@ -1730,6 +1767,14 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: P.text,
         marginRight: 8,
+    },
+    creatorDot: {
+        color: P.muted,
+        fontWeight: '400',
+    },
+    creatorLabel: {
+        color: '#FF4D9A',
+        fontWeight: '600',
     },
     commentTime: {
         fontSize: 12,

@@ -8,6 +8,7 @@ import {
     fetchCommentsPage,
     addComment,
     addReply,
+    commentWrittenByPostAuthor,
     deleteCommentById,
     toggleCommentLike,
     toggleReplyLike,
@@ -145,6 +146,7 @@ function renderTextWithMentions(
 
 function CommentItem({
     comment,
+    postAuthorHandle,
     onLikeComment,
     onLikeReply,
     onStartReply,
@@ -155,6 +157,7 @@ function CommentItem({
     postId: _postId
 }: {
     comment: Comment;
+    postAuthorHandle: string;
     onLikeComment: (commentId: string) => Promise<void>;
     onLikeReply: (parentCommentId: string, replyId: string) => Promise<void>;
     onStartReply: (commentId: string, handle: string) => void;
@@ -198,6 +201,12 @@ function CommentItem({
                 <div className="flex items-baseline gap-2 mb-0.5">
                     <span className="font-semibold text-sm text-white">
                         {comment.userHandle}
+                        {commentWrittenByPostAuthor(comment, postAuthorHandle) ? (
+                            <>
+                                <span className="font-normal text-[#D1E4FF]"> · </span>
+                                <span className="font-semibold text-[#FF4D9A]">Creator</span>
+                            </>
+                        ) : null}
                     </span>
                     <span className="text-xs text-[#D1E4FF]">
                         {formatTime(comment.createdAt)}
@@ -294,6 +303,12 @@ function CommentItem({
                                             <div className="flex items-baseline gap-2 mb-0.5">
                                                 <span className="font-semibold text-xs text-white">
                                                     {reply.userHandle}
+                                                    {commentWrittenByPostAuthor(reply, postAuthorHandle) ? (
+                                                        <>
+                                                            <span className="font-normal text-[#D1E4FF]"> · </span>
+                                                            <span className="font-semibold text-[#FF4D9A]">Creator</span>
+                                                        </>
+                                                    ) : null}
                                                 </span>
                                                 <span className="text-xs text-[#D1E4FF]">
                                                     {formatTime(reply.createdAt)}
@@ -624,6 +639,7 @@ export default function CommentsModal({
             createdAt: Date.now(),
             likes: 0,
             userLiked: false,
+            isCreator: commentWrittenByPostAuthor({ userHandle: user.handle }, post?.userHandle),
             moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
             moderationReason: moderation.matched[0],
         };
@@ -761,6 +777,7 @@ export default function CommentsModal({
             createdAt: Date.now(),
             likes: 0,
             userLiked: false,
+            isCreator: commentWrittenByPostAuthor({ userHandle: user.handle }, post?.userHandle),
             parentId,
             moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
             moderationReason: moderation.matched[0],
@@ -997,6 +1014,7 @@ export default function CommentsModal({
                                             <CommentItem
                                                 key={comment.id}
                                                 comment={comment}
+                                                postAuthorHandle={authorHandle}
                                                 onLikeComment={handleLikeComment}
                                                 onLikeReply={handleLikeReply}
                                                 onStartReply={(id, handle) => setReplyingTo({ id, handle })}
